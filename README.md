@@ -1,72 +1,119 @@
 <div align="center">
 
 # 🍃 Leeef Reader
-### *Turn a new leeef with AI.*
+### *开卷新境，伴读以灵 · Turn a new leeef with AI*
 
-**An AI-native, cross-platform e-book workspace with realistic 3D page flip, MCP agent tools, and S3-compatible cloud synchronization.**
+**一款为 AI 时代打造的跨平台（iOS / Android / macOS / Windows）深度共读工作台。**  
+**集成物理级 3D 仿真翻页、MCP (Model Context Protocol) 智能体生态与 S3 离线优先云同步。**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Platform](https://img.shields.io/badge/Platform-iOS%20|%20Android%20|%20macOS%20|%20Windows-green.svg)](#)
-[![Website](https://img.shields.io/badge/Website-leeefreader.org-blueviolet.svg)](https://leeefreader.org)
+[![Website](https://img.shields.io/badge/Official%20Website-leeefreader.org-blueviolet.svg)](https://leeefreader.org)
 
 </div>
 
 ---
 
-## 🌟 Highlights
+## 🎯 项目定位：从“阅读器”到“AI 知识工作台”
 
-- **📖 Realistic 3D Page Flip (仿真翻页)**: Pure Canvas & Shader-accelerated page curling and dynamic lighting, offering physical-grade reading tactile feedback on touchscreens and desktop.
-- **🤖 MCP (Model Context Protocol) Native**: Seamlessly integrates Model Context Protocol as both an MCP Client (calling Obsidian, Anki, web search) and an MCP Server (exposing your book highlights to Cursor/Claude).
-- **🧠 Multi-LLM Companion**: Native streaming (SSE) support for OpenAI, Claude, DeepSeek, Google Gemini, and local Ollama models.
-- **☁️ S3 Cloud Sync (Offline-First)**: Full compatibility with AWS S3, Cloudflare R2, MinIO, and Aliyun OSS. Read offline anytime; sync reading progress, highlights, and book files seamlessly.
-- **💻 True Multi-Platform**: Single codebase powering iOS, Android, macOS, and Windows.
-- **🔒 Sovereign & Private (BYOS + BYOK)**: Zero tracking, zero telemetry. Bring your own S3 storage and LLM API keys.
+市面上绝大多数电子书阅读器仍然停留在上一代**“单向文本展示”**的思维中。即便部分软件加入了 AI，也仅仅是预设了几个翻译或总结的死板 Prompt，数据依然是孤岛。
+
+**Leeef Reader 的核心定位是一个「AI-Native 个人知识引擎与深度共读工作台」：**
+
+1. **阅读体验回归物理质感**：基于纯原生 Canvas 与 Shader 打造极致丝滑的 **3D 仿真卷角翻页（Page Curl）**，重现指尖触碰纸张的沉浸阅读感。
+2. **MCP (Model Context Protocol) 原生赋能**：不仅能在阅读时让 AI 调用外部工具（制卡 Anki、写入 Obsidian、实时学术检索），还能**将书库作为 MCP Server 暴露给电脑上的 Cursor / Codex / Claude Desktop**，让代码与写作随时引用书摘。
+3. **S3 云原生与离线优先（Own Your Data）**：告别老旧脆弱的 WebDAV，采用现代 **S3 对象存储协议（兼容 Cloudflare R2 / MinIO / AWS S3 / 阿里云 OSS）**。**零中心服务器依赖**，书籍与笔记 100% 属于用户自己。
+4. **真正的现代四端一体**：单一 Flutter 代码库，无缝覆盖 **iOS、Android、macOS、Windows**。
 
 ---
 
-## 🏗️ Architecture Blueprint
+## 🌟 核心特性与杀手级功能
+
+### 1. 📖 物理级 3D 仿真翻页与多格式排版
+* **纯原生渲染**：采用 Canvas + 贝塞尔曲线几何形变与动态光影着色，拒绝卡顿与掉帧，在移动端和桌面端均保持 120Hz 满帧手势跟手体验。
+* **全格式支持**：深度解析 **EPUB、PDF、TXT**，支持自定义排版、多栏切换与字体渲染。
+* **PDF 深度交互**：基于 PDFium 引擎，支持原生高精度文本划词、目录大纲导航、选区批注。
+
+### 2. 🤖 MCP (Model Context Protocol) 双向智能体
+* **作为 MCP Client（伴读增强）**：
+  * **联动第二大脑**：读到重点概念，AI 自动调用 MCP 检索你的本地 **Obsidian / Notion** 历史笔记并做双向关联。
+  * **划词一键制卡**：选中生词或考点，AI 自动提炼例句语法，直接通过 MCP 推送到 **Anki**。
+  * **实时事实核查**：非虚构与学术书籍阅读中，AI 自动调用 **Brave / ArXiv / 维基百科 MCP** 展开深度背景。
+* **作为 MCP Server（外脑输出）**：
+  * 外部 Agent（Cursor / Codex / Claude Desktop）可通过 MCP 直接搜索并调取你在 Leeef Reader 中沉淀的数千条高亮书摘与书籍原文。
+
+### 3. ☁️ S3 离线优先云同步与导出
+* **现代 S3 协议**：支持分片上传、断点续传与基于哈希（SHA-256）的书籍秒传去重。
+* **离线优先架构（Offline-First）**：无网状态下阅读、划线丝滑无阻；联网后基于 Drift 数据库与 S3 增量日志自动同步阅读进度与书签。
+* **多维导出体系**：一键生成精美金句排版卡片（PNG），支持完整导出为 Markdown、Notion 格式与 JSON 备份。
+
+### 4. 🔒 极致私密与零服务器（BYOS + BYOK）
+* **0 追踪、0 遥测、0 中心服务器**。
+* **BYOS（自带存储）**：使用免费的 Cloudflare R2（10GB 永久免费）或自有 NAS MinIO 存储书库。
+* **BYOK（自带 Key）**：客户端直连 **DeepSeek、OpenAI、Claude、Gemini、本地 Ollama** 等大模型，全流式（SSE）响应。
+
+---
+
+## 🏗️ 架构设计：现代四支柱体系
 
 ```
 +-----------------------------------------------------------------------------------+
-|                           🍃 Leeef Reader Client (Flutter)                        |
+|                        🍃 Leeef Reader Client (Flutter)                           |
 |                                                                                   |
-|  [ UI Layer ]        : 3D Page Flip (page_flip) / PDF Viewer (pdfrx) / AI Chat UI |
-|  [ State Layer ]     : Riverpod Reactive State Management                         |
-|  [ Local Storage ]   : Drift (Reactive SQLite ORM, Offline-First)                 |
-|  [ AI & MCP Layer ]  : Multi-Provider LLM Engine + MCP Host/Client Engine        |
-|  [ Cloud Sync Layer] : S3 Protocol Engine (minio_new)                             |
+|  [ 表现层 UI ]     : 3D 仿真翻页 (page_flip) / PDF 原生划词 (pdfrx) / AI 聊天流式气泡  |
+|  [ 状态中枢 ]      : Riverpod (编译期安全、响应式 Stream 数据流动、解耦业务)           |
+|  [ 本地记忆底座 ]   : Drift SQLite (响应式 watch() 查询、离线优先单一真实来源)         |
+|  [ AI 与 MCP 引擎] : Multi-LLM 聚合调度器 (SSE 流式) + MCP Client/Server 协议解析器 |
+|  [ S3 存储引擎 ]   : minio_new (纯 Dart 跨端 S3 客户端，断点续传与元数据同步)          |
 +-----------------------------------------------------------------------------------+
                                    │              │
                    ┌───────────────┘              └───────────────┐
                    ▼                                              ▼
-       [ S3 Object Storage ]                             [ LLM & MCP Ecosystem ]
+       [ S3 现代对象存储 ]                               [ 开放 AI & MCP 生态 ]
   (Cloudflare R2 / MinIO / AWS S3)               (DeepSeek / Claude / OpenAI / Tools)
 ```
 
 ---
 
-## 📦 Tech Stack
+## 📦 核心技术栈清单 (Tech Stack Blueprint)
 
-- **Framework**: [Flutter](https://flutter.dev) (Dart)
-- **State Management**: [Riverpod](https://riverpod.dev)
-- **Local Database**: [Drift (SQLite)](https://drift.simonbinder.eu/)
-- **PDF Engine**: [pdfrx](https://pub.dev/packages/pdfrx)
-- **EPUB Engine**: [epubx](https://pub.dev/packages/epubx)
-- **S3 Protocol**: [minio_new](https://pub.dev/packages/minio_new)
-- **AI / MCP**: [dart_openai](https://pub.dev/packages/dart_openai) + [json_rpc_2](https://pub.dev/packages/json_rpc_2)
-
----
-
-## 🗺️ Roadmap
-
-- [ ] **Phase 1**: Core Reading Engine (TXT/EPUB/PDF pagination & 3D page flip animation)
-- [ ] **Phase 2**: S3 Multi-Device Sync (Book files & reading progress)
-- [ ] **Phase 3**: In-App AI Reader Companion (Streaming chat, highlight explanation, summary)
-- [ ] **Phase 4**: Full MCP Client & Server Integration (Obsidian, Anki, Cursor/Claude integration)
-- [ ] **Phase 5**: Cross-platform Releases (iOS, macOS, Android, Windows)
+| 模块类别 | 选用技术 / 核心库 | 选型理由与技术价值 |
+| :--- | :--- | :--- |
+| **跨端框架** | **Flutter (Dart)** | 真正的 iOS / Android / macOS / Windows 四端原生编译，高帧率 Skia/Impeller 渲染底座。 |
+| **状态管理** | **`flutter_riverpod`** | 现代 Flutter 事实标准，天然契合大模型 SSE 流式数据推送与跨模块状态解耦。 |
+| **本地数据库** | **`drift`** + **`sqlite3_flutter_libs`** | 强类型 SQLite ORM，支持响应式 `watch()`（S3 同步完本地 UI 自动无感刷新）。 |
+| **3D 仿真翻页** | **`page_flip`** + 自研 Canvas 引擎 | 贝塞尔物理形变算法与着色器，提供 120Hz 纸质卷角翻页手感。 |
+| **PDF 阅读引擎** | **`pdfrx`** | 基于 Google PDFium 引擎，支持全平台高性能渲染、原生高精度文字划词与搜索。 |
+| **EPUB 排版解析** | **`epubx`** | 纯 Dart 实现的 EPUB 深度解析器，支持目录大纲、章节流式解压与样式重排。 |
+| **S3 协议客户端** | **`minio_new`** | 纯 Dart 实现的完整 S3 协议库，无原生依赖，完美支持 R2 / MinIO / S3 / 阿里云 OSS。 |
+| **大模型接入** | **`dart_openai`** + **`dio`** | 兼容所有 OpenAI 格式大模型（DeepSeek / Moonshot / Ollama），支持高并发 SSE 流式解析。 |
+| **MCP 协议通信** | **`json_rpc_2`** + 进程管道/SSE | 实现 Anthropic MCP 协议标准（桌面端支持 `stdio` 本地进程，全端支持 `SSE` 远程连接）。 |
+| **卡片与文件导出** | **`screenshot`** + **`file_saver`** | 跨端 Widget 像素级渲染转高清 PNG 书摘卡片，多平台系统级文件另存为。 |
 
 ---
 
-## 📄 License
+## 🗺️ 开发路线图 (Roadmap)
 
-Licensed under the [Apache License, Version 2.0](LICENSE).
+- [ ] **Phase 1: 核心排版与仿真翻页引擎**
+  - [ ] TXT / EPUB 流式切页算法与字号动态重排
+  - [ ] 移动端触控与桌面端拖拽的 3D 卷角仿真翻页实现
+  - [ ] 基于 `pdfrx` 的 PDF 渲染与划词交互
+- [ ] **Phase 2: 本地 SQLite 离线优先与 S3 云同步**
+  - [ ] Drift 本地书库、高亮、书签与阅读进度数据建模
+  - [ ] S3 (Cloudflare R2 / MinIO) 认证、书籍上传下载与增量同步
+- [ ] **Phase 3: AI 流式伴读与划词深度交互**
+  - [ ] 多服务商 API Key 配置（DeepSeek, OpenAI, Claude, Gemini, Ollama）
+  - [ ] 划词悬浮菜单：AI 深度解释、章节脉络总结、精美卡片生成
+- [ ] **Phase 4: MCP (Model Context Protocol) 深度集成**
+  - [ ] MCP Client：集成 Obsidian、Anki、Brave 搜索工具
+  - [ ] MCP Server：向桌面端 Cursor / Codex 暴露书库检索接口
+- [ ] **Phase 5: 全平台构建与公开发布**
+  - [ ] macOS / Windows 桌面端适配与键盘快捷键
+  - [ ] iOS / Android 移动端触控优化
+  - [ ] 开源发布与官网 [leeefreader.org](https://leeefreader.org) 上线
+
+---
+
+## 📄 开源许可证
+
+本项目采用商业友好的 **[Apache License 2.0](LICENSE)** 协议开源。
