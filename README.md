@@ -1,131 +1,223 @@
 <div align="center">
 
 # 🍃 Leeef Reader
-### *开卷新境，伴读以灵 · Turn a new leeef with AI*
 
-**一款为 AI 时代打造的跨平台（iOS / Android / macOS / Windows）深度共读工作台。**  
-**集成物理级 3D 仿真翻页、MCP (Model Context Protocol) 智能体生态与 S3 离线优先云同步。**
+**跨端同步、MCP 原生、支持 3D 翻页的电子书阅读器。**
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Platform](https://img.shields.io/badge/Platform-iOS%20|%20Android%20|%20macOS%20|%20Windows-green.svg)](#)
-[![Website](https://img.shields.io/badge/Official%20Website-leeefreader.org-blueviolet.svg)](https://leeefreader.org)
+iOS · Android · macOS · Windows
+
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Status: Early Development](https://img.shields.io/badge/Status-Early_Development-orange.svg)](#项目状态)
 
 </div>
 
----
+## 核心能力
 
-## 🎯 项目定位：从“阅读器”到“AI 知识工作台”
+### 1. 跨端同步
 
-市面上绝大多数电子书阅读器仍然停留在上一代**“单向文本展示”**的思维中。即便部分软件加入了 AI，也仅仅是预设了几个翻译或总结的死板 Prompt，数据依然是孤岛。
+以下数据在 iOS、Android、macOS 和 Windows 之间保持一致：
 
-**Leeef Reader 的核心定位是一个「AI-Native 个人知识引擎与深度共读工作台」：**
+| 数据 | 同步内容 |
+| --- | --- |
+| 书籍文件 | EPUB、PDF、TXT 原文件、封面和元数据 |
+| 阅读进度 | 当前章节、页码、阅读位置和更新时间 |
+| 书摘 | 高亮原文、笔记、颜色和原文定位 |
+| 书签 | 书签位置、标题和备注 |
+| 书架目录 | 书架、目录层级、排序和书籍归属 |
 
-1. **阅读体验回归物理质感**：基于纯原生 Canvas 与 Shader 打造极致丝滑的 **3D 仿真卷角翻页（Page Curl）**，重现指尖触碰纸张的沉浸阅读感。
-2. **MCP (Model Context Protocol) 原生赋能**：不仅能在阅读时让 AI 调用外部工具（制卡 Anki、写入 Obsidian、实时学术检索），还能**将书库作为 MCP Server 暴露给电脑上的 Cursor / Codex / Claude Desktop**，让代码与写作随时引用书摘。
-3. **S3 云原生与离线优先（Own Your Data）**：告别老旧脆弱的 WebDAV，采用现代 **S3 对象存储协议（兼容 Cloudflare R2 / MinIO / AWS S3 / 阿里云 OSS）**。**零中心服务器依赖**，书籍与笔记 100% 属于用户自己。
-4. **真正的现代四端一体**：单一 Flutter 代码库，无缝覆盖 **iOS、Android、macOS、Windows**。
+应用离线时正常读写；恢复网络后自动同步。书籍文件按 SHA-256 去重，元数据通过增量操作日志同步，不直接上传或覆盖 SQLite 数据库文件。
 
----
+### 2. MCP 全量管理
 
-## 🌟 核心特性与杀手级功能
+Leeef 通过 MCP 向 AI 暴露完整书库，并允许 AI 在用户授权后执行管理操作。
 
-### 1. 📖 物理级 3D 仿真翻页与多格式排版
-* **纯原生渲染**：采用 Canvas + 贝塞尔曲线几何形变与动态光影着色，拒绝卡顿与掉帧，在移动端和桌面端均保持 120Hz 满帧手势跟手体验。
-* **全格式支持**：深度解析 **EPUB、PDF、TXT**，支持自定义排版、多栏切换与字体渲染。
-* **PDF 深度交互**：基于 PDFium 引擎，支持原生高精度文本划词、目录大纲导航、选区批注。
+> MCP 不保存数据。AI 通过 MCP 修改本地数据库，修改结果再由同步引擎传播到其他设备。
 
-### 2. 🤖 MCP (Model Context Protocol) 双向智能体
-* **作为 MCP Client（伴读增强）**：
-  * **联动第二大脑**：读到重点概念，AI 自动调用 MCP 检索你的本地 **Obsidian / Notion** 历史笔记并做双向关联。
-  * **划词一键制卡**：选中生词或考点，AI 自动提炼例句语法，直接通过 MCP 推送到 **Anki**。
-  * **实时事实核查**：非虚构与学术书籍阅读中，AI 自动调用 **Brave / ArXiv / 维基百科 MCP** 展开深度背景。
-* **作为 MCP Server（外脑输出）**：
-  * 外部 Agent（Cursor / Codex / Claude Desktop）可通过 MCP 直接搜索并调取你在 Leeef Reader 中沉淀的数千条高亮书摘与书籍原文。
-
-### 3. ☁️ S3 离线优先云同步与导出
-* **现代 S3 协议**：支持分片上传、断点续传与基于哈希（SHA-256）的书籍秒传去重。
-* **离线优先架构（Offline-First）**：无网状态下阅读、划线丝滑无阻；联网后基于 Drift 数据库与 S3 增量日志自动同步阅读进度与书签。
-* **多维导出体系**：一键生成精美金句排版卡片（PNG），支持完整导出为 Markdown、Notion 格式与 JSON 备份。
-
-### 4. 🔒 极致私密与零服务器（BYOS + BYOK）
-* **0 追踪、0 遥测、0 中心服务器**。
-* **BYOS（自带存储）**：使用免费的 Cloudflare R2（10GB 永久免费）或自有 NAS MinIO 存储书库。
-* **BYOK（自带 Key）**：客户端直连 **DeepSeek、OpenAI、Claude、Gemini、本地 Ollama** 等大模型，全流式（SSE）响应。
-
----
-
-## 🏛️ 现代架构核心：Riverpod + Drift + S3 + MCP
-
-Leeef Reader 彻底摒弃了上一代阅读器“自建重度后端、弱本地存储、僵死 Prompt”的传统范式，采用专为 AI 时代打造的 **「现代四支柱协同架构」**：
-
-| 核心支柱 | 角色定位 | 解决什么核心问题？ |
-| :--- | :--- | :--- |
-| 🧠 **Riverpod** | **神经中枢（响应式状态管理）** | 天然支持大模型 **SSE 逐字流式返回** 与异步流监听，编译期类型安全，业务逻辑与 UI 彻底解耦。 |
-| 💾 **Drift (SQLite)** | **本地记忆（离线优先单一真实来源）** | 强类型响应式 ORM。自带 `watch()` 机制——**S3 后台增量同步一旦写入，屏幕 UI 自动秒级刷新**，无网离线体验极速丝滑。 |
-| ☁️ **S3 协议** | **云端仓库（零服务器去中心化存储）** | 兼容 **Cloudflare R2 / MinIO / AWS S3 / OSS**。开发者 0 服务器运维负担，用户数据 100% 自主掌控（BYOS），支持大文件哈希秒传与分片续传。 |
-| 🔌 **MCP 协议** | **手与眼（开放智能体上下文协议）** | 接入 Anthropic 开源标准。双向打通——**既让阅读器 AI 能调用外部工具（Obsidian/Anki），又让外部 AI（Cursor/Codex）能调取阅读器书摘**。 |
-
-```
-+-----------------------------------------------------------------------------------+
-|                        🍃 Leeef Reader Client (Flutter)                           |
-|                                                                                   |
-|  [ 表现层 UI ]     : shadcn_ui 现代设计系统 / 3D 仿真翻页 (page_flip) / PDF 划词 (pdfrx)   |
-|  [ 1. 状态中枢 ]   : Riverpod (编译期安全、响应式 Stream 数据流动、解耦业务)           |
-|  [ 2. 本地记忆底座 ] : Drift SQLite (响应式 watch() 查询、离线优先单一真实来源)         |
-|  [ 3. AI 与 MCP 引擎]: Multi-LLM 聚合调度器 (SSE 流式) + MCP Client/Server 协议解析器 |
-|  [ 4. S3 存储引擎 ] : minio_new (纯 Dart 跨端 S3 客户端，断点续传与元数据同步)          |
-+-----------------------------------------------------------------------------------+
-                                   │              │
-                   ┌───────────────┘              └───────────────┐
-                   ▼                                              ▼
-       [ S3 现代对象存储 ]                               [ 开放 AI & MCP 生态 ]
-  (Cloudflare R2 / MinIO / AWS S3)               (DeepSeek / Claude / OpenAI / Tools)
+```text
+AI / Codex / Claude
+        │
+        ▼
+    leeef-mcp
+        │
+        ▼
+ Drift / SQLite ──→ Sync Engine ──→ 其他设备
 ```
 
----
+计划提供的 MCP Resources：
 
-## 📦 核心技术栈清单 (Tech Stack Blueprint)
+```text
+leeef://library
+leeef://books/{bookId}
+leeef://books/{bookId}/content
+leeef://books/{bookId}/excerpts
+leeef://books/{bookId}/bookmarks
+leeef://bookshelves/{bookshelfId}
+```
 
-| 模块类别 | 选用技术 / 核心库 | 选型理由与技术价值 |
-| :--- | :--- | :--- |
-| **跨端底座** | **Flutter (Dart)** | 真正的 iOS / Android / macOS / Windows 四端原生编译，高帧率 Skia/Impeller 渲染底座。 |
-| **UI 设计系统** | **[`shadcn_ui`](https://pub.dev/packages/shadcn_ui)** | **现代极简设计语言**。纯 Flutter 原生实现的高级感组件库，具备类似 Notion / Linear / Raycast 的克制美感，四端完美适配暗黑模式与桌面交互。 |
-| **状态管理** | **`flutter_riverpod`** | 现代 Flutter 事实标准，天然契合大模型 SSE 流式数据推送与跨模块状态解耦。 |
-| **本地数据库** | **`drift`** + **`sqlite3_flutter_libs`** | 强类型 SQLite ORM，支持响应式 `watch()`（S3 同步完本地 UI 自动无感刷新）。 |
-| **3D 仿真翻页** | **`page_flip`** + 自研 Canvas 引擎 | 贝塞尔物理形变算法与着色器，提供 120Hz 纸质卷角翻页手感。 |
-| **PDF 阅读引擎** | **`pdfrx`** | 基于 Google PDFium 引擎，支持全平台高性能渲染、原生高精度文字划词与搜索。 |
-| **EPUB 排版解析** | **`epubx`** | 纯 Dart 实现的 EPUB 深度解析器，支持目录大纲、章节流式解压与样式重排。 |
-| **S3 协议客户端** | **`minio_new`** | 纯 Dart 实现的完整 S3 协议库，无原生依赖，完美支持 R2 / MinIO / S3 / 阿里云 OSS。 |
-| **大模型接入** | **`dart_openai`** + **`dio`** | 兼容所有 OpenAI 格式大模型（DeepSeek / Moonshot / Ollama），支持高并发 SSE 流式解析。 |
-| **AI 对话面板** | **`flutter_chat_ui`** | 开箱即用的流式聊天气泡、打字机动画与多模态交互界面。 |
-| **桌面侧边栏** | **`sidebarx`** | 专为 macOS / Windows 设计的高颜值折叠侧边导航栏。 |
-| **MCP 协议通信** | **`json_rpc_2`** + 进程管道/SSE | 实现 Anthropic MCP 协议标准（桌面端支持 `stdio` 本地进程，全端支持 `SSE` 远程连接）。 |
-| **卡片与文件导出** | **`screenshot`** + **`file_saver`** | 跨端 Widget 像素级渲染转高清 PNG 书摘卡片，多平台系统级文件另存为。 |
+计划提供的 MCP Tools：
 
----
+```text
+# 书籍
+list_books
+search_books
+get_book
+get_book_content
+update_book_metadata
+move_book
+delete_book
 
-## 🗺️ 开发路线图 (Roadmap)
+# 书摘
+list_excerpts
+search_excerpts
+create_excerpt
+update_excerpt
+delete_excerpt
 
-- [ ] **Phase 1: 核心排版与仿真翻页引擎**
-  - [ ] TXT / EPUB 流式切页算法与字号动态重排
-  - [ ] 移动端触控与桌面端拖拽的 3D 卷角仿真翻页实现
-  - [ ] 基于 `pdfrx` 的 PDF 渲染与划词交互
-- [ ] **Phase 2: 本地 SQLite 离线优先与 S3 云同步**
-  - [ ] Drift 本地书库、高亮、书签与阅读进度数据建模
-  - [ ] S3 (Cloudflare R2 / MinIO) 认证、书籍上传下载与增量同步
-- [ ] **Phase 3: AI 流式伴读与划词深度交互**
-  - [ ] 多服务商 API Key 配置（DeepSeek, OpenAI, Claude, Gemini, Ollama）
-  - [ ] 划词悬浮菜单：AI 深度解释、章节脉络总结、精美卡片生成
-- [ ] **Phase 4: MCP (Model Context Protocol) 深度集成**
-  - [ ] MCP Client：集成 Obsidian、Anki、Brave 搜索工具
-  - [ ] MCP Server：向桌面端 Cursor / Codex 暴露书库检索接口
-- [ ] **Phase 5: 全平台构建与公开发布**
-  - [ ] macOS / Windows 桌面端适配与键盘快捷键
-  - [ ] iOS / Android 移动端触控优化
-  - [ ] 开源发布与官网 [leeefreader.org](https://leeefreader.org) 上线
+# 书签
+list_bookmarks
+create_bookmark
+update_bookmark
+delete_bookmark
 
----
+# 书架目录
+list_bookshelves
+create_bookshelf
+rename_bookshelf
+move_bookshelf
+delete_bookshelf
+add_book_to_bookshelf
+remove_book_from_bookshelf
 
-## 📄 开源许可证
+# 阅读进度
+get_reading_progress
+update_reading_progress
+```
 
-本项目采用商业友好的 **[Apache License 2.0](LICENSE)** 协议开源。
+删除书籍、批量移动等高风险写操作需要显式确认，并记录调用方、参数、时间和执行结果。
+
+### 3. 交互式 3D 翻页
+
+3D Page Curl 是核心能力，不是可选装饰：
+
+- 支持拖拽、回弹、甩页和取消
+- 支持移动端触控、桌面端鼠标与触控板
+- 支持 EPUB、PDF 和 TXT
+- 支持单页、双页与横竖屏布局
+- 翻页时预渲染相邻页面，避免动画帧内重新排版
+- 60fps 为基础目标，高刷新率设备针对 120Hz 优化
+
+翻页引擎采用页面纹理与 Fragment Shader 实现，不依赖通用翻页 Widget。
+
+## 技术架构
+
+```text
+┌────────────────────────── Flutter App ──────────────────────────┐
+│                                                                 │
+│  EPUB.js/WebView     pdfrx/PDFium       TXT Layout              │
+│          └──────────────┬────────────────┘                       │
+│                         ▼                                       │
+│                Unified Page Model                               │
+│          页面纹理 · 文本范围 · 原文定位 · 命中区域               │
+│                         │                                       │
+│                         ▼                                       │
+│                  PageCurlEngine                                 │
+│                                                                 │
+│  Riverpod ───── Drift/SQLite/FTS5 ───── Sync Engine             │
+│                              │                 │                │
+└──────────────────────────────┼─────────────────┼────────────────┘
+                               │                 │
+                               ▼                 ▼
+                          leeef-mcp          S3 Storage
+```
+
+## 技术选型
+
+| 模块 | 方案 |
+| --- | --- |
+| 跨端框架 | Flutter / Dart |
+| 状态管理 | `flutter_riverpod` |
+| 本地数据库 | `drift` + `drift_flutter` + SQLite FTS5 |
+| EPUB 排版 | `epub.js` + `flutter_inappwebview` |
+| EPUB 解包 | `archive` |
+| PDF | `pdfrx` / PDFium |
+| 3D 翻页 | 自研 `PageCurlEngine` + Flutter Fragment Shader |
+| 页面快照 | PDF bitmap、`RepaintBoundary`、原生 WebView Snapshot Adapter |
+| 同步存储 | S3 兼容对象存储 |
+| S3 签名 | `aws_common` + `aws_signature_v4` |
+| 凭证存储 | `flutter_secure_storage` |
+| MCP Server | Go + 官方 MCP Go SDK，编译为桌面端单文件 sidecar |
+| MCP Client | Dart + `dio`，支持 Streamable HTTP |
+
+## 同步设计
+
+S3 中的数据按以下方式组织：
+
+```text
+books/{sha256}/original.epub       书籍原文件
+books/{sha256}/cover               封面
+ops/{deviceId}/{ulid}.json         增量操作
+checkpoints/{deviceId}.json        同步水位
+```
+
+同步引擎负责：
+
+- 幂等应用操作
+- 多设备冲突检测与合并
+- 删除标记和恢复
+- ETag 条件写入
+- 断点续传
+- 日志压缩
+- 数据完整性校验
+
+默认冲突规则：
+
+| 数据 | 规则 |
+| --- | --- |
+| 阅读进度 | 采用更新时间较新的有效进度，保留设备历史用于恢复 |
+| 书摘、书签 | 使用稳定 ID 合并；不同 ID 不互相覆盖 |
+| 书架目录 | 使用稳定 ID 和父目录 ID 合并；冲突操作写入审计日志 |
+| 书籍文件 | 按内容哈希不可变存储，相同文件不重复上传 |
+
+## 开发路线图
+
+### Phase 1：阅读内核与 3D 翻页
+
+- [ ] Flutter 四端工程骨架
+- [ ] EPUB、PDF、TXT 导入与阅读
+- [ ] 统一页面模型
+- [ ] 3D Page Curl 手势、Shader 和页面缓存
+- [ ] 阅读进度、书摘、书签和书架目录本地存储
+
+### Phase 2：跨端同步
+
+- [ ] 书籍文件同步
+- [ ] 阅读进度同步
+- [ ] 书摘和书签同步
+- [ ] 书架目录同步
+- [ ] 冲突、离线恢复和多设备自动化测试
+
+### Phase 3：MCP 管理
+
+- [ ] `leeef-mcp` 桌面 sidecar
+- [ ] 书籍、书摘、书签、书架目录 Resources
+- [ ] 完整查询与管理 Tools
+- [ ] 写操作确认、权限和审计日志
+- [ ] MCP 修改结果自动同步到其他设备
+
+### Phase 4：平台完善
+
+- [ ] iOS / Android 触控、后台和功耗优化
+- [ ] macOS / Windows 键盘、窗口和触控板优化
+- [ ] 性能基准、数据迁移和故障恢复
+
+## 项目状态
+
+项目处于早期开发阶段，当前优先级依次为：
+
+1. 阅读内核和 3D 翻页
+2. 五类数据的跨端同步
+3. MCP 全量读写管理
+
+## 许可证
+
+本项目采用 [Apache License 2.0](LICENSE) 开源。
