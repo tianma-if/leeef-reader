@@ -69,7 +69,7 @@ Leeef Reader 彻底摒弃了上一代阅读器“自建重度后端、弱本地�
 +-----------------------------------------------------------------------------------+
 |                        🍃 Leeef Reader Client (Flutter)                           |
 |                                                                                   |
-|  [ 表现层 UI ]     : 3D 仿真翻页 (page_flip) / PDF 原生划词 (pdfrx) / AI 聊天流式气泡  |
+|  [ 表现层 UI ]     : shadcn_ui 现代设计系统 / 3D 仿真翻页 (page_flip) / PDF 划词 (pdfrx)   |
 |  [ 1. 状态中枢 ]   : Riverpod (编译期安全、响应式 Stream 数据流动、解耦业务)           |
 |  [ 2. 本地记忆底座 ] : Drift SQLite (响应式 watch() 查询、离线优先单一真实来源)         |
 |  [ 3. AI 与 MCP 引擎]: Multi-LLM 聚合调度器 (SSE 流式) + MCP Client/Server 协议解析器 |
@@ -88,7 +88,8 @@ Leeef Reader 彻底摒弃了上一代阅读器“自建重度后端、弱本地�
 
 | 模块类别 | 选用技术 / 核心库 | 选型理由与技术价值 |
 | :--- | :--- | :--- |
-| **跨端框架** | **Flutter (Dart)** | 真正的 iOS / Android / macOS / Windows 四端原生编译，高帧率 Skia/Impeller 渲染底座。 |
+| **跨端底座** | **Flutter (Dart)** | 真正的 iOS / Android / macOS / Windows 四端原生编译，高帧率 Skia/Impeller 渲染底座。 |
+| **UI 设计系统** | **[`shadcn_ui`](https://pub.dev/packages/shadcn_ui)** | **现代极简设计语言**。纯 Flutter 原生实现的高级感组件库，具备类似 Notion / Linear / Raycast 的克制美感，四端完美适配暗黑模式与桌面交互。 |
 | **状态管理** | **`flutter_riverpod`** | 现代 Flutter 事实标准，天然契合大模型 SSE 流式数据推送与跨模块状态解耦。 |
 | **本地数据库** | **`drift`** + **`sqlite3_flutter_libs`** | 强类型 SQLite ORM，支持响应式 `watch()`（S3 同步完本地 UI 自动无感刷新）。 |
 | **3D 仿真翻页** | **`page_flip`** + 自研 Canvas 引擎 | 贝塞尔物理形变算法与着色器，提供 120Hz 纸质卷角翻页手感。 |
@@ -96,6 +97,8 @@ Leeef Reader 彻底摒弃了上一代阅读器“自建重度后端、弱本地�
 | **EPUB 排版解析** | **`epubx`** | 纯 Dart 实现的 EPUB 深度解析器，支持目录大纲、章节流式解压与样式重排。 |
 | **S3 协议客户端** | **`minio_new`** | 纯 Dart 实现的完整 S3 协议库，无原生依赖，完美支持 R2 / MinIO / S3 / 阿里云 OSS。 |
 | **大模型接入** | **`dart_openai`** + **`dio`** | 兼容所有 OpenAI 格式大模型（DeepSeek / Moonshot / Ollama），支持高并发 SSE 流式解析。 |
+| **AI 对话面板** | **`flutter_chat_ui`** | 开箱即用的流式聊天气泡、打字机动画与多模态交互界面。 |
+| **桌面侧边栏** | **`sidebarx`** | 专为 macOS / Windows 设计的高颜值折叠侧边导航栏。 |
 | **MCP 协议通信** | **`json_rpc_2`** + 进程管道/SSE | 实现 Anthropic MCP 协议标准（桌面端支持 `stdio` 本地进程，全端支持 `SSE` 远程连接）。 |
 | **卡片与文件导出** | **`screenshot`** + **`file_saver`** | 跨端 Widget 像素级渲染转高清 PNG 书摘卡片，多平台系统级文件另存为。 |
 
