@@ -6,12 +6,12 @@
 
 | 验证项 | 状态 | 已验证 | 尚未完成 |
 | --- | --- | --- | --- |
-| foliate-js | 进行中 | macOS 原生 WebView、iPhone 真机、Android 16 ARM 模拟器均通过 EPUB 元数据、目录、分页排版参数与实际正文、跳转 CFI 和文本选择 CFI 集成测试 | Windows WebView2 实机/CI 验证 |
+| foliate-js | 通过 | macOS 原生 WebView、iPhone 真机、Android 16 ARM 模拟器和 Windows WebView2 CI 均通过 EPUB 元数据、目录、分页排版参数与实际正文、跳转 CFI 和文本选择 CFI 集成测试 | 发布前补充更多设备与超大 EPUB 回归 |
 | Page Curl | 通过 | iPhone 真机与 Android 16 ARM 模拟器均成功运行 Fragment Shader，并从独立 foliate WebView 抓取两张相邻页纹理；iPhone profile build/raster p90 为 0.757/0.010ms，Android 宿主 GPU profile 为 1.002/2.171ms，均满足 120Hz 预算 | 发布前继续在多档 Android 真机做兼容性与视觉调优 |
 | Drift/同步 | 通过 | SQLite v2 schema、事务式操作日志、SHA-256 去重、进度设备历史、删除标记、幂等与双设备乱序收敛；日志失败会回滚业务写入 | M1 再加入真实 S3 双客户端故障注入 |
 | MCP sidecar | 通过 | Go sidecar 使用官方 MCP Go SDK v1.7.0；Bearer 鉴权、随机 loopback 端口、Flutter 进程拉起、MCP 初始化以及只读 Drift `library_stats` 调用均通过 | 扩展完整 Resources/Tools 和 `plan → confirm → apply` 写操作 |
 
-M0 尚不能整体关闭：Windows foliate-js 实际运行验证仍是硬性缺口。Windows workflow 已就绪，推送分支后可在 `windows-latest` 执行。
+M0 四项高风险验证已全部通过，可以进入 M1 纵向闭环开发。Windows 证据来自 GitHub Actions `windows-latest` 的 [M0 Windows verification #32547893626](https://github.com/tianma-if/leeef-reader/actions/runs/32547893626)：WebView2 Runtime 151.0.4129.86、Go sidecar、静态分析、25 项 Flutter 测试和 3 项 Windows 桌面集成测试全部通过。
 
 Windows 开发机也可在仓库根目录直接执行：
 
@@ -61,10 +61,17 @@ flutter drive --profile --no-dds ... -d emulator-5554
 
 go test ./...
   sidecar 鉴权、health、library_stats 通过
+
+GitHub Actions M0 Windows verification #32547893626
+  Windows WebView2：EPUB/排版/CFI/文本选择通过
+  Page Curl Shader 交互和 foliate 相邻页纹理抓取通过
+  Windows 原生 leeef-mcp.exe 数据桥接通过
 ```
 
 ## 依赖决策
 
 `flutter_inappwebview` 6.1.5 在当前 Flutter 3.47 / Gradle 9.3 工具链上因旧 `proguard-android.txt` 配置无法构建。M0 暂时固定到 `6.2.0-beta.3`，该版本使用 AGP 8.13.1 和 `proguard-android-optimize.txt`，Android 集成测试已通过。进入发布阶段前必须重新评估稳定版本。
+
+`flutter_inappwebview_windows` 0.7.0-beta.3 仍使用实验性 coroutine 兼容头。Windows Runner 对当前 MSVC 14.51 显式定义 `_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS`；插件迁移到标准 C++20 coroutine 后应移除该兼容定义。
 
 foliate-js 固定在提交 `78914aef4466eb960965702401634c2cb348e9b1`，上游信息与许可证位于 `assets/foliate-js/UPSTREAM.md`。
