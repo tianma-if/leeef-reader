@@ -51,11 +51,11 @@ flutter test integration_test/m1_vertical_slice_test.dart -d emulator-5554
 flutter test integration_test/required_formats_test.dart -d emulator-5554
   Android 16 ARM EPUB/TXT Page Curl、相邻页纹理、PDF/TXT 阅读恢复与数据同步闭环通过
 
-GitHub Actions Leeef Windows verification #32555455117
-  Windows WebView2 EPUB 阅读、PDFium PDF 阅读、TXT 阅读、41 项 Flutter 测试、Go/MCP 和 M1 数据纵向测试通过
+GitHub Actions Leeef Windows verification #32557789722
+  Windows WebView2 EPUB 阅读、PDFium PDF 阅读、TXT Page Curl 与阅读恢复、43 项 Flutter 测试、Go/MCP 和 M1 数据纵向测试通过
 ```
 
-Windows CI：[Leeef Windows verification #32555455117](https://github.com/tianma-if/leeef-reader/actions/runs/32555455117)
+Windows CI：[Leeef Windows verification #32557789722](https://github.com/tianma-if/leeef-reader/actions/runs/32557789722)
 
 ## 故障恢复覆盖
 
