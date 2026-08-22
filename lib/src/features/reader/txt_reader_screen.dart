@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,11 +9,14 @@ import 'package:leeef_reader/src/data/database/app_database.dart';
 import 'package:leeef_reader/src/domain/reading_location.dart';
 import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
+import 'package:leeef_reader/src/features/reader/txt_page_snapshot_renderer.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
 
 class TxtReaderScreen extends ConsumerStatefulWidget {
-  const TxtReaderScreen({required this.book, super.key});
+  const TxtReaderScreen({required this.book, super.key, this.pageCurlEnabled});
 
   final BookRecord book;
+  final bool? pageCurlEnabled;
 
   @override
   ConsumerState<TxtReaderScreen> createState() => _TxtReaderScreenState();
@@ -25,6 +29,12 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   Object? _error;
   Timer? _progressTimer;
   String? _lastPersistedLocator;
+  bool _preparingTurn = false;
+  _TxtCurlTurn? _curlTurn;
+  final GlobalKey _bodyKey = GlobalKey();
+
+  bool get _supportsPageCurl =>
+      widget.pageCurlEnabled ?? (Platform.isIOS || Platform.isAndroid);
 
   @override
   void initState() {
@@ -35,6 +45,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   @override
   void dispose() {
     _progressTimer?.cancel();
+    _curlTurn?.dispose();
     unawaited(_persistProgress());
     super.dispose();
   }
@@ -71,6 +82,83 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       _selection = null;
     });
     _scheduleProgressSave();
+  }
+
+  Future<void> _prepareTurn(int targetIndex) async {
+    final document = _document;
+    if (document == null || _preparingTurn || _curlTurn != null) return;
+    final target = targetIndex.clamp(0, document.pages.length - 1);
+    if (target == _pageIndex) return;
+    if (!_supportsPageCurl) {
+      _goToPage(target);
+      return;
+    }
+
+    final renderObject = _bodyKey.currentContext?.findRenderObject();
+    final size = renderObject is RenderBox && renderObject.hasSize
+        ? renderObject.size
+        : MediaQuery.sizeOf(context);
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final theme = Theme.of(context);
+    final backgroundColor = theme.scaffoldBackgroundColor;
+    final textStyle =
+        theme.textTheme.bodyLarge?.copyWith(height: 1.8) ??
+        const TextStyle(fontSize: 16, height: 1.8);
+    final textDirection = Directionality.of(context);
+
+    setState(() => _preparingTurn = true);
+    ui.Image? currentImage;
+    ui.Image? targetImage;
+    try {
+      currentImage = await renderTxtPageSnapshot(
+        text: document.pages[_pageIndex].text,
+        size: size,
+        pixelRatio: pixelRatio,
+        backgroundColor: backgroundColor,
+        textStyle: textStyle,
+        textDirection: textDirection,
+      );
+      targetImage = await renderTxtPageSnapshot(
+        text: document.pages[target].text,
+        size: size,
+        pixelRatio: pixelRatio,
+        backgroundColor: backgroundColor,
+        textStyle: textStyle,
+        textDirection: textDirection,
+      );
+      if (!mounted) {
+        currentImage.dispose();
+        targetImage.dispose();
+        return;
+      }
+      setState(() {
+        _curlTurn = _TxtCurlTurn(
+          current: currentImage!,
+          target: targetImage!,
+          targetIndex: target,
+        );
+      });
+    } on Object {
+      currentImage?.dispose();
+      targetImage?.dispose();
+      if (mounted) _goToPage(target);
+    } finally {
+      if (mounted) setState(() => _preparingTurn = false);
+    }
+  }
+
+  void _finishTurn({required bool completed}) {
+    final turn = _curlTurn;
+    if (turn == null) return;
+    setState(() {
+      _curlTurn = null;
+      if (completed) {
+        _pageIndex = turn.targetIndex;
+        _selection = null;
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => turn.dispose());
+    if (completed) _scheduleProgressSave();
   }
 
   void _scheduleProgressSave() {
@@ -199,6 +287,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
         ],
       ),
       body: Stack(
+        key: _bodyKey,
         children: [
           if (_error case final error?)
             Center(
@@ -243,9 +332,9 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                     children: [
                       IconButton(
                         tooltip: '上一页',
-                        onPressed: _pageIndex == 0
+                        onPressed: _pageIndex == 0 || _preparingTurn
                             ? null
-                            : () => _goToPage(_pageIndex - 1),
+                            : () => _prepareTurn(_pageIndex - 1),
                         icon: const Icon(Icons.chevron_left),
                       ),
                       SizedBox(
@@ -257,9 +346,11 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                       ),
                       IconButton(
                         tooltip: '下一页',
-                        onPressed: _pageIndex == document.pages.length - 1
+                        onPressed:
+                            _pageIndex == document.pages.length - 1 ||
+                                _preparingTurn
                             ? null
-                            : () => _goToPage(_pageIndex + 1),
+                            : () => _prepareTurn(_pageIndex + 1),
                         icon: const Icon(Icons.chevron_right),
                       ),
                     ],
@@ -287,9 +378,38 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                 ),
               ),
             ),
+          if (_curlTurn case final turn?)
+            Positioned.fill(
+              child: PageCurlSurface(
+                key: const Key('txt-page-curl'),
+                currentPage: turn.current,
+                nextPage: turn.target,
+                direction: turn.targetIndex > _pageIndex ? 1 : -1,
+                onTurnCompleted: () => _finishTurn(completed: true),
+                onTurnCancelled: () => _finishTurn(completed: false),
+                onUnavailable: () => _finishTurn(completed: true),
+              ),
+            ),
         ],
       ),
     );
+  }
+}
+
+class _TxtCurlTurn {
+  const _TxtCurlTurn({
+    required this.current,
+    required this.target,
+    required this.targetIndex,
+  });
+
+  final ui.Image current;
+  final ui.Image target;
+  final int targetIndex;
+
+  void dispose() {
+    current.dispose();
+    target.dispose();
   }
 }
 

@@ -101,7 +101,7 @@ update_reading_progress
 
 - 支持拖拽、回弹、甩页和取消
 - 针对触控手势和不同屏幕尺寸优化
-- 支持 EPUB、MOBI、AZW3、FB2、TXT 和 PDF
+- 当前支持 EPUB、TXT；其他格式在对应阅读器接入页面纹理后扩展
 - 支持单页、双页与横竖屏布局
 - 翻页时预渲染相邻页面，避免动画帧内重新排版
 - 60fps 为基础目标，高刷新率设备针对 120Hz 优化
@@ -277,9 +277,9 @@ Leeef Reader
 | 格式支持 | EPUB、MOBI、AZW3、FB2、TXT、PDF；首期优先 EPUB、PDF、TXT |
 | WebView 资源服务 | 随机端口 loopback HTTP Server + session token + `bookId` 路径白名单 |
 | PDF | `pdfrx` / PDFium |
-| 移动端 3D 翻页 | iOS / Android 自研 `PageCurlEngine` + Flutter Fragment Shader |
+| 移动端 3D 翻页 | iOS / Android 的 EPUB、TXT 使用自研 `PageCurlEngine` + Flutter Fragment Shader |
 | 桌面端翻页 | macOS / Windows 支持滑动、无动画和连续滚动，不实现 3D Page Curl |
-| 移动端页面快照 | foliate-js 相邻页预渲染、PDF bitmap、原生 WebView Snapshot Adapter |
+| 移动端页面快照 | EPUB 使用 foliate-js 相邻页预渲染；TXT 使用 Canvas 页面纹理；PDF 保持原生阅读器翻页 |
 | 同步接口 | 自研 `SyncBackend`，统一对象读写、列举、条件写入与能力检测 |
 | 默认同步后端 | S3 兼容对象存储 |
 | 可选同步后端 | WebDAV，面向 NAS、Nextcloud 等自托管场景 |
@@ -340,7 +340,7 @@ S3 是默认后端；WebDAV 作为可选适配器。启动同步前执行能力�
 - EPUB、PDF、TXT 导入、书架和基础阅读
 - 阅读进度、书摘、书签、书架目录本地管理
 - 基础字体、字号、行距、主题、目录、进度和书内搜索
-- iOS / Android 交互式 3D Page Curl
+- iOS / Android 的 EPUB、TXT 交互式 3D Page Curl
 - macOS / Windows 滑动、无动画和连续滚动
 - S3 `SyncBackend`：五类核心数据和书籍文件的增量同步
 - UUID/ULID、操作日志、幂等、删除标记、冲突合并和失败恢复
@@ -395,7 +395,7 @@ P0 验收标准：
 
 - [x] 完成 EPUB、PDF、TXT 从导入、阅读、摘录到同步的完整流程
 - [x] 完成 MCP 查询、确认写入和跨端同步流程
-- [x] 完成移动端 3D Page Curl 与普通翻页降级
+- [x] 完成移动端 EPUB、TXT 3D Page Curl 与普通翻页降级
 - [x] 完成四端数据完整性、离线和故障恢复测试
 
 M1 的实现边界和四端验证证据见 [`docs/m1-validation.md`](docs/m1-validation.md)。

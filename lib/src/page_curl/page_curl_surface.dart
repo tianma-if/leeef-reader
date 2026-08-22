@@ -66,6 +66,7 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
     return LayoutBuilder(
       builder: (context, constraints) {
         return GestureDetector(
+          key: const Key('page-curl-gesture'),
           behavior: HitTestBehavior.opaque,
           onHorizontalDragStart: (_) => _animation.stop(),
           onHorizontalDragUpdate: (details) {

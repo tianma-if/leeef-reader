@@ -10,6 +10,7 @@ import 'package:leeef_reader/src/app_providers.dart';
 import 'package:leeef_reader/src/data/database/app_database.dart';
 import 'package:leeef_reader/src/data/repositories/library_repository.dart';
 import 'package:leeef_reader/src/features/reader/reader_screen.dart';
+import 'package:leeef_reader/src/features/reader/txt_reader_screen.dart';
 import 'package:leeef_reader/src/import/book_import_service.dart';
 import 'package:pdfrx/pdfrx.dart';
 
@@ -27,11 +28,17 @@ void main() {
       );
       final book = await fixture.importer.importFile(source);
 
-      await tester.pumpWidget(fixture.reader(book));
+      await tester.pumpWidget(fixture.reader(book, enableTxtPageCurl: true));
       await _pumpUntilFound(tester, find.byKey(const Key('txt-reader-text')));
       expect(find.textContaining('1 / '), findsOneWidget);
 
       await tester.tap(find.byTooltip('下一页'));
+      await _pumpUntilFound(tester, find.byKey(const Key('page-curl-gesture')));
+      await tester.drag(
+        find.byKey(const Key('page-curl-gesture')),
+        const Offset(-500, 0),
+      );
+      await tester.pumpAndSettle();
       await tester.pump(const Duration(milliseconds: 700));
       expect(find.textContaining('2 / '), findsOneWidget);
 
@@ -64,7 +71,7 @@ void main() {
       expect(progress?.page, 2);
 
       await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pumpWidget(fixture.reader(book));
+      await tester.pumpWidget(fixture.reader(book, enableTxtPageCurl: true));
       await _pumpUntilFound(tester, find.byKey(const Key('txt-reader-text')));
       expect(find.textContaining('2 / '), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -183,12 +190,17 @@ class _Fixture {
   final LibraryRepository repository;
   final BookImportService importer;
 
-  Widget reader(BookRecord book) => ProviderScope(
-    overrides: [
-      libraryRepositoryProvider.overrideWith((ref) async => repository),
-    ],
-    child: MaterialApp(home: ReaderScreen(book: book)),
-  );
+  Widget reader(BookRecord book, {bool enableTxtPageCurl = false}) =>
+      ProviderScope(
+        overrides: [
+          libraryRepositoryProvider.overrideWith((ref) async => repository),
+        ],
+        child: MaterialApp(
+          home: enableTxtPageCurl
+              ? TxtReaderScreen(book: book, pageCurlEnabled: true)
+              : ReaderScreen(book: book),
+        ),
+      );
 
   Future<void> dispose() async {
     await database.close();
