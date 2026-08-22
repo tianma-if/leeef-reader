@@ -5,9 +5,11 @@
 *.swp
 .DS_Store
 .atom/
+.build/
 .buildlog/
 .history
 .svn/
+.swiftpm/
 migrate_working_dir/
 
 # IntelliJ related
@@ -29,10 +31,12 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+sidecars/*/build/
 
 # Android related
 **/android/**/gradle-wrapper.jar
 **/android/.gradle
+**/android/**/build/
 **/android/captures/
 **/android/gradlew
 **/android/gradlew.bat

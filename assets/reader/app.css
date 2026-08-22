@@ -1,0 +1,25 @@
+:root {
+  color-scheme: light dark;
+  --reader-background: #fbf8f1;
+  --reader-foreground: #292b29;
+  --reader-font-size: 18px;
+  --reader-line-height: 1.65;
+  background: var(--reader-background);
+  color: var(--reader-foreground);
+}
+
+html,
+body,
+foliate-view {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+foliate-view {
+  color: var(--reader-foreground);
+  background: var(--reader-background);
+  font-size: var(--reader-font-size);
+  line-height: var(--reader-line-height);
+}

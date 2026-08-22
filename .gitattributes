@@ -1,0 +1,2 @@
+# Preserve vendored foliate-js byte-for-byte, including upstream EOF style.
+assets/foliate-js/** whitespace=-blank-at-eof

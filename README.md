@@ -383,9 +383,11 @@ P0 验收标准：
 ### M0：高风险技术验证
 
 - [ ] foliate-js 四端加载、排版、CFI 和文本选择
-- [ ] iOS / Android WebView 相邻页预渲染、快照和 Shader 原型
-- [ ] Drift 数据模型、操作日志和双设备冲突模拟
-- [ ] MCP sidecar 与 Flutter 本地数据通路
+- [x] iOS / Android WebView 相邻页预渲染、快照和 Shader 原型
+- [x] Drift 数据模型、操作日志和双设备冲突模拟
+- [x] MCP sidecar 与 Flutter 本地数据通路
+
+当前验证证据、平台覆盖和剩余风险见 [`docs/m0-validation.md`](docs/m0-validation.md)。
 
 只有四项验证全部通过，才进入完整功能开发。
 
@@ -412,6 +414,20 @@ P0 验收标准：
 ## 项目状态
 
 项目处于早期开发阶段，当前阶段为 **M0：高风险技术验证**。首个可用版本严格限定为 P0，不因功能树中的 P1/P2 项目扩大范围。
+
+## 本地开发
+
+当前代码已包含 Flutter Material 3 响应式应用骨架、四端平台 Runner、Drift 核心数据模型、事务式操作日志写入，以及双设备冲突合并规则。安装包含 Dart 3.10 或更高版本的 Flutter SDK 后执行：
+
+```bash
+flutter pub get
+dart run build_runner build
+flutter analyze
+flutter test
+flutter run
+```
+
+数据库写操作必须经过 `LibraryRepository`，由同一事务同时提交业务数据和 `SyncOperations`，禁止绕过操作日志直接修改核心表。
 
 ## 许可证
 

@@ -1,0 +1,33 @@
+name: M0 Windows verification
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/m0-windows.yml"
+      - "assets/**"
+      - "integration_test/**"
+      - "lib/**"
+      - "sidecars/leeef-mcp/**"
+      - "tool/verify_m0_windows.ps1"
+      - "windows/**"
+      - "pubspec.yaml"
+
+jobs:
+  windows-reader-and-sidecar:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.1
+          channel: stable
+          cache: true
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: sidecars/leeef-mcp/go.mod
+          cache-dependency-path: sidecars/leeef-mcp/go.sum
+      - name: Run M0 Windows verification
+        shell: pwsh
+        run: ./tool/verify_m0_windows.ps1

@@ -1,0 +1,15 @@
+targets:
+  $default:
+    builders:
+      drift_dev:
+        options:
+          databases:
+            app_database: lib/src/data/database/app_database.dart
+          store_date_time_values_as_text: true
+          fatal_warnings: true
+          sql:
+            dialect: sqlite
+            options:
+              version: "3.39"
+              modules:
+                - fts5
