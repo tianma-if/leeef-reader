@@ -10,6 +10,7 @@ import 'package:leeef_reader/src/domain/reading_location.dart';
 import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
 import 'package:leeef_reader/src/features/reader/txt_page_snapshot_renderer.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
 
 class TxtReaderScreen extends ConsumerStatefulWidget {
@@ -34,6 +35,10 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   final GlobalKey _bodyKey = GlobalKey();
   Offset? _pointerDownPosition;
   DateTime? _pointerDownAt;
+  PageCurlController? _pointerCurlController;
+  Offset? _lastPointerPosition;
+  Duration? _lastPointerTime;
+  double _horizontalVelocity = 0;
 
   bool get _supportsPageCurl =>
       widget.pageCurlEnabled ?? (Platform.isIOS || Platform.isAndroid);
@@ -86,7 +91,11 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     _scheduleProgressSave();
   }
 
-  Future<void> _prepareTurn(int targetIndex, {bool autoComplete = true}) async {
+  Future<void> _prepareTurn(
+    int targetIndex, {
+    bool autoComplete = true,
+    PageCurlController? controller,
+  }) async {
     final document = _document;
     if (document == null || _preparingTurn || _curlTurn != null) return;
     final target = targetIndex.clamp(0, document.pages.length - 1);
@@ -131,6 +140,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       if (!mounted) {
         currentImage.dispose();
         targetImage.dispose();
+        controller?.dispose();
         return;
       }
       setState(() {
@@ -139,11 +149,13 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
           target: targetImage!,
           targetIndex: target,
           autoComplete: autoComplete,
+          controller: controller,
         );
       });
     } on Object {
       currentImage?.dispose();
       targetImage?.dispose();
+      controller?.dispose();
       if (mounted) _goToPage(target);
     } finally {
       if (mounted) setState(() => _preparingTurn = false);
@@ -153,6 +165,54 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   void _handlePointerDown(PointerDownEvent event) {
     _pointerDownPosition = event.localPosition;
     _pointerDownAt = DateTime.now();
+    _lastPointerPosition = event.localPosition;
+    _lastPointerTime = event.timeStamp;
+    _horizontalVelocity = 0;
+
+    final document = _document;
+    final renderObject = _bodyKey.currentContext?.findRenderObject();
+    if (document == null ||
+        renderObject is! RenderBox ||
+        !renderObject.hasSize ||
+        _preparingTurn ||
+        _curlTurn != null) {
+      return;
+    }
+    final size = renderObject.size;
+    final x = event.localPosition.dx;
+    final direction = x >= size.width * 0.7
+        ? 1.0
+        : x <= size.width * 0.3
+        ? -1.0
+        : 0.0;
+    final target = _pageIndex + direction.toInt();
+    if (direction == 0 || target < 0 || target >= document.pages.length) return;
+
+    final controller = PageCurlController()
+      ..begin(position: event.localPosition, size: size, direction: direction);
+    _pointerCurlController = controller;
+    unawaited(
+      _prepareTurn(target, autoComplete: false, controller: controller),
+    );
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    final controller = _pointerCurlController;
+    if (controller == null) return;
+    final previousPosition = _lastPointerPosition;
+    final previousTime = _lastPointerTime;
+    if (previousPosition != null && previousTime != null) {
+      final elapsedMicros = (event.timeStamp - previousTime).inMicroseconds
+          .clamp(1, 100000);
+      final instantaneous =
+          (event.localPosition.dx - previousPosition.dx) *
+          Duration.microsecondsPerSecond /
+          elapsedMicros;
+      _horizontalVelocity = _horizontalVelocity * 0.58 + instantaneous * 0.42;
+    }
+    _lastPointerPosition = event.localPosition;
+    _lastPointerTime = event.timeStamp;
+    controller.update(event.localPosition);
   }
 
   void _handlePointerUp(PointerUpEvent event) {
@@ -161,11 +221,23 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     _pointerDownPosition = null;
     _pointerDownAt = null;
     if (start == null || startedAt == null) return;
-    if (DateTime.now().difference(startedAt) >
-            const Duration(milliseconds: 350) ||
-        (event.localPosition - start).distance > 12) {
+    final isTap =
+        DateTime.now().difference(startedAt) <=
+            const Duration(milliseconds: 350) &&
+        (event.localPosition - start).distance <= 12;
+    if (_pointerCurlController case final controller?) {
+      controller
+        ..update(event.localPosition)
+        ..release(
+          horizontalVelocity: _horizontalVelocity,
+          forceComplete: isTap,
+        );
+      _pointerCurlController = null;
+      _lastPointerPosition = null;
+      _lastPointerTime = null;
       return;
     }
+    if (!isTap) return;
     final width = _bodyKey.currentContext?.size?.width ?? 0;
     if (width <= 0) return;
     if (event.localPosition.dx <= width * 0.3) {
@@ -178,6 +250,10 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   void _handlePointerCancel(PointerCancelEvent event) {
     _pointerDownPosition = null;
     _pointerDownAt = null;
+    _pointerCurlController?.release(horizontalVelocity: 0);
+    _pointerCurlController = null;
+    _lastPointerPosition = null;
+    _lastPointerTime = null;
   }
 
   void _finishTurn({required bool completed}) {
@@ -336,6 +412,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
               child: Listener(
                 behavior: HitTestBehavior.translucent,
                 onPointerDown: _handlePointerDown,
+                onPointerMove: _handlePointerMove,
                 onPointerUp: _handlePointerUp,
                 onPointerCancel: _handlePointerCancel,
                 child: SingleChildScrollView(
@@ -425,6 +502,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                 nextPage: turn.target,
                 direction: turn.targetIndex > _pageIndex ? 1 : -1,
                 autoComplete: turn.autoComplete,
+                controller: turn.controller,
                 onTurnCompleted: () => _finishTurn(completed: true),
                 onTurnCancelled: () => _finishTurn(completed: false),
                 onUnavailable: () => _finishTurn(completed: true),
@@ -442,16 +520,19 @@ class _TxtCurlTurn {
     required this.target,
     required this.targetIndex,
     required this.autoComplete,
+    this.controller,
   });
 
   final ui.Image current;
   final ui.Image target;
   final int targetIndex;
   final bool autoComplete;
+  final PageCurlController? controller;
 
   void dispose() {
     current.dispose();
     target.dispose();
+    controller?.dispose();
   }
 }
 

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_gesture.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_mesh.dart';
 
@@ -15,6 +16,7 @@ class PageCurlSurface extends StatefulWidget {
     super.key,
     this.onTurnCancelled,
     this.onUnavailable,
+    this.controller,
     this.direction = 1,
     this.autoComplete = false,
   });
@@ -24,6 +26,7 @@ class PageCurlSurface extends StatefulWidget {
   final VoidCallback onTurnCompleted;
   final VoidCallback? onTurnCancelled;
   final VoidCallback? onUnavailable;
+  final PageCurlController? controller;
   final double direction;
   final bool autoComplete;
 
@@ -37,7 +40,7 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
   late final AnimationController _animation = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 420),
-  )..addListener(() => setState(() => _gesture.setProgress(_animation.value)));
+  )..addListener(_handleAnimationTick);
   late ui.ImageShader _pageTexture;
   double _touchY = 0.88;
 
@@ -45,6 +48,7 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
   void initState() {
     super.initState();
     _pageTexture = _createPageTexture(widget.currentPage);
+    _attachController(widget.controller);
     if (widget.autoComplete) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(_settle(true));
@@ -55,6 +59,10 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
   @override
   void didUpdateWidget(PageCurlSurface oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      _detachController(oldWidget.controller);
+      _attachController(widget.controller);
+    }
     if (oldWidget.currentPage != widget.currentPage) {
       _pageTexture.dispose();
       _pageTexture = _createPageTexture(widget.currentPage);
@@ -88,6 +96,7 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
 
   @override
   void dispose() {
+    _detachController(widget.controller);
     _animation.dispose();
     _pageTexture.dispose();
     super.dispose();
@@ -98,7 +107,7 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
     return LayoutBuilder(
       builder: (context, constraints) {
         return IgnorePointer(
-          ignoring: widget.autoComplete,
+          ignoring: widget.autoComplete || widget.controller != null,
           child: GestureDetector(
             key: const Key('page-curl-gesture'),
             behavior: HitTestBehavior.opaque,
@@ -130,11 +139,11 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
                 pageTexture: _pageTexture,
                 currentPage: widget.currentPage,
                 nextPage: widget.nextPage,
-                progress: _gesture.progress,
+                progress: _progress,
                 direction: widget.direction,
                 touchY: widget.autoComplete
-                    ? _automaticTouchY(_gesture.progress)
-                    : _touchY,
+                    ? _automaticTouchY(_progress)
+                    : widget.controller?.touchY ?? _touchY,
               ),
               size: Size.infinite,
             ),
@@ -151,7 +160,7 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
       0.88 - (math.sin(math.pi * progress) * 0.20);
 
   Future<void> _settle(bool complete) async {
-    _animation.value = _gesture.progress;
+    _animation.value = _progress;
     if (complete) {
       await _animation.animateTo(1, curve: Curves.easeInOutCubic);
       widget.onTurnCompleted();
@@ -159,7 +168,47 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
       await _animation.animateBack(0, curve: Curves.easeOutCubic);
       widget.onTurnCancelled?.call();
     }
-    if (mounted) setState(_gesture.reset);
+    if (mounted) {
+      if (widget.controller case final controller?) {
+        controller.setProgress(0);
+      } else {
+        setState(_gesture.reset);
+      }
+    }
+  }
+
+  double get _progress => widget.controller?.progress ?? _gesture.progress;
+
+  void _handleAnimationTick() {
+    if (widget.controller case final controller?) {
+      controller.setProgress(_animation.value);
+    } else if (mounted) {
+      setState(() => _gesture.setProgress(_animation.value));
+    }
+  }
+
+  void _handleControllerChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _handleControllerRelease(PageCurlRelease release) {
+    final complete =
+        release.forceComplete ||
+        _progress >= _gesture.completionThreshold ||
+        release.normalizedVelocity <= -_gesture.flingVelocityThreshold;
+    unawaited(_settle(complete));
+  }
+
+  void _attachController(PageCurlController? controller) {
+    controller
+      ?..addListener(_handleControllerChanged)
+      ..attach(_handleControllerRelease);
+  }
+
+  void _detachController(PageCurlController? controller) {
+    controller
+      ?..detach(_handleControllerRelease)
+      ..removeListener(_handleControllerChanged);
   }
 }
 

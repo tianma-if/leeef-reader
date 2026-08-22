@@ -10,6 +10,7 @@ import 'package:leeef_reader/src/app_providers.dart';
 import 'package:leeef_reader/src/data/database/app_database.dart';
 import 'package:leeef_reader/src/data/repositories/library_repository.dart';
 import 'package:leeef_reader/src/features/reader/reader_screen.dart';
+import 'package:leeef_reader/src/features/reader/pdf_reader_screen.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_screen.dart';
 import 'package:leeef_reader/src/import/book_import_service.dart';
 import 'package:pdfrx/pdfrx.dart';
@@ -32,7 +33,14 @@ void main() {
       await _pumpUntilFound(tester, find.byKey(const Key('txt-reader-text')));
       expect(find.textContaining('1 / '), findsOneWidget);
 
-      await tester.tap(find.byTooltip('下一页'));
+      final readerBounds = tester.getRect(find.byType(TxtReaderScreen));
+      final gesture = await tester.startGesture(
+        Offset(readerBounds.right - 24, readerBounds.center.dy),
+      );
+      await gesture.moveBy(Offset(-readerBounds.width * 0.24, -80));
+      await _pumpUntilFound(tester, find.byKey(const Key('txt-page-curl')));
+      await gesture.moveBy(Offset(-readerBounds.width * 0.48, -60));
+      await gesture.up();
       await _pumpUntilFound(tester, find.textContaining('2 / '));
 
       await tester.tap(find.byTooltip('添加书签'));
@@ -89,7 +97,14 @@ void main() {
         timeout: const Duration(seconds: 20),
       );
 
-      await tester.tap(find.byTooltip('下一页'));
+      final pdfBounds = tester.getRect(find.byType(PdfReaderScreen));
+      final pdfGesture = await tester.startGesture(
+        Offset(pdfBounds.right - 24, pdfBounds.center.dy),
+      );
+      await pdfGesture.moveBy(Offset(-pdfBounds.width * 0.24, -60));
+      await _pumpUntilFound(tester, find.byKey(const Key('pdf-page-curl')));
+      await pdfGesture.moveBy(Offset(-pdfBounds.width * 0.48, -50));
+      await pdfGesture.up();
       await _pumpUntilFound(tester, find.text('2 / 2'));
       await tester.pump(const Duration(milliseconds: 700));
 
