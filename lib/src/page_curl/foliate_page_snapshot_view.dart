@@ -114,6 +114,16 @@ class _FoliatePageSnapshotViewState extends State<FoliatePageSnapshotView> {
         await _engine.open(widget.book, initialLocator: key.locator);
         _bookIsOpen = true;
       }
+      switch (key.slot) {
+        case PageSnapshotSlot.previous:
+          await _engine.previous();
+          break;
+        case PageSnapshotSlot.current:
+          break;
+        case PageSnapshotSlot.next:
+          await _engine.next();
+          break;
+      }
       // open/goTo resolve after foliate has applied navigation. Relocation is
       // intentionally not used as a barrier: hidden WKWebViews can coalesce
       // that event even though the requested layout is already available.

@@ -6,6 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:leeef_reader/src/app_providers.dart';
 import 'package:leeef_reader/src/data/database/app_database.dart';
 import 'package:leeef_reader/src/features/reader/reader_screen.dart';
+import 'package:leeef_reader/src/sync/directory_sync_backend.dart';
+import 'package:leeef_reader/src/sync/sync_engine.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
@@ -245,17 +248,97 @@ class _ExcerptContent extends ConsumerWidget {
   }
 }
 
-class _SettingsContent extends StatelessWidget {
+class _SettingsContent extends ConsumerStatefulWidget {
   const _SettingsContent();
+
+  @override
+  ConsumerState<_SettingsContent> createState() => _SettingsContentState();
+}
+
+class _SettingsContentState extends ConsumerState<_SettingsContent> {
+  static const _syncDirectoryKey = 'leeef.sync.directory';
+  String? _syncDirectory;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    SharedPreferences.getInstance().then((preferences) {
+      if (mounted) {
+        setState(
+          () => _syncDirectory = preferences.getString(_syncDirectoryKey),
+        );
+      }
+    });
+  }
+
+  Future<void> _chooseDirectory() async {
+    final path = await FilePicker.getDirectoryPath(
+      dialogTitle: '选择 Leeef 同步目录',
+    );
+    if (path == null || !mounted) return;
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_syncDirectoryKey, path);
+    setState(() => _syncDirectory = path);
+  }
+
+  Future<void> _synchronize() async {
+    final path = _syncDirectory;
+    if (path == null || _busy) return;
+    setState(() => _busy = true);
+    try {
+      final engine = SyncEngine(
+        repository: await ref.read(libraryRepositoryProvider.future),
+        backend: DirectorySyncBackend(Directory(path)),
+        libraryDirectory: await ref.read(libraryDirectoryProvider.future),
+      );
+      final report = await engine.synchronize();
+      ref.invalidate(libraryBooksProvider);
+      ref.invalidate(allExcerptsProvider);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '同步完成：上传 ${report.uploadedOperations}，接收 ${report.downloadedOperations}，下载书籍 ${report.downloadedBooks}',
+          ),
+        ),
+      );
+    } on Object catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('同步失败，稍后可重试：$error')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return ListView(
-      children: const [
+      children: [
         ListTile(
-          leading: Icon(Icons.sync),
-          title: Text('同步'),
-          subtitle: Text('本地优先；同步配置将在本阶段接入'),
+          leading: const Icon(Icons.folder_outlined),
+          title: const Text('同步目录'),
+          subtitle: Text(_syncDirectory ?? '尚未选择，可使用共享目录或网络盘'),
+          trailing: TextButton(
+            onPressed: _busy ? null : _chooseDirectory,
+            child: const Text('选择'),
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.sync),
+          title: const Text('立即同步'),
+          subtitle: const Text('离线失败不会丢失变更，恢复连接后可安全重试'),
+          trailing: _busy
+              ? const SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : FilledButton.tonal(
+                  onPressed: _syncDirectory == null ? null : _synchronize,
+                  child: const Text('同步'),
+                ),
         ),
       ],
     );

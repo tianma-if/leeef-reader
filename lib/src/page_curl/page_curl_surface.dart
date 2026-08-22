@@ -10,6 +10,7 @@ class PageCurlSurface extends StatefulWidget {
     required this.onTurnCompleted,
     super.key,
     this.onTurnCancelled,
+    this.onUnavailable,
     this.direction = 1,
   });
 
@@ -17,6 +18,7 @@ class PageCurlSurface extends StatefulWidget {
   final ui.Image nextPage;
   final VoidCallback onTurnCompleted;
   final VoidCallback? onTurnCancelled;
+  final VoidCallback? onUnavailable;
   final double direction;
 
   @override
@@ -39,11 +41,15 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
   }
 
   Future<void> _loadShader() async {
-    final program = await ui.FragmentProgram.fromAsset(
-      'shaders/page_curl.frag',
-    );
-    if (!mounted) return;
-    setState(() => _shader = program.fragmentShader());
+    try {
+      final program = await ui.FragmentProgram.fromAsset(
+        'shaders/page_curl.frag',
+      );
+      if (!mounted) return;
+      setState(() => _shader = program.fragmentShader());
+    } on Object {
+      widget.onUnavailable?.call();
+    }
   }
 
   @override

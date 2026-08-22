@@ -1,11 +1,15 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:leeef_reader/src/app_providers.dart';
 import 'package:leeef_reader/src/data/database/app_database.dart';
 import 'package:leeef_reader/src/domain/reading_location.dart';
+import 'package:leeef_reader/src/page_curl/foliate_page_snapshot_view.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
+import 'package:leeef_reader/src/page_curl/page_snapshot_cache.dart';
 import 'package:leeef_reader/src/reader/foliate_reader_engine.dart';
 import 'package:leeef_reader/src/reader/foliate_reader_view.dart';
 import 'package:leeef_reader/src/reader/reader_engine.dart';
@@ -21,6 +25,11 @@ class ReaderScreen extends ConsumerStatefulWidget {
 
 class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   final FoliateReaderEngine _engine = FoliateReaderEngine();
+  final FoliatePageSnapshotController _snapshotController =
+      FoliatePageSnapshotController();
+  late final PageSnapshotCache _snapshotCache = PageSnapshotCache(
+    source: _snapshotController,
+  );
   StreamSubscription<ReaderEvent>? _eventSubscription;
   Timer? _progressTimer;
   ReaderBookInfo? _bookInfo;
@@ -29,6 +38,20 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   Object? _error;
   bool _opening = false;
   bool _controlsVisible = true;
+  bool _preparingTurn = false;
+  _CurlTurn? _curlTurn;
+
+  bool get _supportsPageCurl => Platform.isIOS || Platform.isAndroid;
+
+  ReaderBookSource? get _bookSource {
+    final path = widget.book.filePath;
+    if (path == null) return null;
+    return ReaderBookSource(
+      bookId: widget.book.id,
+      file: File(path),
+      mediaType: widget.book.mediaType,
+    );
+  }
 
   @override
   void initState() {
@@ -42,6 +65,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     unawaited(_persistProgress());
     unawaited(_eventSubscription?.cancel());
     unawaited(_engine.close());
+    _snapshotCache.clear();
     super.dispose();
   }
 
@@ -199,9 +223,72 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     if (locator != null) await _engine.goTo(locator);
   }
 
+  Future<void> _prepareTurn(bool forward) async {
+    if (!_supportsPageCurl) {
+      await (forward ? _engine.next() : _engine.previous());
+      return;
+    }
+    final location = _location;
+    if (location == null || _preparingTurn) return;
+    setState(() => _preparingTurn = true);
+    try {
+      final size = MediaQuery.sizeOf(context);
+      final common = (
+        bookId: widget.book.id,
+        locator: location.locator,
+        viewportWidth: size.width.round(),
+        viewportHeight: size.height.round(),
+        themeRevision: 0,
+      );
+      final pages = await Future.wait([
+        _snapshotCache.get(
+          PageSnapshotKey(
+            bookId: common.bookId,
+            locator: common.locator,
+            viewportWidth: common.viewportWidth,
+            viewportHeight: common.viewportHeight,
+            themeRevision: common.themeRevision,
+            slot: PageSnapshotSlot.current,
+          ),
+        ),
+        _snapshotCache.get(
+          PageSnapshotKey(
+            bookId: common.bookId,
+            locator: common.locator,
+            viewportWidth: common.viewportWidth,
+            viewportHeight: common.viewportHeight,
+            themeRevision: common.themeRevision,
+            slot: forward ? PageSnapshotSlot.next : PageSnapshotSlot.previous,
+          ),
+        ),
+      ]);
+      if (mounted) {
+        setState(
+          () => _curlTurn = _CurlTurn(
+            current: pages[0],
+            target: pages[1],
+            forward: forward,
+          ),
+        );
+      }
+    } on Object {
+      // Snapshot failure is an expected capability boundary. Preserve reading
+      // with the ordinary foliate page transition.
+      await (forward ? _engine.next() : _engine.previous());
+    } finally {
+      if (mounted) setState(() => _preparingTurn = false);
+    }
+  }
+
+  void _completeTurn(_CurlTurn turn) {
+    unawaited(turn.forward ? _engine.next() : _engine.previous());
+    if (mounted) setState(() => _curlTurn = null);
+  }
+
   @override
   Widget build(BuildContext context) {
     final progress = _location?.progress ?? 0;
+    final bookSource = _bookSource;
     return Scaffold(
       appBar: _controlsVisible
           ? AppBar(
@@ -222,6 +309,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           : null,
       body: Stack(
         children: [
+          if (_supportsPageCurl && bookSource != null)
+            Positioned.fill(
+              child: FoliatePageSnapshotView(
+                controller: _snapshotController,
+                book: bookSource,
+              ),
+            ),
           Positioned.fill(
             child: GestureDetector(
               behavior: HitTestBehavior.translucent,
@@ -260,9 +354,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                       children: [
                         IconButton(
                           tooltip: '上一页',
-                          onPressed: _bookInfo == null
+                          onPressed: _bookInfo == null || _preparingTurn
                               ? null
-                              : _engine.previous,
+                              : () => _prepareTurn(false),
                           icon: const Icon(Icons.chevron_left),
                         ),
                         SizedBox(
@@ -274,7 +368,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                         ),
                         IconButton(
                           tooltip: '下一页',
-                          onPressed: _bookInfo == null ? null : _engine.next,
+                          onPressed: _bookInfo == null || _preparingTurn
+                              ? null
+                              : () => _prepareTurn(true),
                           icon: const Icon(Icons.chevron_right),
                         ),
                       ],
@@ -303,8 +399,31 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 ),
               ),
             ),
+          if (_curlTurn case final turn?)
+            Positioned.fill(
+              child: PageCurlSurface(
+                currentPage: turn.current,
+                nextPage: turn.target,
+                direction: turn.forward ? 1 : -1,
+                onTurnCompleted: () => _completeTurn(turn),
+                onTurnCancelled: () => setState(() => _curlTurn = null),
+                onUnavailable: () => _completeTurn(turn),
+              ),
+            ),
         ],
       ),
     );
   }
+}
+
+class _CurlTurn {
+  const _CurlTurn({
+    required this.current,
+    required this.target,
+    required this.forward,
+  });
+
+  final ui.Image current;
+  final ui.Image target;
+  final bool forward;
 }

@@ -23,11 +23,21 @@ class McpSidecar {
   static Future<McpSidecar> start({
     required String executablePath,
     required String databasePath,
+    String deviceId = 'mcp-sidecar',
+    bool writable = false,
   }) async {
     final token = _newToken();
     final process = await Process.start(
       executablePath,
-      ['--listen', '127.0.0.1:0', '--database', databasePath],
+      [
+        '--listen',
+        '127.0.0.1:0',
+        '--database',
+        databasePath,
+        '--device-id',
+        deviceId,
+        if (writable) '--writable',
+      ],
       environment: {...Platform.environment, 'LEEEF_MCP_TOKEN': token},
     );
     final errors = <String>[];
@@ -70,6 +80,38 @@ class McpSidecar {
 
   Future<Map<String, dynamic>> libraryStats() =>
       _client.callTool('library_stats');
+
+  Future<Map<String, dynamic>> listBooks() => _client.callTool('list_books');
+
+  Future<Map<String, dynamic>> planCreateExcerpt({
+    required String bookId,
+    required String locator,
+    required String quote,
+    String? note,
+    String color = 'yellow',
+  }) {
+    return _client.callTool(
+      'plan_create_excerpt',
+      arguments: {
+        'bookId': bookId,
+        'locator': locator,
+        'quote': quote,
+        'note': note,
+        'color': color,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> confirmWrite(String planId) =>
+      _client.callTool('confirm_write', arguments: {'planId': planId});
+
+  Future<Map<String, dynamic>> applyWrite({
+    required String planId,
+    required String confirmationToken,
+  }) => _client.callTool(
+    'apply_write',
+    arguments: {'planId': planId, 'confirmationToken': confirmationToken},
+  );
 
   Future<void> close() async {
     await _client.close();

@@ -23,12 +23,16 @@ type readyMessage struct {
 func main() {
 	listenAddress := flag.String("listen", "127.0.0.1:0", "loopback listen address")
 	databasePath := flag.String("database", "", "path to the Leeef SQLite database")
+	deviceID := flag.String("device-id", "mcp-sidecar", "device ID recorded in MCP sync operations")
+	writable := flag.Bool("writable", false, "enable confirmed MCP write tools")
 	flag.Parse()
 
 	token := os.Getenv("LEEEF_MCP_TOKEN")
 	server, err := leeefserver.New(leeefserver.Config{
 		Token:        token,
 		DatabasePath: *databasePath,
+		DeviceID:     *deviceID,
+		Writable:     *writable,
 	})
 	if err != nil {
 		log.Fatal(err)

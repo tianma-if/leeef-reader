@@ -52,13 +52,17 @@ final allExcerptsProvider = StreamProvider<List<ExcerptRecord>>((ref) async* {
   yield* repository.watchExcerpts();
 });
 
+final libraryDirectoryProvider = FutureProvider<Directory>((ref) async {
+  final documents = await getApplicationDocumentsDirectory();
+  return Directory('${documents.path}/leeef/books');
+});
+
 final bookImportServiceProvider = FutureProvider<BookImportService>((
   ref,
 ) async {
-  final documents = await getApplicationDocumentsDirectory();
   final repository = await ref.watch(libraryRepositoryProvider.future);
   return BookImportService(
     repository: repository,
-    libraryDirectory: Directory('${documents.path}/leeef/books'),
+    libraryDirectory: await ref.watch(libraryDirectoryProvider.future),
   );
 });
