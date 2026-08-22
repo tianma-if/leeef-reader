@@ -39,17 +39,22 @@ class PageCurlMesh {
     final clampedProgress = progress.clamp(0.0, 1.0);
     final cornerY = touchY < 0.42 ? 0.0 : height;
     final corner = Offset(width, cornerY);
-    final travel = math.pow(clampedProgress, 0.84).toDouble();
-    final touch = Offset(
-      width * (1 - 1.42 * travel),
-      _lerpDouble(cornerY, height * touchY, 0.84),
+    final touchX = width * (1 - clampedProgress);
+    final horizontalPull = math.max(width - touchX, 1.0);
+    final requestedVerticalPull =
+        _lerpDouble(cornerY, height * touchY, 0.84) - cornerY;
+    final verticalPull = requestedVerticalPull.clamp(
+      -horizontalPull * 0.72,
+      horizontalPull * 0.72,
     );
+    final touch = Offset(touchX, cornerY + verticalPull);
     final pull = corner - touch;
     final pullLength = math.max(pull.distance, 0.001);
     final normal = pull / pullLength;
     final tangent = Offset(-normal.dy, normal.dx);
-    final foldCenter = (corner + touch) / 2;
-    final baseRadius = (pullLength * 0.092).clamp(10.0, width * 0.105);
+    final baseRadius = (pullLength * 0.145).clamp(12.0, width * 0.15);
+    final sourceCornerDistance = (pullLength + math.pi * baseRadius) / 2;
+    final foldCenter = corner - normal * sourceCornerDistance;
     final cameraDistance = width * 2.8;
     final points = <_MeshPoint>[];
 

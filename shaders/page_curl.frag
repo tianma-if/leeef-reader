@@ -47,6 +47,8 @@ void main() {
   float source_distance = 0.0;
   if (projected_normal >= 0.0 && projected_normal <= u_radius) {
     float cylinder_t = clamp(projected_normal / u_radius, 0.0, 1.0);
+    // Fast monotonic approximation of asin(t) for the visible half-cylinder.
+    // Avoiding a transcendental per pixel matters on mid-range mobile GPUs.
     angle = PI - cylinder_t * (1.25 + 0.3207963 * cylinder_t);
     source_distance = u_radius * angle;
     has_back = true;
@@ -82,10 +84,10 @@ void main() {
     float shadow_distance = max(projected_normal - u_radius, 0.0);
     float contact_shadow = 1.0 - smoothstep(
       0.0,
-      max(u_radius * 0.9, 1.0),
+      max(u_radius * 0.32, 1.0),
       shadow_distance
     );
-    color.rgb *= 1.0 - contact_shadow * 0.13;
+    color.rgb *= 1.0 - contact_shadow * 0.18;
   }
 
   // A narrow soft crease makes the sheet read as paper rather than a wipe.

@@ -40,7 +40,10 @@ class PageCurlController extends ChangeNotifier {
     _origin = position;
     _size = size;
     _direction = direction.sign == 0 ? 1 : direction.sign;
-    _progress = 0;
+    // Reveal a small lifted corner as soon as the snapshot is ready, even if
+    // the pointer has not moved yet. Subsequent updates remain fully tied to
+    // the finger's horizontal travel.
+    _progress = 0.018;
     _touchY = _normalizeY(position.dy);
     _pendingRelease = null;
     notifyListeners();

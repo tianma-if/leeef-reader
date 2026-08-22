@@ -9,10 +9,20 @@ Future<ui.Image> renderPdfPageSnapshot({
   required Size size,
   required double pixelRatio,
   required Color backgroundColor,
+  double margin = 12,
 }) async {
   final outputWidth = (size.width * pixelRatio).round().clamp(1, 4096);
   final outputHeight = (size.height * pixelRatio).round().clamp(1, 4096);
-  final scale = math.min(outputWidth / page.width, outputHeight / page.height);
+  final marginPixels = (margin * pixelRatio).clamp(
+    0.0,
+    math.min(outputWidth, outputHeight) / 2 - 1,
+  );
+  final availableWidth = math.max(1.0, outputWidth - marginPixels * 2);
+  final availableHeight = math.max(1.0, outputHeight - marginPixels * 2);
+  final scale = math.min(
+    availableWidth / page.width,
+    availableHeight / page.height,
+  );
   final pageWidth = (page.width * scale).round().clamp(1, outputWidth);
   final pageHeight = (page.height * scale).round().clamp(1, outputHeight);
   final rendered = await page.render(

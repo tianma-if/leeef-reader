@@ -306,17 +306,32 @@ class _PageCurlPainter extends CustomPainter {
     if (shader != null) {
       final cornerY = touchY < 0.42 ? 0.0 : size.height;
       final corner = Offset(size.width, cornerY);
-      final travel = math.pow(progress.clamp(0.0, 1.0), 0.84).toDouble();
-      final touch = Offset(
-        size.width * (1 - 1.42 * travel),
-        cornerY + (size.height * touchY - cornerY) * 0.84,
+      // Progress is already normalized from the pointer's horizontal travel;
+      // keep the free corner on that trajectory instead of accelerating it
+      // ahead of the finger with a second easing curve.
+      final travel = progress.clamp(0.0, 1.0);
+      final touchX = size.width * (1 - travel);
+      final horizontalPull = math.max(size.width - touchX, 1.0);
+      final requestedVerticalPull = (size.height * touchY - cornerY) * 0.84;
+      // A page corner cannot follow a steep diagonal finger path literally:
+      // the free edge tightens and slides along the finger instead. Limiting
+      // the vertical component avoids the oversized flat triangular flap that
+      // a cylindrical approximation otherwise produces.
+      final verticalPull = requestedVerticalPull.clamp(
+        -horizontalPull * 0.72,
+        horizontalPull * 0.72,
       );
+      final touch = Offset(touchX, cornerY + verticalPull);
       final pull = corner - touch;
       final pullLength = math.max(pull.distance, 0.001);
       final normal = pull / pullLength;
       final tangent = Offset(-normal.dy, normal.dx);
-      final foldCenter = (corner + touch) / 2;
-      final radius = (pullLength * 0.092).clamp(10.0, size.width * 0.105);
+      final radius = (pullLength * 0.145).clamp(12.0, size.width * 0.15);
+      // Preserve the sheet length across the half-cylinder. With d being the
+      // source corner's distance from the crease, the reflected tail lands on
+      // the finger when 2d - pi*r equals the requested pull distance.
+      final sourceCornerDistance = (pullLength + math.pi * radius) / 2;
+      final foldCenter = corner - normal * sourceCornerDistance;
       shader
         ..setFloat(0, size.width)
         ..setFloat(1, size.height)

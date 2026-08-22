@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -489,6 +490,19 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
                 controller: _controller,
                 initialPageNumber: _initialPage,
                 params: PdfViewerParams(
+                  margin: 12,
+                  backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+                  layoutPages: _layoutPdfPagesHorizontally,
+                  panAxis: PanAxis.horizontal,
+                  pageAnchor: PdfPageAnchor.all,
+                  pageAnchorEnd: PdfPageAnchor.all,
+                  pageDropShadow: null,
+                  sizeDelegateProvider:
+                      const PdfViewerSizeDelegateProviderLegacy(
+                        minScale: 0.1,
+                        useAlternativeFitScaleAsMinScale: false,
+                        calculateInitialZoom: _fitInitialPdfPage,
+                      ),
                   onViewerReady: _onViewerReady,
                   onPageChanged: _onPageChanged,
                   textSelectionParams: PdfTextSelectionParams(
@@ -599,6 +613,31 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
       child: const SizedBox.expand(),
     ),
   );
+}
+
+double _fitInitialPdfPage(
+  PdfDocument document,
+  PdfViewerController controller,
+  double fitZoom,
+  double coverZoom,
+) => fitZoom;
+
+PdfPageLayout _layoutPdfPagesHorizontally(
+  List<PdfPage> pages,
+  PdfViewerParams params,
+) {
+  final height =
+      pages.fold(0.0, (maximum, page) => math.max(maximum, page.height)) +
+      params.margin * 2;
+  final pageLayouts = <Rect>[];
+  var x = params.margin;
+  for (final page in pages) {
+    pageLayouts.add(
+      Rect.fromLTWH(x, (height - page.height) / 2, page.width, page.height),
+    );
+    x += page.width + params.margin * 2;
+  }
+  return PdfPageLayout(pageLayouts: pageLayouts, documentSize: Size(x, height));
 }
 
 int parsePdfPageLocator(String? locator) {

@@ -4,6 +4,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
 
 void main() {
+  test('pressing the edge immediately lifts the page corner', () {
+    final controller = PageCurlController()
+      ..begin(
+        position: const Offset(900, 800),
+        size: const Size(1000, 1600),
+        direction: 1,
+      );
+    addTearDown(controller.dispose);
+
+    expect(controller.progress, greaterThan(0));
+    expect(controller.progress, lessThan(0.03));
+  });
+
   test('forward and backward drags map to the same curl progress', () {
     final forward = PageCurlController()
       ..begin(

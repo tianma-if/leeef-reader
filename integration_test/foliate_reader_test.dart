@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:leeef_reader/src/page_curl/foliate_page_snapshot_view.dart';
 import 'package:leeef_reader/src/page_curl/page_snapshot_cache.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
 import 'package:leeef_reader/src/reader/foliate_reader_engine.dart';
 import 'package:leeef_reader/src/reader/foliate_reader_view.dart';
@@ -190,6 +191,53 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(completed, isTrue);
+  });
+
+  testWidgets('a short slow pull springs back without changing page', (
+    tester,
+  ) async {
+    final currentPage = await _solidImage(const ui.Color(0xFFF7F1E3));
+    final nextPage = await _solidImage(const ui.Color(0xFFCEE5D0));
+    final controller = PageCurlController()
+      ..begin(
+        position: const Offset(390, 540),
+        size: const Size(400, 600),
+        direction: 1,
+      )
+      ..update(const Offset(350, 530));
+    addTearDown(() {
+      controller.dispose();
+      currentPage.dispose();
+      nextPage.dispose();
+    });
+    var completed = false;
+    var cancelled = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 400,
+            height: 600,
+            child: PageCurlSurface(
+              currentPage: currentPage,
+              nextPage: nextPage,
+              controller: controller,
+              onTurnCompleted: () => completed = true,
+              onTurnCancelled: () => cancelled = true,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    controller.release(horizontalVelocity: 0);
+    await tester.pumpAndSettle();
+
+    expect(cancelled, isTrue);
+    expect(completed, isFalse);
+    expect(controller.progress, 0);
   });
 
   testWidgets('foliate replica pre-renders adjacent page textures', (
