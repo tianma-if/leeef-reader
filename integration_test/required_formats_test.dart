@@ -33,14 +33,7 @@ void main() {
       expect(find.textContaining('1 / '), findsOneWidget);
 
       await tester.tap(find.byTooltip('下一页'));
-      await _pumpUntilFound(tester, find.byKey(const Key('page-curl-gesture')));
-      await tester.drag(
-        find.byKey(const Key('page-curl-gesture')),
-        const Offset(-500, 0),
-      );
-      await tester.pumpAndSettle();
-      await tester.pump(const Duration(milliseconds: 700));
-      expect(find.textContaining('2 / '), findsOneWidget);
+      await _pumpUntilFound(tester, find.textContaining('2 / '));
 
       await tester.tap(find.byTooltip('添加书签'));
       await tester.pumpAndSettle();

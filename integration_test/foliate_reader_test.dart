@@ -108,6 +108,36 @@ void main() {
     expect(completed, isTrue);
   });
 
+  testWidgets('page curl can automatically complete after a single tap', (
+    tester,
+  ) async {
+    final currentPage = await _solidImage(const ui.Color(0xFFF7F1E3));
+    final nextPage = await _solidImage(const ui.Color(0xFFCEE5D0));
+    addTearDown(() {
+      currentPage.dispose();
+      nextPage.dispose();
+    });
+    var completed = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: PageCurlSurface(
+              currentPage: currentPage,
+              nextPage: nextPage,
+              autoComplete: true,
+              onTurnCompleted: () => completed = true,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(completed, isTrue);
+  });
+
   testWidgets('foliate replica pre-renders adjacent page textures', (
     tester,
   ) async {

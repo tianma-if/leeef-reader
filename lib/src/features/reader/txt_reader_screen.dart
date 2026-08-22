@@ -32,6 +32,8 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   bool _preparingTurn = false;
   _TxtCurlTurn? _curlTurn;
   final GlobalKey _bodyKey = GlobalKey();
+  Offset? _pointerDownPosition;
+  DateTime? _pointerDownAt;
 
   bool get _supportsPageCurl =>
       widget.pageCurlEnabled ?? (Platform.isIOS || Platform.isAndroid);
@@ -84,7 +86,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     _scheduleProgressSave();
   }
 
-  Future<void> _prepareTurn(int targetIndex) async {
+  Future<void> _prepareTurn(int targetIndex, {bool autoComplete = true}) async {
     final document = _document;
     if (document == null || _preparingTurn || _curlTurn != null) return;
     final target = targetIndex.clamp(0, document.pages.length - 1);
@@ -136,6 +138,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
           current: currentImage!,
           target: targetImage!,
           targetIndex: target,
+          autoComplete: autoComplete,
         );
       });
     } on Object {
@@ -145,6 +148,36 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     } finally {
       if (mounted) setState(() => _preparingTurn = false);
     }
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    _pointerDownPosition = event.localPosition;
+    _pointerDownAt = DateTime.now();
+  }
+
+  void _handlePointerUp(PointerUpEvent event) {
+    final start = _pointerDownPosition;
+    final startedAt = _pointerDownAt;
+    _pointerDownPosition = null;
+    _pointerDownAt = null;
+    if (start == null || startedAt == null) return;
+    if (DateTime.now().difference(startedAt) >
+            const Duration(milliseconds: 350) ||
+        (event.localPosition - start).distance > 12) {
+      return;
+    }
+    final width = _bodyKey.currentContext?.size?.width ?? 0;
+    if (width <= 0) return;
+    if (event.localPosition.dx <= width * 0.3) {
+      unawaited(_prepareTurn(_pageIndex - 1));
+    } else if (event.localPosition.dx >= width * 0.7) {
+      unawaited(_prepareTurn(_pageIndex + 1));
+    }
+  }
+
+  void _handlePointerCancel(PointerCancelEvent event) {
+    _pointerDownPosition = null;
+    _pointerDownAt = null;
   }
 
   void _finishTurn({required bool completed}) {
@@ -300,19 +333,25 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
             const Center(child: CircularProgressIndicator())
           else
             Positioned.fill(
-              child: SingleChildScrollView(
-                key: ValueKey('txt-page-$_pageIndex'),
-                padding: const EdgeInsets.fromLTRB(28, 24, 28, 120),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 760),
-                    child: SelectableText(
-                      page.text,
-                      key: const Key('txt-reader-text'),
-                      onSelectionChanged: _onSelectionChanged,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodyLarge?.copyWith(height: 1.8),
+              child: Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: _handlePointerDown,
+                onPointerUp: _handlePointerUp,
+                onPointerCancel: _handlePointerCancel,
+                child: SingleChildScrollView(
+                  key: ValueKey('txt-page-$_pageIndex'),
+                  padding: const EdgeInsets.fromLTRB(28, 24, 28, 120),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 760),
+                      child: SelectableText(
+                        page.text,
+                        key: const Key('txt-reader-text'),
+                        onSelectionChanged: _onSelectionChanged,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodyLarge?.copyWith(height: 1.8),
+                      ),
                     ),
                   ),
                 ),
@@ -385,6 +424,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                 currentPage: turn.current,
                 nextPage: turn.target,
                 direction: turn.targetIndex > _pageIndex ? 1 : -1,
+                autoComplete: turn.autoComplete,
                 onTurnCompleted: () => _finishTurn(completed: true),
                 onTurnCancelled: () => _finishTurn(completed: false),
                 onUnavailable: () => _finishTurn(completed: true),
@@ -401,11 +441,13 @@ class _TxtCurlTurn {
     required this.current,
     required this.target,
     required this.targetIndex,
+    required this.autoComplete,
   });
 
   final ui.Image current;
   final ui.Image target;
   final int targetIndex;
+  final bool autoComplete;
 
   void dispose() {
     current.dispose();

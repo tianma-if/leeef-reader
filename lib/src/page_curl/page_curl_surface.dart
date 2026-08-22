@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ class PageCurlSurface extends StatefulWidget {
     this.onTurnCancelled,
     this.onUnavailable,
     this.direction = 1,
+    this.autoComplete = false,
   });
 
   final ui.Image currentPage;
@@ -20,6 +22,7 @@ class PageCurlSurface extends StatefulWidget {
   final VoidCallback? onTurnCancelled;
   final VoidCallback? onUnavailable;
   final double direction;
+  final bool autoComplete;
 
   @override
   State<PageCurlSurface> createState() => _PageCurlSurfaceState();
@@ -47,6 +50,11 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
       );
       if (!mounted) return;
       setState(() => _shader = program.fragmentShader());
+      if (widget.autoComplete) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_settle(true));
+        });
+      }
     } on Object {
       if (mounted) widget.onUnavailable?.call();
     }
@@ -65,31 +73,34 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
     if (shader == null) return const ColoredBox(color: Colors.transparent);
     return LayoutBuilder(
       builder: (context, constraints) {
-        return GestureDetector(
-          key: const Key('page-curl-gesture'),
-          behavior: HitTestBehavior.opaque,
-          onHorizontalDragStart: (_) => _animation.stop(),
-          onHorizontalDragUpdate: (details) {
-            setState(
-              () => _gesture.update(
-                horizontalDelta: details.delta.dx * widget.direction,
-                width: constraints.maxWidth,
+        return IgnorePointer(
+          ignoring: widget.autoComplete,
+          child: GestureDetector(
+            key: const Key('page-curl-gesture'),
+            behavior: HitTestBehavior.opaque,
+            onHorizontalDragStart: (_) => _animation.stop(),
+            onHorizontalDragUpdate: (details) {
+              setState(
+                () => _gesture.update(
+                  horizontalDelta: details.delta.dx * widget.direction,
+                  width: constraints.maxWidth,
+                ),
+              );
+            },
+            onHorizontalDragEnd: (details) {
+              final velocity = details.primaryVelocity! * widget.direction;
+              _settle(_gesture.shouldComplete(velocity));
+            },
+            child: CustomPaint(
+              painter: _PageCurlPainter(
+                shader: shader,
+                currentPage: widget.currentPage,
+                nextPage: widget.nextPage,
+                progress: _gesture.progress,
+                direction: widget.direction,
               ),
-            );
-          },
-          onHorizontalDragEnd: (details) {
-            final velocity = details.primaryVelocity! * widget.direction;
-            _settle(_gesture.shouldComplete(velocity));
-          },
-          child: CustomPaint(
-            painter: _PageCurlPainter(
-              shader: shader,
-              currentPage: widget.currentPage,
-              nextPage: widget.nextPage,
-              progress: _gesture.progress,
-              direction: widget.direction,
+              size: Size.infinite,
             ),
-            size: Size.infinite,
           ),
         );
       },
