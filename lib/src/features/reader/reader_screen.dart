@@ -10,6 +10,7 @@ import 'package:leeef_reader/src/domain/reading_location.dart';
 import 'package:leeef_reader/src/features/reader/pdf_reader_screen.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_screen.dart';
 import 'package:leeef_reader/src/page_curl/foliate_page_snapshot_view.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
 import 'package:leeef_reader/src/page_curl/page_snapshot_cache.dart';
 import 'package:leeef_reader/src/reader/foliate_reader_engine.dart';
@@ -60,6 +61,13 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
   bool _controlsVisible = true;
   bool _preparingTurn = false;
   _CurlTurn? _curlTurn;
+  final GlobalKey _bodyKey = GlobalKey();
+  Offset? _pointerDownPosition;
+  DateTime? _pointerDownAt;
+  PageCurlController? _pointerCurlController;
+  Offset? _lastPointerPosition;
+  Duration? _lastPointerTime;
+  double _horizontalVelocity = 0;
 
   bool get _supportsPageCurl => Platform.isIOS || Platform.isAndroid;
 
@@ -85,6 +93,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     unawaited(_persistProgress());
     unawaited(_eventSubscription?.cancel());
     unawaited(_engine.close());
+    _curlTurn?.dispose();
     _snapshotCache.clear();
     super.dispose();
   }
@@ -146,6 +155,9 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
           _progressTimer = null;
           unawaited(_persistProgress());
         });
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => unawaited(_prefetchAdjacentTextures()),
+        );
       case ReaderSelectionChanged():
         setState(() {
           _selection = event;
@@ -260,14 +272,20 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     if (locator != null) await _engine.goTo(locator);
   }
 
-  Future<void> _prepareTurn(bool forward) async {
+  Future<void> _prepareTurn(
+    bool forward, {
+    bool autoComplete = true,
+    PageCurlController? controller,
+  }) async {
     if (!_supportsPageCurl) {
       await (forward ? _engine.next() : _engine.previous());
       return;
     }
     final location = _location;
-    if (location == null || _preparingTurn) return;
+    if (location == null || _preparingTurn || _curlTurn != null) return;
     setState(() => _preparingTurn = true);
+    ui.Image? currentImage;
+    ui.Image? targetImage;
     try {
       final size = MediaQuery.sizeOf(context);
       final common = (
@@ -277,50 +295,195 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
         viewportHeight: size.height.round(),
         themeRevision: 0,
       );
-      final pages = await Future.wait([
-        _snapshotCache.get(
-          PageSnapshotKey(
-            bookId: common.bookId,
-            locator: common.locator,
-            viewportWidth: common.viewportWidth,
-            viewportHeight: common.viewportHeight,
-            themeRevision: common.themeRevision,
-            slot: PageSnapshotSlot.current,
-          ),
+      currentImage = await _snapshotCache.get(
+        PageSnapshotKey(
+          bookId: common.bookId,
+          locator: common.locator,
+          viewportWidth: common.viewportWidth,
+          viewportHeight: common.viewportHeight,
+          themeRevision: common.themeRevision,
+          slot: PageSnapshotSlot.current,
         ),
-        _snapshotCache.get(
-          PageSnapshotKey(
-            bookId: common.bookId,
-            locator: common.locator,
-            viewportWidth: common.viewportWidth,
-            viewportHeight: common.viewportHeight,
-            themeRevision: common.themeRevision,
-            slot: forward ? PageSnapshotSlot.next : PageSnapshotSlot.previous,
-          ),
+      );
+      targetImage = await _snapshotCache.get(
+        PageSnapshotKey(
+          bookId: common.bookId,
+          locator: common.locator,
+          viewportWidth: common.viewportWidth,
+          viewportHeight: common.viewportHeight,
+          themeRevision: common.themeRevision,
+          slot: forward ? PageSnapshotSlot.next : PageSnapshotSlot.previous,
         ),
-      ]);
-      if (mounted) {
-        setState(
-          () => _curlTurn = _CurlTurn(
-            current: pages[0],
-            target: pages[1],
-            forward: forward,
-          ),
-        );
+      );
+      if (!mounted) {
+        currentImage.dispose();
+        targetImage.dispose();
+        controller?.dispose();
+        return;
       }
+      setState(
+        () => _curlTurn = _CurlTurn(
+          current: currentImage!,
+          target: targetImage!,
+          forward: forward,
+          autoComplete: autoComplete,
+          controller: controller,
+        ),
+      );
     } on Object {
+      currentImage?.dispose();
+      targetImage?.dispose();
       // Snapshot failure is an expected capability boundary. Preserve reading
       // with the ordinary foliate page transition.
-      if (mounted) await (forward ? _engine.next() : _engine.previous());
+      if (identical(_pointerCurlController, controller)) {
+        _pointerCurlController = null;
+      }
+      controller?.dispose();
+      if (mounted && autoComplete) {
+        await (forward ? _engine.next() : _engine.previous());
+      }
     } finally {
       if (mounted) setState(() => _preparingTurn = false);
     }
   }
 
-  void _completeTurn(_CurlTurn turn) {
+  void _finishTurn(_CurlTurn turn, {required bool completed}) {
     if (!mounted) return;
-    unawaited(turn.forward ? _engine.next() : _engine.previous());
+    if (completed) {
+      unawaited(turn.forward ? _engine.next() : _engine.previous());
+    }
     setState(() => _curlTurn = null);
+    WidgetsBinding.instance.addPostFrameCallback((_) => turn.dispose());
+  }
+
+  Future<void> _prefetchAdjacentTextures() async {
+    final location = _location;
+    final renderObject = _bodyKey.currentContext?.findRenderObject();
+    if (!mounted ||
+        !_supportsPageCurl ||
+        location == null ||
+        _bookInfo == null ||
+        renderObject is! RenderBox ||
+        !renderObject.hasSize) {
+      return;
+    }
+    final size = renderObject.size;
+    final common = (
+      bookId: widget.book.id,
+      locator: location.locator,
+      viewportWidth: size.width.round(),
+      viewportHeight: size.height.round(),
+      themeRevision: 0,
+    );
+    try {
+      await _snapshotCache.prefetch([
+        for (final slot in PageSnapshotSlot.values)
+          PageSnapshotKey(
+            bookId: common.bookId,
+            locator: common.locator,
+            viewportWidth: common.viewportWidth,
+            viewportHeight: common.viewportHeight,
+            themeRevision: common.themeRevision,
+            slot: slot,
+          ),
+      ]);
+    } on Object {
+      // Prefetch is opportunistic; an edge press can still render on demand.
+    }
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    final position = _bodyPosition(event.position);
+    if (position == null) return;
+    _pointerDownPosition = position;
+    _pointerDownAt = DateTime.now();
+    _lastPointerPosition = position;
+    _lastPointerTime = event.timeStamp;
+    _horizontalVelocity = 0;
+    final renderObject = _bodyKey.currentContext?.findRenderObject();
+    if (_bookInfo == null ||
+        _location == null ||
+        renderObject is! RenderBox ||
+        !renderObject.hasSize ||
+        _preparingTurn ||
+        _curlTurn != null) {
+      return;
+    }
+    final size = renderObject.size;
+    final direction = position.dx >= size.width * 0.7
+        ? 1.0
+        : position.dx <= size.width * 0.3
+        ? -1.0
+        : 0.0;
+    if (direction == 0) return;
+    final controller = PageCurlController()
+      ..begin(position: position, size: size, direction: direction);
+    _pointerCurlController = controller;
+    unawaited(
+      _prepareTurn(direction > 0, autoComplete: false, controller: controller),
+    );
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    final controller = _pointerCurlController;
+    if (controller == null) return;
+    final position = _bodyPosition(event.position);
+    if (position == null) return;
+    final previousPosition = _lastPointerPosition;
+    final previousTime = _lastPointerTime;
+    if (previousPosition != null && previousTime != null) {
+      final elapsedMicros = (event.timeStamp - previousTime).inMicroseconds
+          .clamp(1, 100000);
+      final instantaneous =
+          (position.dx - previousPosition.dx) *
+          Duration.microsecondsPerSecond /
+          elapsedMicros;
+      _horizontalVelocity = _horizontalVelocity * 0.58 + instantaneous * 0.42;
+    }
+    _lastPointerPosition = position;
+    _lastPointerTime = event.timeStamp;
+    controller.update(position);
+  }
+
+  void _handlePointerUp(PointerUpEvent event) {
+    final position = _bodyPosition(event.position);
+    final start = _pointerDownPosition;
+    final startedAt = _pointerDownAt;
+    _pointerDownPosition = null;
+    _pointerDownAt = null;
+    final isTap =
+        start != null &&
+        startedAt != null &&
+        position != null &&
+        DateTime.now().difference(startedAt) <=
+            const Duration(milliseconds: 350) &&
+        (position - start).distance <= 12;
+    if (_pointerCurlController case final controller?) {
+      if (position != null) controller.update(position);
+      controller.release(
+        horizontalVelocity: _horizontalVelocity,
+        forceComplete: isTap,
+      );
+    }
+    _pointerCurlController = null;
+    _lastPointerPosition = null;
+    _lastPointerTime = null;
+  }
+
+  void _handlePointerCancel(PointerCancelEvent event) {
+    _pointerDownPosition = null;
+    _pointerDownAt = null;
+    _pointerCurlController?.release(horizontalVelocity: 0);
+    _pointerCurlController = null;
+    _lastPointerPosition = null;
+    _lastPointerTime = null;
+  }
+
+  Offset? _bodyPosition(Offset globalPosition) {
+    final renderObject = _bodyKey.currentContext?.findRenderObject();
+    return renderObject is RenderBox && renderObject.hasSize
+        ? renderObject.globalToLocal(globalPosition)
+        : null;
   }
 
   @override
@@ -346,6 +509,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
             )
           : null,
       body: Stack(
+        key: _bodyKey,
         children: [
           if (_supportsPageCurl && bookSource != null)
             Positioned.fill(
@@ -364,6 +528,10 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
               ),
             ),
           ),
+          if (_supportsPageCurl && _bookInfo != null) ...[
+            _buildCurlGestureZone(Alignment.centerLeft),
+            _buildCurlGestureZone(Alignment.centerRight),
+          ],
           if (_error case final error?)
             Positioned.fill(
               child: ColoredBox(
@@ -440,18 +608,42 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
           if (_curlTurn case final turn?)
             Positioned.fill(
               child: PageCurlSurface(
+                key: const Key('epub-page-curl'),
                 currentPage: turn.current,
                 nextPage: turn.target,
                 direction: turn.forward ? 1 : -1,
-                onTurnCompleted: () => _completeTurn(turn),
-                onTurnCancelled: () => setState(() => _curlTurn = null),
-                onUnavailable: () => _completeTurn(turn),
+                autoComplete: turn.autoComplete,
+                controller: turn.controller,
+                onTurnCompleted: () => _finishTurn(turn, completed: true),
+                onTurnCancelled: () => _finishTurn(turn, completed: false),
+                onUnavailable: () => _finishTurn(turn, completed: true),
               ),
             ),
         ],
       ),
     );
   }
+
+  Widget _buildCurlGestureZone(Alignment alignment) => Positioned(
+    top: 0,
+    bottom: 0,
+    left: alignment == Alignment.centerLeft ? 0 : null,
+    right: alignment == Alignment.centerRight ? 0 : null,
+    width: MediaQuery.sizeOf(context).width * 0.3,
+    child: Listener(
+      key: Key(
+        alignment == Alignment.centerLeft
+            ? 'epub-curl-left-zone'
+            : 'epub-curl-right-zone',
+      ),
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: _handlePointerDown,
+      onPointerMove: _handlePointerMove,
+      onPointerUp: _handlePointerUp,
+      onPointerCancel: _handlePointerCancel,
+      child: const SizedBox.expand(),
+    ),
+  );
 }
 
 class _CurlTurn {
@@ -459,9 +651,19 @@ class _CurlTurn {
     required this.current,
     required this.target,
     required this.forward,
+    required this.autoComplete,
+    this.controller,
   });
 
   final ui.Image current;
   final ui.Image target;
   final bool forward;
+  final bool autoComplete;
+  final PageCurlController? controller;
+
+  void dispose() {
+    current.dispose();
+    target.dispose();
+    controller?.dispose();
+  }
 }

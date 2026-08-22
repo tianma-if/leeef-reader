@@ -206,7 +206,8 @@ class ReaderContentServer {
       ..set('Referrer-Policy', 'no-referrer')
       ..set(
         'Content-Security-Policy',
-        "default-src 'none'; script-src 'self'; style-src 'self'; "
+        "default-src 'none'; script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' blob: data:; font-src 'self' blob: data:; "
             "connect-src 'self' blob:; frame-src blob:; worker-src 'self' blob:",
       );

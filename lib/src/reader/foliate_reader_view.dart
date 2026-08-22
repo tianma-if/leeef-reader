@@ -7,10 +7,14 @@ class FoliateReaderView extends StatefulWidget {
     required this.engine,
     super.key,
     this.onWebViewCreated,
+    this.useHybridComposition = true,
+    this.hardwareAcceleration = true,
   });
 
   final FoliateReaderEngine engine;
   final void Function(InAppWebViewController controller)? onWebViewCreated;
+  final bool useHybridComposition;
+  final bool hardwareAcceleration;
 
   @override
   State<FoliateReaderView> createState() => _FoliateReaderViewState();
@@ -42,6 +46,8 @@ class _FoliateReaderViewState extends State<FoliateReaderView> {
             allowFileAccess: false,
             allowFileAccessFromFileURLs: false,
             allowUniversalAccessFromFileURLs: false,
+            useHybridComposition: widget.useHybridComposition,
+            hardwareAcceleration: widget.hardwareAcceleration,
           ),
           onWebViewCreated: (controller) {
             widget.engine.attach(controller);

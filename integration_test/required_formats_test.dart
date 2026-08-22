@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:leeef_reader/src/app_providers.dart';
@@ -13,10 +14,84 @@ import 'package:leeef_reader/src/features/reader/reader_screen.dart';
 import 'package:leeef_reader/src/features/reader/pdf_reader_screen.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_screen.dart';
 import 'package:leeef_reader/src/import/book_import_service.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('EPUB uses a continuous curl and springs back on a short pull', (
+    tester,
+  ) async {
+    final fixture = await _Fixture.create();
+    addTearDown(fixture.dispose);
+    final fixtureData = await rootBundle.load('assets/fixtures/m0.epub');
+    final source = File('${fixture.root.path}/Required EPUB.epub');
+    await source.writeAsBytes(
+      fixtureData.buffer.asUint8List(
+        fixtureData.offsetInBytes,
+        fixtureData.lengthInBytes,
+      ),
+    );
+    final book = await fixture.importer.importFile(source);
+
+    await tester.pumpWidget(fixture.reader(book));
+    await _pumpUntilFound(
+      tester,
+      find.byKey(const Key('epub-curl-right-zone')),
+      timeout: const Duration(seconds: 20),
+    );
+    await tester.pump(const Duration(milliseconds: 800));
+    final initialProgress = await fixture.repository.getReadingProgress(
+      book.id,
+    );
+    final readerWidth = tester.getSize(find.byType(EpubReaderScreen)).width;
+    final readerBounds = tester.getRect(
+      find.byKey(const Key('epub-curl-right-zone')),
+    );
+
+    final cancelledGesture = await tester.startGesture(readerBounds.center);
+    await cancelledGesture.moveBy(Offset(-readerWidth * 0.08, -24));
+    await _pumpUntilFound(
+      tester,
+      find.byKey(const Key('epub-page-curl')),
+      timeout: const Duration(seconds: 20),
+    );
+    final interactiveCurl = tester.widget<PageCurlSurface>(
+      find.byKey(const Key('epub-page-curl')),
+    );
+    expect(interactiveCurl.autoComplete, isFalse);
+    expect(interactiveCurl.controller, isNotNull);
+    await cancelledGesture.up();
+    await _pumpUntilGone(tester, find.byKey(const Key('epub-page-curl')));
+    expect(
+      (await fixture.repository.getReadingProgress(book.id))?.locator,
+      initialProgress?.locator,
+    );
+
+    final completedGesture = await tester.startGesture(readerBounds.center);
+    await completedGesture.moveBy(Offset(-readerWidth * 0.24, -60));
+    await _pumpUntilFound(
+      tester,
+      find.byKey(const Key('epub-page-curl')),
+      timeout: const Duration(seconds: 20),
+    );
+    final completingCurl = tester.widget<PageCurlSurface>(
+      find.byKey(const Key('epub-page-curl')),
+    );
+    await completedGesture.moveBy(Offset(-readerWidth * 0.48, -50));
+    expect(completingCurl.controller!.progress, greaterThan(0.48));
+    await completedGesture.up();
+    await _pumpUntilGone(tester, find.byKey(const Key('epub-page-curl')));
+    await tester.pump(const Duration(milliseconds: 800));
+
+    final completedProgress = await fixture.repository.getReadingProgress(
+      book.id,
+    );
+    expect(completedProgress?.locator, startsWith('epubcfi('));
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
 
   testWidgets(
     'TXT reads, navigates, restores progress, bookmarks, and excerpts',
@@ -163,6 +238,18 @@ Future<void> _pumpUntilFound(
     await tester.pump(const Duration(milliseconds: 100));
   }
   expect(finder, findsOneWidget);
+}
+
+Future<void> _pumpUntilGone(
+  WidgetTester tester,
+  Finder finder, {
+  Duration timeout = const Duration(seconds: 10),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (finder.evaluate().isNotEmpty && DateTime.now().isBefore(deadline)) {
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+  expect(finder, findsNothing);
 }
 
 class _Fixture {

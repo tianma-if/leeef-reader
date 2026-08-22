@@ -41,6 +41,18 @@ void main() {
     expect(unauthorized.statusCode, HttpStatus.notFound);
   });
 
+  test(
+    'allows foliate runtime styles without allowing inline scripts',
+    () async {
+      final response = await _get(server.readerUri);
+      final policy = response.headers.value('content-security-policy');
+
+      expect(policy, contains("style-src 'self' 'unsafe-inline'"));
+      expect(policy, contains("script-src 'self'"));
+      expect(policy, isNot(contains("script-src 'self' 'unsafe-inline'")));
+    },
+  );
+
   test('supports byte ranges required by the EPUB zip loader', () async {
     final response = await _get(
       server.bookUri('book-1'),

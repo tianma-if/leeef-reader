@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -42,7 +44,7 @@ class FoliatePageSnapshotView extends StatefulWidget {
     required this.controller,
     required this.book,
     super.key,
-    this.layoutSettleDelay = const Duration(milliseconds: 80),
+    this.layoutSettleDelay = const Duration(milliseconds: 320),
   });
 
   final FoliatePageSnapshotController controller;
@@ -91,6 +93,14 @@ class _FoliatePageSnapshotViewState extends State<FoliatePageSnapshotView> {
     return IgnorePointer(
       child: FoliateReaderView(
         engine: _engine,
+        // Android's virtual-display mode obeys Flutter's texture z-order, so
+        // this pre-renderer can stay behind the visible hybrid WebView while
+        // continuing to paint valid snapshots.
+        useHybridComposition: false,
+        // WebView.draw(Canvas), used by Android screenshot capture, omits
+        // accelerated iframe layers. Software rendering keeps EPUB iframe
+        // text and images in the captured page texture.
+        hardwareAcceleration: false,
         onWebViewCreated: (controller) {
           if (!_webView.isCompleted) _webView.complete(controller);
         },
@@ -110,9 +120,15 @@ class _FoliatePageSnapshotViewState extends State<FoliatePageSnapshotView> {
       if (_bookIsOpen) {
         await _engine.goTo(key.locator);
       } else {
-        await _webView.future;
+        final webView = await _webView.future;
+        if (Platform.isIOS) {
+          await _setIosSnapshotViewport(webView, key);
+        }
         await _engine.open(widget.book, initialLocator: key.locator);
         _bookIsOpen = true;
+      }
+      if (Platform.isIOS) {
+        await _setIosSnapshotViewport(await _webView.future, key);
       }
       switch (key.slot) {
         case PageSnapshotSlot.previous:
@@ -130,6 +146,14 @@ class _FoliatePageSnapshotViewState extends State<FoliatePageSnapshotView> {
       await Future<void>.delayed(widget.layoutSettleDelay);
 
       final webView = await _webView.future;
+      if (Platform.isAndroid) {
+        await webView.callAsyncJavaScript(
+          functionBody: '''
+            return await new Promise(resolve => requestAnimationFrame(() =>
+              requestAnimationFrame(resolve)));
+          ''',
+        );
+      }
       final metrics = await webView.evaluateJavascript(
         source: '''({
           width: window.innerWidth,
@@ -148,6 +172,23 @@ class _FoliatePageSnapshotViewState extends State<FoliatePageSnapshotView> {
       final height = reportedHeight > 0
           ? reportedHeight
           : key.viewportHeight.toDouble();
+      if (Platform.isIOS) {
+        final result = await webView.callAsyncJavaScript(
+          functionBody:
+              'return await globalThis.leeefReader.captureSnapshotModel(viewport)',
+          arguments: {
+            'viewport': {
+              'width': key.viewportWidth,
+              'height': key.viewportHeight,
+            },
+          },
+        );
+        return _renderSnapshotModel(
+          result?.value,
+          width: key.viewportWidth,
+          height: key.viewportHeight,
+        );
+      }
       final bytes = await webView.takeScreenshot(
         screenshotConfiguration: ScreenshotConfiguration(
           afterScreenUpdates: true,
@@ -173,6 +214,145 @@ class _FoliatePageSnapshotViewState extends State<FoliatePageSnapshotView> {
       return await operation;
     } finally {
       if (identical(_navigation, completion)) _navigation = null;
+    }
+  }
+
+  Future<void> _setIosSnapshotViewport(
+    InAppWebViewController webView,
+    PageSnapshotKey key,
+  ) async {
+    await webView.evaluateJavascript(
+      source:
+          '''(() => {
+            const width = '${key.viewportWidth}px';
+            const height = '${key.viewportHeight}px';
+            for (const element of [document.documentElement, document.body,
+              document.getElementById('reader')]) {
+              if (!element) continue;
+              element.style.width = width;
+              element.style.height = height;
+            }
+            window.dispatchEvent(new Event('resize'));
+          })()''',
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+
+  Future<ui.Image> _renderSnapshotModel(
+    dynamic value, {
+    required int width,
+    required int height,
+  }) async {
+    final model = value is Map
+        ? Map<String, dynamic>.from(value)
+        : const <String, dynamic>{};
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+    canvas.drawColor(
+      ui.Color((model['background'] as num?)?.toInt() ?? 0xFFFBF8F1),
+      ui.BlendMode.src,
+    );
+    final decodedImages = <ui.Image>[];
+    final images = model['images'];
+    if (images is List) {
+      for (final rawImage in images) {
+        if (rawImage is! Map) continue;
+        final image = Map<String, dynamic>.from(rawImage);
+        final data = image['data'] as String?;
+        if (data == null) continue;
+        final separator = data.indexOf(',');
+        if (separator < 0) continue;
+        try {
+          final codec = await ui.instantiateImageCodec(
+            base64Decode(data.substring(separator + 1)),
+          );
+          try {
+            final decoded = (await codec.getNextFrame()).image;
+            decodedImages.add(decoded);
+            final left = (image['x'] as num?)?.toDouble() ?? 0;
+            final top = (image['y'] as num?)?.toDouble() ?? 0;
+            final imageWidth =
+                (image['width'] as num?)?.toDouble() ??
+                decoded.width.toDouble();
+            final imageHeight =
+                (image['height'] as num?)?.toDouble() ??
+                decoded.height.toDouble();
+            canvas.drawImageRect(
+              decoded,
+              ui.Rect.fromLTWH(
+                0,
+                0,
+                decoded.width.toDouble(),
+                decoded.height.toDouble(),
+              ),
+              ui.Rect.fromLTWH(left, top, imageWidth, imageHeight),
+              ui.Paint(),
+            );
+          } finally {
+            codec.dispose();
+          }
+        } on Object {
+          // Unsupported or malformed EPUB images do not block page turning.
+        }
+      }
+    }
+    final runs = model['runs'];
+    if (runs is! List || runs.isEmpty) {
+      throw StateError(
+        'EPUB page model contains no visible text: ${model['diagnostics']}',
+      );
+    }
+    for (final rawRun in runs) {
+      if (rawRun is! Map) continue;
+      final run = Map<String, dynamic>.from(rawRun);
+      final text = run['text'] as String? ?? '';
+      if (text.isEmpty) continue;
+      final weight = ((run['fontWeight'] as num?)?.toInt() ?? 400).clamp(
+        100,
+        900,
+      );
+      final builder =
+          ui.ParagraphBuilder(
+            ui.ParagraphStyle(textDirection: ui.TextDirection.ltr),
+          )..pushStyle(
+            ui.TextStyle(
+              color: ui.Color(
+                (run['color'] as num?)?.toInt() ??
+                    (model['foreground'] as num?)?.toInt() ??
+                    0xFF292B29,
+              ),
+              fontSize: (run['fontSize'] as num?)?.toDouble() ?? 18,
+              fontWeight: ui.FontWeight.values[(weight ~/ 100).clamp(1, 9) - 1],
+              fontStyle: run['fontStyle'] == 'italic'
+                  ? ui.FontStyle.italic
+                  : ui.FontStyle.normal,
+              letterSpacing: (run['letterSpacing'] as num?)?.toDouble() ?? 0,
+            ),
+          );
+      builder.addText(text);
+      final paragraph = builder.build()
+        ..layout(
+          ui.ParagraphConstraints(
+            width: ((run['width'] as num?)?.toDouble() ?? width.toDouble()) + 4,
+          ),
+        );
+      canvas.drawParagraph(
+        paragraph,
+        ui.Offset(
+          (run['x'] as num?)?.toDouble() ?? 0,
+          (run['y'] as num?)?.toDouble() ?? 0,
+        ),
+      );
+      paragraph.dispose();
+    }
+    final picture = recorder.endRecording();
+    try {
+      return await picture.toImage(width, height);
+    } finally {
+      picture.dispose();
+      for (final image in decodedImages) {
+        image.dispose();
+      }
     }
   }
 }

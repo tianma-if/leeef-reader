@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -322,14 +323,29 @@ void main() {
         ),
       ),
     ]);
-    await tester.pump(const Duration(seconds: 1));
-    final images = await imagesFuture;
+    final images = await _pumpUntilComplete(tester, imagesFuture);
 
     expect(images, hasLength(2));
     expect(
       images.every((image) => image.width > 0 && image.height > 0),
       isTrue,
     );
+    final pixels = await images.first.toByteData(
+      format: ui.ImageByteFormat.rawRgba,
+    );
+    expect(pixels, isNotNull);
+    var darkSamples = 0;
+    for (var offset = 0; offset < pixels!.lengthInBytes; offset += 4 * 97) {
+      if (pixels.getUint8(offset) < 180 &&
+          pixels.getUint8(offset + 1) < 180 &&
+          pixels.getUint8(offset + 2) < 180) {
+        darkSamples++;
+      }
+    }
+    expect(darkSamples, greaterThan(8), reason: 'snapshot contains EPUB text');
+    for (final image in images) {
+      image.dispose();
+    }
   });
 }
 
@@ -343,6 +359,35 @@ Future<ui.Image> _solidImage(ui.Color color) async {
   } finally {
     picture.dispose();
   }
+}
+
+Future<T> _pumpUntilComplete<T>(
+  WidgetTester tester,
+  Future<T> future, {
+  Duration timeout = const Duration(seconds: 20),
+}) async {
+  T? value;
+  Object? error;
+  StackTrace? stackTrace;
+  var completed = false;
+  future.then(
+    (result) {
+      value = result;
+      completed = true;
+    },
+    onError: (Object caughtError, StackTrace caughtStackTrace) {
+      error = caughtError;
+      stackTrace = caughtStackTrace;
+      completed = true;
+    },
+  );
+  final deadline = DateTime.now().add(timeout);
+  while (!completed && DateTime.now().isBefore(deadline)) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+  if (!completed) throw TimeoutException('Future did not complete in $timeout');
+  if (error != null) Error.throwWithStackTrace(error!, stackTrace!);
+  return value as T;
 }
 
 ({int r, int g, int b, int a}) _pixelAt(

@@ -56,6 +56,15 @@ class PageSnapshotCache {
   final Map<PageSnapshotKey, Future<ui.Image>> _inFlight = {};
 
   Future<ui.Image> get(PageSnapshotKey key) async {
+    final image = await _load(key);
+    return image.clone();
+  }
+
+  Future<void> prefetch(Iterable<PageSnapshotKey> keys) async {
+    await Future.wait(keys.map(_load));
+  }
+
+  Future<ui.Image> _load(PageSnapshotKey key) async {
     final cached = _images.remove(key);
     if (cached != null) {
       _images[key] = cached;
@@ -75,10 +84,6 @@ class PageSnapshotCache {
     } finally {
       _inFlight.remove(key);
     }
-  }
-
-  Future<void> prefetch(Iterable<PageSnapshotKey> keys) async {
-    await Future.wait(keys.map(get));
   }
 
   void clear() {

@@ -13,8 +13,11 @@ void main() {
     final cached = await cache.get(key);
 
     expect(source.captureCount, 1);
-    expect(images[0], same(images[1]));
-    expect(cached, same(images[0]));
+    expect(images[0], isNot(same(images[1])));
+    expect(cached, isNot(same(images[0])));
+    for (final image in [...images, cached]) {
+      image.dispose();
+    }
     cache.clear();
   });
 
@@ -22,10 +25,9 @@ void main() {
     final source = _FakeSnapshotSource();
     final cache = PageSnapshotCache(source: source, capacity: 2);
 
-    await cache.get(_key('one'));
-    await cache.get(_key('two'));
-    await cache.get(_key('three'));
-    await cache.get(_key('one'));
+    for (final locator in ['one', 'two', 'three', 'one']) {
+      (await cache.get(_key(locator))).dispose();
+    }
 
     expect(source.captureCount, 4);
     cache.clear();

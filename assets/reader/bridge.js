@@ -107,6 +107,104 @@ globalThis.leeefReader = {
         if (fontSize) style.setProperty('--reader-font-size', `${fontSize}px`)
         if (lineHeight) style.setProperty('--reader-line-height', String(lineHeight))
     },
+    async captureSnapshotModel(viewport = {}) {
+        const [{ doc }] = view.renderer.getContents()
+        if (!doc) throw new Error('No rendered EPUB page to snapshot')
+        const frameRect = doc.defaultView.frameElement.getBoundingClientRect()
+        const viewportWidth = window.innerWidth || viewport.width || frameRect.width
+        const viewportHeight = window.innerHeight || viewport.height || frameRect.height
+        const parseColor = value => {
+            if (value.startsWith('#')) {
+                const hex = value.slice(1)
+                const rgb = hex.length === 3
+                    ? hex.split('').map(value => value + value).join('')
+                    : hex.slice(0, 6)
+                return (0xff000000 | Number.parseInt(rgb, 16)) >>> 0
+            }
+            const parts = value.match(/[\d.]+/g)?.map(Number) ?? []
+            const [r = 41, g = 43, b = 41, a = 1] = parts
+            return ((Math.round(a * 255) << 24) | (r << 16) | (g << 8) | b) >>> 0
+        }
+        const runs = []
+        const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            if (!node.data.trim()) continue
+            const computed = doc.defaultView.getComputedStyle(node.parentElement)
+            let run = null
+            for (let offset = 0; offset < node.length; offset++) {
+                const range = doc.createRange()
+                range.setStart(node, offset)
+                range.setEnd(node, offset + 1)
+                const rect = range.getBoundingClientRect()
+                const x = frameRect.left + rect.left
+                const y = frameRect.top + rect.top
+                const visible = rect.width > 0 && rect.height > 0 &&
+                    x + rect.width > 0 && x < viewportWidth &&
+                    y + rect.height > 0 && y < viewportHeight
+                if (!visible) {
+                    run = null
+                    continue
+                }
+                const adjacent = run && Math.abs(run.y - y) < .75 &&
+                    Math.abs(run.x + run.width - x) < 2
+                if (!adjacent) {
+                    run = {
+                        text: '', x, y, width: 0, height: rect.height,
+                        fontSize: parseFloat(computed.fontSize) || 18,
+                        fontWeight: parseInt(computed.fontWeight) || 400,
+                        fontStyle: computed.fontStyle,
+                        letterSpacing: parseFloat(computed.letterSpacing) || 0,
+                        color: parseColor(computed.color),
+                    }
+                    runs.push(run)
+                }
+                run.text += node.data[offset]
+                run.width = x + rect.width - run.x
+                run.height = Math.max(run.height, rect.height)
+            }
+        }
+        const bodyStyle = doc.defaultView.getComputedStyle(doc.body)
+        const htmlStyle = doc.defaultView.getComputedStyle(doc.documentElement)
+        const transparent = value => value === 'transparent' ||
+            value === 'rgba(0, 0, 0, 0)'
+        const bodyBackground = bodyStyle.backgroundColor
+        const background = transparent(bodyBackground)
+            ? (transparent(htmlStyle.backgroundColor)
+                ? getComputedStyle(document.documentElement).backgroundColor
+                : htmlStyle.backgroundColor)
+            : bodyBackground
+        const images = await Promise.all(Array.from(doc.images, async image => {
+            const rect = image.getBoundingClientRect()
+            const x = frameRect.left + rect.left
+            const y = frameRect.top + rect.top
+            if (!rect.width || !rect.height || x + rect.width <= 0 ||
+                x >= viewportWidth || y + rect.height <= 0 ||
+                y >= viewportHeight) return null
+            try {
+                const canvas = document.createElement('canvas')
+                canvas.width = Math.max(1, Math.round(rect.width))
+                canvas.height = Math.max(1, Math.round(rect.height))
+                canvas.getContext('2d').drawImage(image, 0, 0,
+                    canvas.width, canvas.height)
+                return { x, y, width: rect.width, height: rect.height,
+                    data: canvas.toDataURL('image/png') }
+            } catch (_) { return null }
+        }))
+        return {
+            background: parseColor(background),
+            foreground: parseColor(bodyStyle.color),
+            images: images.filter(Boolean),
+            runs,
+            diagnostics: {
+                frame: { x: frameRect.x, y: frameRect.y,
+                    width: frameRect.width, height: frameRect.height },
+                window: { width: window.innerWidth, height: window.innerHeight },
+                document: { width: doc.documentElement.clientWidth,
+                    height: doc.documentElement.clientHeight,
+                    textLength: doc.body.innerText.length },
+            },
+        }
+    },
     async probeTextSelection() {
         const contents = view.renderer.getContents()
         for (const { doc, index } of contents) {
