@@ -197,13 +197,13 @@ class FoliateReaderEngine implements ReaderEngine {
 
   Future<void> _waitForBridge() async {
     await _webViewAttached.future.timeout(
-      const Duration(seconds: 10),
+      const Duration(seconds: 30),
       onTimeout: () =>
           throw TimeoutException('Reader WebView was not attached in time.'),
     );
     _ensureOpen();
     await _bridgeReady.future.timeout(
-      const Duration(seconds: 10),
+      const Duration(seconds: 30),
       onTimeout: () =>
           throw TimeoutException('foliate-js bridge did not become ready.'),
     );
