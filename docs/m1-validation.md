@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 导入 → 阅读 → 摘录 → 同步 | 通过 | EPUB、PDF、TXT 均完成导入、基础阅读与导航、稳定定位与进度恢复、书摘/书签，以及跨设备文件同步与完整性恢复验证 |
 | MCP 查询与确认写入 | 通过 | `list_books` 查询；`plan_create_excerpt → confirm_write → apply_write` 一次性确认链；书摘、同步操作和审计事件在同一 SQLite 事务提交 |
-| 移动端 Page Curl 与降级 | 通过 | iOS/Android 的 EPUB 使用独立 foliate WebView、TXT 使用 Canvas 预渲染当前与相邻页纹理并交给 Fragment Shader；卷页采用页角/触点驱动的斜向折轴、圆柱弧面、纸张背面和动态投影，TXT 支持左右区域单击自动卷页，纹理或 Shader 不可用时自动执行普通翻页 |
+| 移动端 Page Curl 与降级 | 通过 | iOS/Android 的 EPUB 使用独立 foliate WebView、TXT 使用 Canvas 预渲染当前与相邻页纹理；翻页核心使用高密度三角网格、页角/触点驱动的三维圆柱弯曲、透视投影、纸张背面和软投影，TXT 支持左右区域单击自动卷页，纹理准备失败时自动执行普通翻页 |
 | 四端完整性与恢复 | 通过 | macOS、iPhone 真机、Android 16 ARM 模拟器和 Windows WebView2 均运行阅读集成与 M1 数据纵向测试；离线操作保留、幂等重放、冲突合并、损坏 blob 拒绝和修复重试均通过 |
 
 M1 的 P0 格式纵向闭环已经完成。EPUB、PDF 与 TXT 三种首发必选格式均通过导入、阅读、定位恢复、书摘/书签、同步与四端自动化验证。当前同步产品入口使用 `DirectorySyncBackend`，可指向共享目录或网络盘，并严格采用与对象存储一致的 `blobs/{sha256}` 与 `ops/{deviceId}` 布局。
@@ -18,7 +18,7 @@ M1 的 P0 格式纵向闭环已经完成。EPUB、PDF 与 TXT 三种首发必选
 - `BookImportService`：流式 SHA-256、格式白名单、受管目录原子落盘、重复导入和损坏副本修复。
 - `ReaderScreen`：按 EPUB、PDF、TXT 分派阅读器；恢复阅读位置、自动保存、目录、书签、文本选择书摘，以及移动端 EPUB Page Curl/普通翻页降级。
 - `PdfReaderScreen`：基于 `pdfrx` / PDFium 的页面渲染、目录与页码导航，以 `pdf:<page>` 定位并恢复进度。
-- `TxtReaderScreen`：UTF-8/UTF-16/UTF-32/GBK 解码、自动章节识别与分页，以 `txt:<offset>` 稳定定位并恢复进度；移动端将当前页和相邻页渲染为 Canvas 纹理，复用交互式 Page Curl 并支持失败降级。
+- `TxtReaderScreen`：UTF-8/UTF-16/UTF-32/GBK 解码、自动章节识别与分页，以 `txt:<offset>` 稳定定位并恢复进度；移动端将当前页和相邻页渲染为 Canvas 纹理，交给三维三角网格 Page Curl 并支持失败降级。
 - `LibraryRepository`：图书、元数据、进度、书摘和书签的唯一写入路径；业务数据和 `sync_operations` 同事务提交。
 - `SyncEngine`：先上传本地待处理操作，再幂等应用远端操作，最后按内容哈希下载缺失书籍。
 - `DirectorySyncBackend`：不可变 blob/operation 布局、原子写入、SHA-256 完整性验证和安全存储键。
@@ -50,7 +50,7 @@ flutter test integration_test/foliate_reader_test.dart -d emulator-5554
 flutter test integration_test/m1_vertical_slice_test.dart -d emulator-5554
 flutter test integration_test/required_formats_test.dart -d emulator-5554
   Android 16 ARM EPUB/TXT Page Curl、相邻页纹理、PDF/TXT 阅读恢复与数据同步闭环通过；
-  Page Curl 拖动完成、斜向卷页固定像素判定、单击自动完成 3 项设备测试通过
+  Page Curl 网格拖动完成、斜向卷页固定像素判定、单击自动完成 3 项设备测试通过
 
 GitHub Actions Leeef Windows verification #32557789722
   Windows WebView2 EPUB 阅读、PDFium PDF 阅读、TXT Page Curl 与阅读恢复、43 项 Flutter 测试、Go/MCP 和 M1 数据纵向测试通过

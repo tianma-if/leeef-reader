@@ -107,7 +107,7 @@ update_reading_progress
 - 翻页时预渲染相邻页面，避免动画帧内重新排版
 - 60fps 为基础目标，高刷新率设备针对 120Hz 优化
 
-翻页引擎采用页面纹理与 Fragment Shader 实现，不依赖通用翻页 Widget。macOS 和 Windows 不实现 3D Page Curl，提供滑动、无动画和连续滚动模式。
+翻页引擎采用页面纹理、高密度三角网格、三维圆柱弯曲与透视投影实现，通过 `Canvas.drawVertices` 渲染，不依赖通用翻页 Widget。macOS 和 Windows 不实现 3D Page Curl，提供滑动、无动画和连续滚动模式。
 
 ## 功能树
 
@@ -209,7 +209,7 @@ Leeef Reader
 ├── 移动端 3D Page Curl（Leeef）
 │   ├── 平台：iOS、Android
 │   ├── 手势：左右区域单击、拖拽、回弹、甩页和取消
-│   ├── 渲染：相邻页预渲染、双页纹理、Fragment Shader
+│   ├── 渲染：相邻页预渲染、双页纹理、三维三角网格
 │   └── 性能：60fps 基线、高刷新率优化
 │
 ├── 全局搜索
@@ -278,7 +278,7 @@ Leeef Reader
 | 格式支持 | EPUB、MOBI、AZW3、FB2、TXT、PDF；首期优先 EPUB、PDF、TXT |
 | WebView 资源服务 | 随机端口 loopback HTTP Server + session token + `bookId` 路径白名单 |
 | PDF | `pdfrx` / PDFium |
-| 移动端 3D 翻页 | iOS / Android 的 EPUB、TXT 使用自研 `PageCurlEngine` + Flutter Fragment Shader |
+| 移动端 3D 翻页 | iOS / Android 的 EPUB、TXT 使用自研 `PageCurlEngine` + Flutter `Canvas.drawVertices` 三维纹理网格 |
 | 桌面端翻页 | macOS / Windows 支持滑动、无动画和连续滚动，不实现 3D Page Curl |
 | 移动端页面快照 | EPUB 使用 foliate-js 相邻页预渲染；TXT 使用 Canvas 页面纹理；PDF 保持原生阅读器翻页 |
 | 同步接口 | 自研 `SyncBackend`，统一对象读写、列举、条件写入与能力检测 |

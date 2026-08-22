@@ -78,7 +78,7 @@ void main() {
     expect(selection.cfi, startsWith('epubcfi('));
   });
 
-  testWidgets('page curl shader renders and completes an interactive drag', (
+  testWidgets('page curl mesh renders and completes an interactive drag', (
     tester,
   ) async {
     final currentPage = await _solidImage(const ui.Color(0xFFF7F1E3));

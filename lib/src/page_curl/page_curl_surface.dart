@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_gesture.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_mesh.dart';
 
 class PageCurlSurface extends StatefulWidget {
   const PageCurlSurface({
@@ -36,43 +38,63 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
     vsync: this,
     duration: const Duration(milliseconds: 420),
   )..addListener(() => setState(() => _gesture.setProgress(_animation.value)));
-  ui.FragmentShader? _shader;
+  late ui.ImageShader _pageTexture;
   double _touchY = 0.88;
 
   @override
   void initState() {
     super.initState();
-    _loadShader();
-  }
-
-  Future<void> _loadShader() async {
-    try {
-      final program = await ui.FragmentProgram.fromAsset(
-        'shaders/page_curl.frag',
-      );
-      if (!mounted) return;
-      setState(() => _shader = program.fragmentShader());
-      if (widget.autoComplete) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) unawaited(_settle(true));
-        });
-      }
-    } on Object {
-      if (mounted) widget.onUnavailable?.call();
+    _pageTexture = _createPageTexture(widget.currentPage);
+    if (widget.autoComplete) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_settle(true));
+      });
     }
   }
 
   @override
+  void didUpdateWidget(PageCurlSurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentPage != widget.currentPage) {
+      _pageTexture.dispose();
+      _pageTexture = _createPageTexture(widget.currentPage);
+    }
+  }
+
+  ui.ImageShader _createPageTexture(ui.Image image) => ui.ImageShader(
+    image,
+    ui.TileMode.clamp,
+    ui.TileMode.clamp,
+    Float64List.fromList(<double>[
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+    ]),
+    filterQuality: FilterQuality.medium,
+  );
+
+  @override
   void dispose() {
     _animation.dispose();
-    _shader?.dispose();
+    _pageTexture.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final shader = _shader;
-    if (shader == null) return const ColoredBox(color: Colors.transparent);
     return LayoutBuilder(
       builder: (context, constraints) {
         return IgnorePointer(
@@ -105,7 +127,7 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
             },
             child: CustomPaint(
               painter: _PageCurlPainter(
-                shader: shader,
+                pageTexture: _pageTexture,
                 currentPage: widget.currentPage,
                 nextPage: widget.nextPage,
                 progress: _gesture.progress,
@@ -143,7 +165,7 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
 
 class _PageCurlPainter extends CustomPainter {
   const _PageCurlPainter({
-    required this.shader,
+    required this.pageTexture,
     required this.currentPage,
     required this.nextPage,
     required this.progress,
@@ -151,7 +173,7 @@ class _PageCurlPainter extends CustomPainter {
     required this.touchY,
   });
 
-  final ui.FragmentShader shader;
+  final ui.ImageShader pageTexture;
   final ui.Image currentPage;
   final ui.Image nextPage;
   final double progress;
@@ -160,15 +182,74 @@ class _PageCurlPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    shader
-      ..setFloat(0, size.width)
-      ..setFloat(1, size.height)
-      ..setFloat(2, progress)
-      ..setFloat(3, direction)
-      ..setFloat(4, touchY)
-      ..setImageSampler(0, currentPage)
-      ..setImageSampler(1, nextPage);
-    canvas.drawRect(Offset.zero & size, Paint()..shader = shader);
+    final bounds = Offset.zero & size;
+    if (progress <= 0.001) {
+      canvas.drawImageRect(
+        currentPage,
+        Rect.fromLTWH(
+          0,
+          0,
+          currentPage.width.toDouble(),
+          currentPage.height.toDouble(),
+        ),
+        bounds,
+        Paint()..filterQuality = FilterQuality.medium,
+      );
+      return;
+    }
+    canvas.drawImageRect(
+      nextPage,
+      Rect.fromLTWH(
+        0,
+        0,
+        nextPage.width.toDouble(),
+        nextPage.height.toDouble(),
+      ),
+      bounds,
+      Paint()..filterQuality = FilterQuality.medium,
+    );
+    if (progress >= 0.999) return;
+
+    final mesh = PageCurlMesh.build(
+      size: size,
+      texture: currentPage,
+      progress: progress,
+      direction: direction,
+      touchY: touchY,
+    );
+    canvas.drawVertices(
+      mesh.shadow,
+      BlendMode.dst,
+      Paint()
+        ..blendMode = BlendMode.srcOver
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8)
+        ..isAntiAlias = true,
+    );
+    canvas.drawVertices(
+      mesh.page,
+      BlendMode.modulate,
+      Paint()
+        ..shader = pageTexture
+        ..filterQuality = FilterQuality.medium
+        ..isAntiAlias = true,
+    );
+    canvas
+      ..drawPath(
+        mesh.curledEdge,
+        Paint()
+          ..color = const Color(0x66806F58)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.1
+          ..isAntiAlias = true,
+      )
+      ..drawPath(
+        mesh.curledEdge,
+        Paint()
+          ..color = const Color(0x99FFFDF7)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 0.45
+          ..isAntiAlias = true,
+      );
   }
 
   @override

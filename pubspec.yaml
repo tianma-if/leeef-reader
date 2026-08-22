@@ -39,5 +39,3 @@ flutter:
     - assets/foliate-js/vendor/
     - assets/fixtures/m0.epub
     - assets/reader/
-  shaders:
-    - shaders/page_curl.frag
