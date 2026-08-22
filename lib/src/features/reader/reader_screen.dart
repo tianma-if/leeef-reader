@@ -292,15 +292,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     } on Object {
       // Snapshot failure is an expected capability boundary. Preserve reading
       // with the ordinary foliate page transition.
-      await (forward ? _engine.next() : _engine.previous());
+      if (mounted) await (forward ? _engine.next() : _engine.previous());
     } finally {
       if (mounted) setState(() => _preparingTurn = false);
     }
   }
 
   void _completeTurn(_CurlTurn turn) {
+    if (!mounted) return;
     unawaited(turn.forward ? _engine.next() : _engine.previous());
-    if (mounted) setState(() => _curlTurn = null);
+    setState(() => _curlTurn = null);
   }
 
   @override

@@ -48,7 +48,7 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
       if (!mounted) return;
       setState(() => _shader = program.fragmentShader());
     } on Object {
-      widget.onUnavailable?.call();
+      if (mounted) widget.onUnavailable?.call();
     }
   }
 
