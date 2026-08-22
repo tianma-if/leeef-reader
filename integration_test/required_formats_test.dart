@@ -33,13 +33,14 @@ void main() {
       await _pumpUntilFound(tester, find.byKey(const Key('txt-reader-text')));
       expect(find.textContaining('1 / '), findsOneWidget);
 
-      final readerBounds = tester.getRect(find.byType(TxtReaderScreen));
-      final gesture = await tester.startGesture(
-        Offset(readerBounds.right - 24, readerBounds.center.dy),
+      final readerBounds = tester.getRect(
+        find.byKey(const Key('txt-curl-right-zone')),
       );
-      await gesture.moveBy(Offset(-readerBounds.width * 0.24, -80));
+      final readerWidth = tester.getSize(find.byType(TxtReaderScreen)).width;
+      final gesture = await tester.startGesture(readerBounds.center);
+      await gesture.moveBy(Offset(-readerWidth * 0.24, -80));
       await _pumpUntilFound(tester, find.byKey(const Key('txt-page-curl')));
-      await gesture.moveBy(Offset(-readerBounds.width * 0.48, -60));
+      await gesture.moveBy(Offset(-readerWidth * 0.48, -60));
       await gesture.up();
       await _pumpUntilFound(tester, find.textContaining('2 / '));
 
@@ -97,13 +98,14 @@ void main() {
         timeout: const Duration(seconds: 20),
       );
 
-      final pdfBounds = tester.getRect(find.byType(PdfReaderScreen));
-      final pdfGesture = await tester.startGesture(
-        Offset(pdfBounds.right - 24, pdfBounds.center.dy),
+      final pdfBounds = tester.getRect(
+        find.byKey(const Key('pdf-curl-right-zone')),
       );
-      await pdfGesture.moveBy(Offset(-pdfBounds.width * 0.24, -60));
+      final pdfWidth = tester.getSize(find.byType(PdfReaderScreen)).width;
+      final pdfGesture = await tester.startGesture(pdfBounds.center);
+      await pdfGesture.moveBy(Offset(-pdfWidth * 0.24, -60));
       await _pumpUntilFound(tester, find.byKey(const Key('pdf-page-curl')));
-      await pdfGesture.moveBy(Offset(-pdfBounds.width * 0.48, -50));
+      await pdfGesture.moveBy(Offset(-pdfWidth * 0.48, -50));
       await pdfGesture.up();
       await _pumpUntilFound(tester, find.text('2 / 2'));
       await tester.pump(const Duration(milliseconds: 700));

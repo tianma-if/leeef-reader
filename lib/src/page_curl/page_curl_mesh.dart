@@ -13,12 +13,14 @@ import 'package:flutter/material.dart';
 class PageCurlMesh {
   const PageCurlMesh({
     required this.page,
+    required this.backside,
     required this.shadow,
     required this.curledEdge,
     required this.foldCrease,
   });
 
   final ui.Vertices page;
+  final ui.Vertices backside;
   final ui.Vertices shadow;
   final Path curledEdge;
   final Path foldCrease;
@@ -29,8 +31,8 @@ class PageCurlMesh {
     required double progress,
     required double direction,
     required double touchY,
-    int columns = 52,
-    int rows = 112,
+    int columns = 20,
+    int rows = 36,
   }) {
     final width = size.width;
     final height = size.height;
@@ -178,6 +180,27 @@ class PageCurlMesh {
       triangleIndices[triangleIndex + 1] = triangle.b;
       triangleIndices[triangleIndex + 2] = triangle.c;
     }
+    final backsideTriangles = depthSortedTriangles
+        .where((triangle) => triangle.averageAngle > math.pi / 2)
+        .toList(growable: false);
+    final backsideIndices = Uint16List(backsideTriangles.length * 3);
+    final backsideColors = Int32List(points.length);
+    for (var index = 0; index < points.length; index++) {
+      final angle = points[index].angle;
+      final backAmount = ((angle - math.pi / 2) / (math.pi / 2)).clamp(
+        0.0,
+        1.0,
+      );
+      final opacity = (104 + backAmount * 58).round();
+      backsideColors[index] = Color.fromARGB(opacity, 255, 247, 224).toARGB32();
+    }
+    for (var index = 0; index < backsideTriangles.length; index++) {
+      final triangle = backsideTriangles[index];
+      final triangleIndex = index * 3;
+      backsideIndices[triangleIndex] = triangle.a;
+      backsideIndices[triangleIndex + 1] = triangle.b;
+      backsideIndices[triangleIndex + 2] = triangle.c;
+    }
 
     final boundary = <int>[
       for (var column = 0; column <= columns; column++) column,
@@ -216,6 +239,12 @@ class PageCurlMesh {
         textureCoordinates: pageTextureCoordinates,
         colors: pageColors,
         indices: triangleIndices,
+      ),
+      backside: ui.Vertices.raw(
+        ui.VertexMode.triangles,
+        pagePositions,
+        colors: backsideColors,
+        indices: backsideIndices,
       ),
       shadow: ui.Vertices.raw(
         ui.VertexMode.triangles,
@@ -269,6 +298,7 @@ class PageCurlMesh {
         b: b,
         c: c,
         averageZ: (first.z + second.z + third.z) / 3,
+        averageAngle: (first.angle + second.angle + third.angle) / 3,
       ),
     );
   }
@@ -325,10 +355,12 @@ class _MeshTriangle {
     required this.b,
     required this.c,
     required this.averageZ,
+    required this.averageAngle,
   });
 
   final int a;
   final int b;
   final int c;
   final double averageZ;
+  final double averageAngle;
 }

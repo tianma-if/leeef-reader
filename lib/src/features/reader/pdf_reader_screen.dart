@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:leeef_reader/src/app_providers.dart';
 import 'package:leeef_reader/src/data/database/app_database.dart';
+import 'package:leeef_reader/src/data/repositories/library_repository.dart';
 import 'package:leeef_reader/src/domain/reading_location.dart';
 import 'package:leeef_reader/src/features/reader/pdf_page_snapshot_renderer.dart';
 import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
@@ -44,6 +45,7 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
   Duration? _lastPointerTime;
   double _horizontalVelocity = 0;
   final PageTextureCache<String> _textureCache = PageTextureCache();
+  LibraryRepository? _repository;
 
   @override
   void initState() {
@@ -56,7 +58,6 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     _progressTimer?.cancel();
     _curlTurn?.dispose();
     _textureCache.dispose();
-    unawaited(_persistProgress());
     super.dispose();
   }
 
@@ -66,9 +67,9 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
       if (path == null || !await File(path).exists()) {
         throw StateError('这本书尚未下载到本机。');
       }
-      final progress = await (await ref.read(
-        libraryRepositoryProvider.future,
-      )).getReadingProgress(widget.book.id);
+      final repository = await ref.read(libraryRepositoryProvider.future);
+      _repository = repository;
+      final progress = await repository.getReadingProgress(widget.book.id);
       final initialPage = parsePdfPageLocator(progress?.locator);
       _lastPersistedLocator = progress?.locator;
       if (mounted) {
@@ -138,12 +139,11 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
   }
 
   Future<void> _persistProgress() async {
-    if (_pageCount < 1) return;
+    final repository = _repository;
+    if (_pageCount < 1 || repository == null) return;
     final locator = pdfPageLocator(_page);
     if (locator == _lastPersistedLocator) return;
-    await (await ref.read(
-      libraryRepositoryProvider.future,
-    )).updateReadingProgress(
+    await repository.updateReadingProgress(
       bookId: widget.book.id,
       location: ReadingLocation(
         locator: locator,
@@ -357,9 +357,11 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
       '$pixelRatio:${backgroundColor.toARGB32()}';
 
   void _handlePointerDown(PointerDownEvent event) {
-    _pointerDownPosition = event.localPosition;
+    final position = _bodyPosition(event.position);
+    if (position == null) return;
+    _pointerDownPosition = position;
     _pointerDownAt = DateTime.now();
-    _lastPointerPosition = event.localPosition;
+    _lastPointerPosition = position;
     _lastPointerTime = event.timeStamp;
     _horizontalVelocity = 0;
     final renderObject = _bodyKey.currentContext?.findRenderObject();
@@ -371,7 +373,7 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
       return;
     }
     final size = renderObject.size;
-    final x = event.localPosition.dx;
+    final x = position.dx;
     final direction = x >= size.width * 0.7
         ? 1.0
         : x <= size.width * 0.3
@@ -380,7 +382,7 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     final target = _page + direction.toInt();
     if (direction == 0 || target < 1 || target > _pageCount) return;
     final controller = PageCurlController()
-      ..begin(position: event.localPosition, size: size, direction: direction);
+      ..begin(position: position, size: size, direction: direction);
     _pointerCurlController = controller;
     unawaited(
       _prepareTurn(target, autoComplete: false, controller: controller),
@@ -390,23 +392,26 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
   void _handlePointerMove(PointerMoveEvent event) {
     final controller = _pointerCurlController;
     if (controller == null) return;
+    final position = _bodyPosition(event.position);
+    if (position == null) return;
     final previousPosition = _lastPointerPosition;
     final previousTime = _lastPointerTime;
     if (previousPosition != null && previousTime != null) {
       final elapsedMicros = (event.timeStamp - previousTime).inMicroseconds
           .clamp(1, 100000);
       final instantaneous =
-          (event.localPosition.dx - previousPosition.dx) *
+          (position.dx - previousPosition.dx) *
           Duration.microsecondsPerSecond /
           elapsedMicros;
       _horizontalVelocity = _horizontalVelocity * 0.58 + instantaneous * 0.42;
     }
-    _lastPointerPosition = event.localPosition;
+    _lastPointerPosition = position;
     _lastPointerTime = event.timeStamp;
-    controller.update(event.localPosition);
+    controller.update(position);
   }
 
   void _handlePointerUp(PointerUpEvent event) {
+    final position = _bodyPosition(event.position);
     final start = _pointerDownPosition;
     final startedAt = _pointerDownAt;
     _pointerDownPosition = null;
@@ -414,16 +419,16 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     final isTap =
         start != null &&
         startedAt != null &&
+        position != null &&
         DateTime.now().difference(startedAt) <=
             const Duration(milliseconds: 350) &&
-        (event.localPosition - start).distance <= 12;
+        (position - start).distance <= 12;
     if (_pointerCurlController case final controller?) {
-      controller
-        ..update(event.localPosition)
-        ..release(
-          horizontalVelocity: _horizontalVelocity,
-          forceComplete: isTap,
-        );
+      if (position != null) controller.update(position);
+      controller.release(
+        horizontalVelocity: _horizontalVelocity,
+        forceComplete: isTap,
+      );
     }
     _pointerCurlController = null;
     _lastPointerPosition = null;
@@ -437,6 +442,13 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     _pointerCurlController = null;
     _lastPointerPosition = null;
     _lastPointerTime = null;
+  }
+
+  Offset? _bodyPosition(Offset globalPosition) {
+    final renderObject = _bodyKey.currentContext?.findRenderObject();
+    return renderObject is RenderBox && renderObject.hasSize
+        ? renderObject.globalToLocal(globalPosition)
+        : null;
   }
 
   @override
@@ -471,28 +483,25 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
             const Center(child: CircularProgressIndicator())
           else
             Positioned.fill(
-              child: Listener(
-                behavior: HitTestBehavior.translucent,
-                onPointerDown: _handlePointerDown,
-                onPointerMove: _handlePointerMove,
-                onPointerUp: _handlePointerUp,
-                onPointerCancel: _handlePointerCancel,
-                child: PdfViewer.file(
-                  widget.book.filePath!,
-                  key: const Key('pdf-reader-view'),
-                  controller: _controller,
-                  initialPageNumber: _initialPage,
-                  params: PdfViewerParams(
-                    onViewerReady: _onViewerReady,
-                    onPageChanged: _onPageChanged,
-                    textSelectionParams: PdfTextSelectionParams(
-                      onTextSelectionChange: (selection) =>
-                          unawaited(_onTextSelectionChange(selection)),
-                    ),
+              child: PdfViewer.file(
+                widget.book.filePath!,
+                key: const Key('pdf-reader-view'),
+                controller: _controller,
+                initialPageNumber: _initialPage,
+                params: PdfViewerParams(
+                  onViewerReady: _onViewerReady,
+                  onPageChanged: _onPageChanged,
+                  textSelectionParams: PdfTextSelectionParams(
+                    onTextSelectionChange: (selection) =>
+                        unawaited(_onTextSelectionChange(selection)),
                   ),
                 ),
               ),
             ),
+          if (_pageCount > 0) ...[
+            _buildCurlGestureZone(Alignment.centerLeft),
+            _buildCurlGestureZone(Alignment.centerRight),
+          ],
           if (_pageCount > 0)
             Align(
               alignment: Alignment.bottomCenter,
@@ -569,6 +578,27 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
       ),
     );
   }
+
+  Widget _buildCurlGestureZone(Alignment alignment) => Positioned(
+    top: 0,
+    bottom: 0,
+    left: alignment == Alignment.centerLeft ? 0 : null,
+    right: alignment == Alignment.centerRight ? 0 : null,
+    width: MediaQuery.sizeOf(context).width * 0.3,
+    child: Listener(
+      key: Key(
+        alignment == Alignment.centerLeft
+            ? 'pdf-curl-left-zone'
+            : 'pdf-curl-right-zone',
+      ),
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: _handlePointerDown,
+      onPointerMove: _handlePointerMove,
+      onPointerUp: _handlePointerUp,
+      onPointerCancel: _handlePointerCancel,
+      child: const SizedBox.expand(),
+    ),
+  );
 }
 
 int parsePdfPageLocator(String? locator) {

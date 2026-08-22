@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:leeef_reader/src/app_providers.dart';
 import 'package:leeef_reader/src/data/database/app_database.dart';
+import 'package:leeef_reader/src/data/repositories/library_repository.dart';
 import 'package:leeef_reader/src/domain/reading_location.dart';
 import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
@@ -41,6 +42,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   Duration? _lastPointerTime;
   double _horizontalVelocity = 0;
   final PageTextureCache<String> _textureCache = PageTextureCache();
+  LibraryRepository? _repository;
 
   bool get _supportsPageCurl =>
       widget.pageCurlEnabled ?? (Platform.isIOS || Platform.isAndroid);
@@ -56,7 +58,6 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     _progressTimer?.cancel();
     _curlTurn?.dispose();
     _textureCache.dispose();
-    unawaited(_persistProgress());
     super.dispose();
   }
 
@@ -66,6 +67,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       if (path == null) throw StateError('这本书尚未下载到本机。');
       final document = TxtReaderDocument.decode(await File(path).readAsBytes());
       final repository = await ref.read(libraryRepositoryProvider.future);
+      _repository = repository;
       final progress = await repository.getReadingProgress(widget.book.id);
       final offset = parseTxtLocator(
         progress?.locator,
@@ -179,9 +181,11 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   }
 
   void _handlePointerDown(PointerDownEvent event) {
-    _pointerDownPosition = event.localPosition;
+    final position = _bodyPosition(event.position);
+    if (position == null) return;
+    _pointerDownPosition = position;
     _pointerDownAt = DateTime.now();
-    _lastPointerPosition = event.localPosition;
+    _lastPointerPosition = position;
     _lastPointerTime = event.timeStamp;
     _horizontalVelocity = 0;
 
@@ -195,7 +199,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       return;
     }
     final size = renderObject.size;
-    final x = event.localPosition.dx;
+    final x = position.dx;
     final direction = x >= size.width * 0.7
         ? 1.0
         : x <= size.width * 0.3
@@ -205,7 +209,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     if (direction == 0 || target < 0 || target >= document.pages.length) return;
 
     final controller = PageCurlController()
-      ..begin(position: event.localPosition, size: size, direction: direction);
+      ..begin(position: position, size: size, direction: direction);
     _pointerCurlController = controller;
     unawaited(
       _prepareTurn(target, autoComplete: false, controller: controller),
@@ -215,35 +219,38 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   void _handlePointerMove(PointerMoveEvent event) {
     final controller = _pointerCurlController;
     if (controller == null) return;
+    final position = _bodyPosition(event.position);
+    if (position == null) return;
     final previousPosition = _lastPointerPosition;
     final previousTime = _lastPointerTime;
     if (previousPosition != null && previousTime != null) {
       final elapsedMicros = (event.timeStamp - previousTime).inMicroseconds
           .clamp(1, 100000);
       final instantaneous =
-          (event.localPosition.dx - previousPosition.dx) *
+          (position.dx - previousPosition.dx) *
           Duration.microsecondsPerSecond /
           elapsedMicros;
       _horizontalVelocity = _horizontalVelocity * 0.58 + instantaneous * 0.42;
     }
-    _lastPointerPosition = event.localPosition;
+    _lastPointerPosition = position;
     _lastPointerTime = event.timeStamp;
-    controller.update(event.localPosition);
+    controller.update(position);
   }
 
   void _handlePointerUp(PointerUpEvent event) {
+    final position = _bodyPosition(event.position);
     final start = _pointerDownPosition;
     final startedAt = _pointerDownAt;
     _pointerDownPosition = null;
     _pointerDownAt = null;
-    if (start == null || startedAt == null) return;
+    if (start == null || startedAt == null || position == null) return;
     final isTap =
         DateTime.now().difference(startedAt) <=
             const Duration(milliseconds: 350) &&
-        (event.localPosition - start).distance <= 12;
+        (position - start).distance <= 12;
     if (_pointerCurlController case final controller?) {
       controller
-        ..update(event.localPosition)
+        ..update(position)
         ..release(
           horizontalVelocity: _horizontalVelocity,
           forceComplete: isTap,
@@ -256,11 +263,18 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     if (!isTap) return;
     final width = _bodyKey.currentContext?.size?.width ?? 0;
     if (width <= 0) return;
-    if (event.localPosition.dx <= width * 0.3) {
+    if (position.dx <= width * 0.3) {
       unawaited(_prepareTurn(_pageIndex - 1));
-    } else if (event.localPosition.dx >= width * 0.7) {
+    } else if (position.dx >= width * 0.7) {
       unawaited(_prepareTurn(_pageIndex + 1));
     }
+  }
+
+  Offset? _bodyPosition(Offset globalPosition) {
+    final renderObject = _bodyKey.currentContext?.findRenderObject();
+    return renderObject is RenderBox && renderObject.hasSize
+        ? renderObject.globalToLocal(globalPosition)
+        : null;
   }
 
   void _handlePointerCancel(PointerCancelEvent event) {
@@ -353,13 +367,12 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
 
   Future<void> _persistProgress() async {
     final document = _document;
-    if (document == null) return;
+    final repository = _repository;
+    if (document == null || repository == null) return;
     final page = document.pages[_pageIndex];
     final locator = txtLocator(page.start);
     if (locator == _lastPersistedLocator) return;
-    await (await ref.read(
-      libraryRepositoryProvider.future,
-    )).updateReadingProgress(
+    await repository.updateReadingProgress(
       bookId: widget.book.id,
       location: ReadingLocation(
         locator: locator,
@@ -482,31 +495,28 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
             const Center(child: CircularProgressIndicator())
           else
             Positioned.fill(
-              child: Listener(
-                behavior: HitTestBehavior.translucent,
-                onPointerDown: _handlePointerDown,
-                onPointerMove: _handlePointerMove,
-                onPointerUp: _handlePointerUp,
-                onPointerCancel: _handlePointerCancel,
-                child: SingleChildScrollView(
-                  key: ValueKey('txt-page-$_pageIndex'),
-                  padding: const EdgeInsets.fromLTRB(28, 24, 28, 120),
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 760),
-                      child: SelectableText(
-                        page.text,
-                        key: const Key('txt-reader-text'),
-                        onSelectionChanged: _onSelectionChanged,
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodyLarge?.copyWith(height: 1.8),
-                      ),
+              child: SingleChildScrollView(
+                key: ValueKey('txt-page-$_pageIndex'),
+                padding: const EdgeInsets.fromLTRB(28, 24, 28, 120),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 760),
+                    child: SelectableText(
+                      page.text,
+                      key: const Key('txt-reader-text'),
+                      onSelectionChanged: _onSelectionChanged,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyLarge?.copyWith(height: 1.8),
                     ),
                   ),
                 ),
               ),
             ),
+          if (page != null && _supportsPageCurl) ...[
+            _buildCurlGestureZone(Alignment.centerLeft),
+            _buildCurlGestureZone(Alignment.centerRight),
+          ],
           if (document != null)
             Align(
               alignment: Alignment.bottomCenter,
@@ -585,6 +595,27 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       ),
     );
   }
+
+  Widget _buildCurlGestureZone(Alignment alignment) => Positioned(
+    top: 0,
+    bottom: 0,
+    left: alignment == Alignment.centerLeft ? 0 : null,
+    right: alignment == Alignment.centerRight ? 0 : null,
+    width: MediaQuery.sizeOf(context).width * 0.3,
+    child: Listener(
+      key: Key(
+        alignment == Alignment.centerLeft
+            ? 'txt-curl-left-zone'
+            : 'txt-curl-right-zone',
+      ),
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: _handlePointerDown,
+      onPointerMove: _handlePointerMove,
+      onPointerUp: _handlePointerUp,
+      onPointerCancel: _handlePointerCancel,
+      child: const SizedBox.expand(),
+    ),
+  );
 }
 
 class _TxtCurlTurn {
