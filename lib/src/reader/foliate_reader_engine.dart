@@ -11,6 +11,7 @@ class FoliateReaderEngine implements ReaderEngine {
   final ReaderContentServer _contentServer;
   final StreamController<ReaderEvent> _events =
       StreamController<ReaderEvent>.broadcast();
+  final Completer<void> _webViewAttached = Completer<void>();
   Completer<void> _bridgeReady = Completer<void>();
   InAppWebViewController? _webViewController;
   String? _openBookId;
@@ -24,8 +25,12 @@ class FoliateReaderEngine implements ReaderEngine {
   Future<void> initialize() => _contentServer.start();
 
   void attach(InAppWebViewController controller) {
-    _ensureOpen();
+    // Windows platform views can finish initialization after their Flutter
+    // widget has already been disposed. A late native callback must not revive
+    // or fail a closed reader engine.
+    if (_isClosed) return;
     _webViewController = controller;
+    if (!_webViewAttached.isCompleted) _webViewAttached.complete();
     if (_bridgeReady.isCompleted) _bridgeReady = Completer<void>();
     controller.addJavaScriptHandler(
       handlerName: 'readerEvent',
@@ -191,9 +196,12 @@ class FoliateReaderEngine implements ReaderEngine {
   }
 
   Future<void> _waitForBridge() async {
-    if (_webViewController == null) {
-      throw StateError('Reader WebView is not attached.');
-    }
+    await _webViewAttached.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () =>
+          throw TimeoutException('Reader WebView was not attached in time.'),
+    );
+    _ensureOpen();
     await _bridgeReady.future.timeout(
       const Duration(seconds: 10),
       onTimeout: () =>
