@@ -254,6 +254,52 @@ class LibraryRepository {
     });
   }
 
+  Future<void> updateBookMetadata({
+    required String bookId,
+    required String title,
+    String? author,
+    String? description,
+  }) async {
+    final current = await getBook(bookId);
+    if (current == null) throw StateError('Book $bookId does not exist.');
+    if (current.title == title &&
+        current.author == author &&
+        current.description == description) {
+      return;
+    }
+    final now = DateTime.now().toUtc();
+    final operationId = _idGenerator();
+    final payload = <String, Object?>{
+      'id': current.id,
+      'sha256': current.sha256,
+      'title': title,
+      'author': author,
+      'description': description,
+      'mediaType': current.mediaType,
+      'coverPath': current.coverPath,
+    };
+    await _database.transaction(() async {
+      await (_database.update(
+        _database.books,
+      )..where((book) => book.id.equals(bookId))).write(
+        BooksCompanion(
+          title: Value(title),
+          author: Value(author),
+          description: Value(description),
+          updatedAt: Value(now),
+        ),
+      );
+      await _appendOperation(
+        operationId: operationId,
+        entityType: EntityType.book,
+        entityId: bookId,
+        kind: OperationKind.upsert,
+        payload: payload,
+        occurredAt: now,
+      );
+    });
+  }
+
   Future<String> createExcerpt({
     required String bookId,
     required String locator,

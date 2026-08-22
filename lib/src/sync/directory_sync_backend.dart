@@ -46,6 +46,14 @@ class DirectorySyncBackend implements SyncBackend {
     if (!await source.exists()) {
       throw SyncUnavailable('Blob $sha256 does not exist.');
     }
+    if (await destination.exists()) {
+      try {
+        await _verifyDigest(destination, sha256);
+        return;
+      } on SyncIntegrityException {
+        await destination.delete();
+      }
+    }
     await destination.parent.create(recursive: true);
     await _copyAtomically(source, destination);
     try {
@@ -65,7 +73,9 @@ class DirectorySyncBackend implements SyncBackend {
     );
     if (await destination.exists()) return;
     await destination.parent.create(recursive: true);
-    final staging = File('${destination.path}.tmp-$pid');
+    final staging = File(
+      '${destination.path}.tmp-$pid-${DateTime.now().microsecondsSinceEpoch}',
+    );
     await staging.writeAsString(jsonEncode(operation.toJson()), flush: true);
     try {
       await staging.rename(destination.path);
@@ -102,7 +112,9 @@ class DirectorySyncBackend implements SyncBackend {
   }
 
   static Future<void> _copyAtomically(File source, File destination) async {
-    final staging = File('${destination.path}.tmp-$pid');
+    final staging = File(
+      '${destination.path}.tmp-$pid-${DateTime.now().microsecondsSinceEpoch}',
+    );
     try {
       await source.openRead().pipe(staging.openWrite());
       await staging.rename(destination.path);

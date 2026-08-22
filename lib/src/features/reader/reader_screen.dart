@@ -35,6 +35,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   ReaderBookInfo? _bookInfo;
   ReadingLocation? _location;
   ReaderSelectionChanged? _selection;
+  String? _lastPersistedLocation;
   Object? _error;
   bool _opening = false;
   bool _controlsVisible = true;
@@ -80,6 +81,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     try {
       final repository = await ref.read(libraryRepositoryProvider.future);
       final progress = await repository.getReadingProgress(widget.book.id);
+      if (progress != null) {
+        _lastPersistedLocation = ReadingLocation(
+          locator: progress.locator,
+          progress: progress.progress,
+          chapterTitle: progress.chapterTitle,
+          page: progress.page,
+        ).encode();
+      }
       final info = await _engine.open(
         ReaderBookSource(
           bookId: widget.book.id,
@@ -87,6 +96,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           mediaType: widget.book.mediaType,
         ),
         initialLocator: progress?.locator,
+      );
+      await repository.updateBookMetadata(
+        bookId: widget.book.id,
+        title: info.title.isEmpty ? widget.book.title : info.title,
+        author: info.author,
+        description: widget.book.description,
       );
       if (mounted) setState(() => _bookInfo = info);
     } on Object catch (error) {
@@ -108,10 +123,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           );
         });
         _progressTimer?.cancel();
-        _progressTimer = Timer(
-          const Duration(milliseconds: 600),
-          () => unawaited(_persistProgress()),
-        );
+        _progressTimer = Timer(const Duration(milliseconds: 600), () {
+          _progressTimer = null;
+          unawaited(_persistProgress());
+        });
       case ReaderSelectionChanged():
         setState(() {
           _selection = event;
@@ -125,11 +140,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   Future<void> _persistProgress() async {
     final location = _location;
     if (location == null) return;
+    final encoded = location.encode();
+    if (encoded == _lastPersistedLocation) return;
     final repository = await ref.read(libraryRepositoryProvider.future);
     await repository.updateReadingProgress(
       bookId: widget.book.id,
       location: location,
     );
+    _lastPersistedLocation = encoded;
   }
 
   Future<void> _saveExcerpt() async {

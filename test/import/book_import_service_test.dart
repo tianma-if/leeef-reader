@@ -58,6 +58,19 @@ void main() {
     );
     expect(await database.select(database.books).get(), isEmpty);
   });
+
+  test('repairs a corrupt managed copy when the book is re-imported', () async {
+    final source = File('${temporaryDirectory.path}/Repair.epub');
+    await source.writeAsString('original-content');
+    final first = await importer.importFile(source);
+    await File(first.filePath!).writeAsString('corrupt');
+
+    final repaired = await importer.importFile(source);
+
+    expect(repaired.id, first.id);
+    expect(await File(repaired.filePath!).readAsString(), 'original-content');
+    expect(await database.select(database.books).get(), hasLength(1));
+  });
 }
 
 class _Ids {

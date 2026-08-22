@@ -30,15 +30,19 @@ class BookImportService {
     final format = _formatFor(source.path);
     await _libraryDirectory.create(recursive: true);
 
-    final digest = await sha256.bind(source.openRead()).first;
-    final hash = digest.toString();
+    final hash = await _digest(source);
     final destination = File(
       '${_libraryDirectory.path}/$hash.${format.extension}',
     );
-    if (!await destination.exists()) {
-      final staging = File('${destination.path}.importing-${pid.toString()}');
+    final existingIsValid =
+        await destination.exists() && await _digest(destination) == hash;
+    if (!existingIsValid) {
+      final staging = File(
+        '${destination.path}.importing-$pid-${DateTime.now().microsecondsSinceEpoch}',
+      );
       try {
         await source.openRead().pipe(staging.openWrite());
+        if (await destination.exists()) await destination.delete();
         await staging.rename(destination.path);
       } on Object {
         if (await staging.exists()) await staging.delete();
@@ -71,6 +75,9 @@ class BookImportService {
     final extension = filename.lastIndexOf('.');
     return extension > 0 ? filename.substring(0, extension) : filename;
   }
+
+  static Future<String> _digest(File file) async =>
+      (await sha256.bind(file.openRead()).first).toString();
 }
 
 class _BookFormat {
