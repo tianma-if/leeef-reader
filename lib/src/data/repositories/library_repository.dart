@@ -31,6 +31,30 @@ class LibraryRepository {
     return query.watch();
   }
 
+  Stream<List<ExcerptRecord>> watchExcerpts({String? bookId}) {
+    final query = _database.select(_database.excerpts)
+      ..where((excerpt) {
+        final visible = excerpt.isDeleted.equals(false);
+        return bookId == null
+            ? visible
+            : visible & excerpt.bookId.equals(bookId);
+      })
+      ..orderBy([(excerpt) => OrderingTerm.desc(excerpt.updatedAt)]);
+    return query.watch();
+  }
+
+  Future<BookRecord?> getBook(String bookId) {
+    return (_database.select(
+      _database.books,
+    )..where((book) => book.id.equals(bookId))).getSingleOrNull();
+  }
+
+  Future<ReadingProgressRecord?> getReadingProgress(String bookId) {
+    return (_database.select(
+      _database.readingProgresses,
+    )..where((progress) => progress.bookId.equals(bookId))).getSingleOrNull();
+  }
+
   Future<String> createBookMetadata({
     required String sha256,
     required String title,
@@ -48,7 +72,20 @@ class LibraryRepository {
     final duplicate = await (_database.select(
       _database.books,
     )..where((book) => book.sha256.equals(normalizedHash))).getSingleOrNull();
-    if (duplicate != null) return duplicate.id;
+    if (duplicate != null) {
+      if (filePath != null &&
+          (duplicate.filePath != filePath || !duplicate.isAvailableLocally)) {
+        await (_database.update(
+          _database.books,
+        )..where((book) => book.id.equals(duplicate.id))).write(
+          BooksCompanion(
+            filePath: Value(filePath),
+            isAvailableLocally: const Value(true),
+          ),
+        );
+      }
+      return duplicate.id;
+    }
 
     final bookId = _idGenerator();
     final operationId = _idGenerator();
@@ -137,6 +174,96 @@ class LibraryRepository {
         occurredAt: now,
       );
     });
+  }
+
+  Future<String> createExcerpt({
+    required String bookId,
+    required String locator,
+    required String quote,
+    String? note,
+    String color = 'yellow',
+  }) async {
+    if (quote.trim().isEmpty) {
+      throw ArgumentError.value(quote, 'quote', 'Excerpt quote is empty.');
+    }
+    final excerptId = _idGenerator();
+    final operationId = _idGenerator();
+    final now = DateTime.now().toUtc();
+    final payload = <String, Object?>{
+      'id': excerptId,
+      'bookId': bookId,
+      'locator': locator,
+      'quote': quote,
+      'note': note,
+      'color': color,
+    };
+    await _database.transaction(() async {
+      await _database
+          .into(_database.excerpts)
+          .insert(
+            ExcerptsCompanion.insert(
+              id: excerptId,
+              bookId: bookId,
+              locator: locator,
+              quote: quote,
+              note: Value(note),
+              color: Value(color),
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
+      await _appendOperation(
+        operationId: operationId,
+        entityType: EntityType.excerpt,
+        entityId: excerptId,
+        kind: OperationKind.upsert,
+        payload: payload,
+        occurredAt: now,
+      );
+    });
+    return excerptId;
+  }
+
+  Future<String> createBookmark({
+    required String bookId,
+    required String locator,
+    String? title,
+    String? note,
+  }) async {
+    final bookmarkId = _idGenerator();
+    final operationId = _idGenerator();
+    final now = DateTime.now().toUtc();
+    final payload = <String, Object?>{
+      'id': bookmarkId,
+      'bookId': bookId,
+      'locator': locator,
+      'title': title,
+      'note': note,
+    };
+    await _database.transaction(() async {
+      await _database
+          .into(_database.bookmarks)
+          .insert(
+            BookmarksCompanion.insert(
+              id: bookmarkId,
+              bookId: bookId,
+              locator: locator,
+              title: Value(title),
+              note: Value(note),
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
+      await _appendOperation(
+        operationId: operationId,
+        entityType: EntityType.bookmark,
+        entityId: bookmarkId,
+        kind: OperationKind.upsert,
+        payload: payload,
+        occurredAt: now,
+      );
+    });
+    return bookmarkId;
   }
 
   Future<void> softDeleteBook(String bookId) async {

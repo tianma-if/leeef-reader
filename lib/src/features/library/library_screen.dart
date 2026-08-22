@@ -1,41 +1,86 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
 
-class LibraryScreen extends StatelessWidget {
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:leeef_reader/src/app_providers.dart';
+import 'package:leeef_reader/src/data/database/app_database.dart';
+import 'package:leeef_reader/src/features/reader/reader_screen.dart';
+
+class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
+
+  @override
+  ConsumerState<LibraryScreen> createState() => _LibraryScreenState();
+}
+
+class _LibraryScreenState extends ConsumerState<LibraryScreen> {
+  int _selectedIndex = 0;
+  bool _isImporting = false;
+
+  Future<void> _importBook() async {
+    final result = await FilePicker.pickFile(
+      type: FileType.custom,
+      allowedExtensions: const ['epub'],
+    );
+    final path = result?.path;
+    if (path == null || !mounted) return;
+    setState(() => _isImporting = true);
+    try {
+      final importer = await ref.read(bookImportServiceProvider.future);
+      final book = await importer.importFile(File(path));
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('已导入《${book.title}》')));
+    } on Object catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导入失败：$error')));
+    } finally {
+      if (mounted) setState(() => _isImporting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final useRail = constraints.maxWidth >= 720;
-        final content = const _EmptyLibrary();
+        final title = switch (_selectedIndex) {
+          0 => '书库',
+          1 => '笔记',
+          _ => '设置',
+        };
+        final content = switch (_selectedIndex) {
+          0 => const _LibraryContent(),
+          1 => const _ExcerptContent(),
+          _ => const _SettingsContent(),
+        };
+        final importButton = _selectedIndex == 0
+            ? FloatingActionButton.extended(
+                onPressed: _isImporting ? null : _importBook,
+                icon: _isImporting
+                    ? const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.add),
+                label: Text(_isImporting ? '导入中' : '导入书籍'),
+              )
+            : null;
 
         if (!useRail) {
           return Scaffold(
-            appBar: AppBar(title: const Text('书库')),
+            appBar: AppBar(title: Text(title)),
             body: content,
-            floatingActionButton: FloatingActionButton.extended(
-              onPressed: null,
-              icon: const Icon(Icons.add),
-              label: const Text('导入书籍'),
-            ),
+            floatingActionButton: importButton,
             bottomNavigationBar: NavigationBar(
-              selectedIndex: 0,
-              destinations: [
-                const NavigationDestination(
-                  icon: Icon(Icons.local_library_outlined),
-                  selectedIcon: Icon(Icons.local_library),
-                  label: '书库',
-                ),
-                const NavigationDestination(
-                  icon: Icon(Icons.edit_note_outlined),
-                  label: '笔记',
-                ),
-                const NavigationDestination(
-                  icon: Icon(Icons.settings_outlined),
-                  label: '设置',
-                ),
-              ],
+              selectedIndex: _selectedIndex,
+              onDestinationSelected: (index) =>
+                  setState(() => _selectedIndex = index),
+              destinations: _destinations,
             ),
           );
         }
@@ -44,40 +89,175 @@ class LibraryScreen extends StatelessWidget {
           body: Row(
             children: [
               NavigationRail(
-                selectedIndex: 0,
+                selectedIndex: _selectedIndex,
+                onDestinationSelected: (index) =>
+                    setState(() => _selectedIndex = index),
                 labelType: NavigationRailLabelType.all,
-                destinations: [
-                  const NavigationRailDestination(
-                    icon: Icon(Icons.local_library_outlined),
-                    selectedIcon: Icon(Icons.local_library),
-                    label: Text('书库'),
-                  ),
-                  const NavigationRailDestination(
-                    icon: Icon(Icons.edit_note_outlined),
-                    label: Text('笔记'),
-                  ),
-                  const NavigationRailDestination(
-                    icon: Icon(Icons.settings_outlined),
-                    label: Text('设置'),
-                  ),
-                ],
+                destinations: _railDestinations,
               ),
               const VerticalDivider(width: 1),
               Expanded(
                 child: Scaffold(
-                  appBar: AppBar(title: const Text('书库')),
+                  appBar: AppBar(title: Text(title)),
                   body: content,
-                  floatingActionButton: FloatingActionButton.extended(
-                    onPressed: null,
-                    icon: const Icon(Icons.add),
-                    label: const Text('导入书籍'),
-                  ),
+                  floatingActionButton: importButton,
                 ),
               ),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+const _destinations = [
+  NavigationDestination(
+    icon: Icon(Icons.local_library_outlined),
+    selectedIcon: Icon(Icons.local_library),
+    label: '书库',
+  ),
+  NavigationDestination(icon: Icon(Icons.edit_note_outlined), label: '笔记'),
+  NavigationDestination(icon: Icon(Icons.settings_outlined), label: '设置'),
+];
+
+const _railDestinations = [
+  NavigationRailDestination(
+    icon: Icon(Icons.local_library_outlined),
+    selectedIcon: Icon(Icons.local_library),
+    label: Text('书库'),
+  ),
+  NavigationRailDestination(
+    icon: Icon(Icons.edit_note_outlined),
+    label: Text('笔记'),
+  ),
+  NavigationRailDestination(
+    icon: Icon(Icons.settings_outlined),
+    label: Text('设置'),
+  ),
+];
+
+class _LibraryContent extends ConsumerWidget {
+  const _LibraryContent();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final books = ref.watch(libraryBooksProvider);
+    return books.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, _) => Center(child: Text('无法读取书库：$error')),
+      data: (items) => items.isEmpty
+          ? const _EmptyLibrary()
+          : GridView.builder(
+              padding: const EdgeInsets.all(20),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 220,
+                mainAxisExtent: 250,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+              ),
+              itemCount: items.length,
+              itemBuilder: (context, index) => _BookCard(book: items[index]),
+            ),
+    );
+  }
+}
+
+class _BookCard extends StatelessWidget {
+  const _BookCard({required this.book});
+
+  final BookRecord book;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: book.isAvailableLocally
+            ? () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => ReaderScreen(book: book),
+                ),
+              )
+            : null,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Center(
+                  child: Icon(
+                    Icons.menu_book_rounded,
+                    size: 72,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+              ),
+              Text(
+                book.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                book.author ?? '未知作者',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExcerptContent extends ConsumerWidget {
+  const _ExcerptContent();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final excerpts = ref.watch(allExcerptsProvider);
+    return excerpts.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, _) => Center(child: Text('无法读取书摘：$error')),
+      data: (items) => items.isEmpty
+          ? const Center(child: Text('选中书中文字，即可创建第一条书摘。'))
+          : ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: items.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                final excerpt = items[index];
+                return Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.format_quote),
+                    title: Text(excerpt.quote),
+                    subtitle: excerpt.note == null ? null : Text(excerpt.note!),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
+class _SettingsContent extends StatelessWidget {
+  const _SettingsContent();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      children: const [
+        ListTile(
+          leading: Icon(Icons.sync),
+          title: Text('同步'),
+          subtitle: Text('本地优先；同步配置将在本阶段接入'),
+        ),
+      ],
     );
   }
 }
@@ -104,7 +284,7 @@ class _EmptyLibrary extends StatelessWidget {
               Text('开始你的书库', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 8),
               Text(
-                '导入 EPUB、PDF 或 TXT。阅读数据会先保存在本地，联网后再安全同步。',
+                '导入 EPUB。阅读进度和书摘会先保存在本地，联网后再安全同步。',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyLarge,
               ),

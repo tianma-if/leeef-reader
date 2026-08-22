@@ -118,6 +118,46 @@ void main() {
     expect(books.map((book) => book.title), ['Committed']);
     expect(await database.select(database.syncOperations).get(), hasLength(1));
   });
+
+  test('excerpt and bookmark mutations append sync operations', () async {
+    final ids = _Ids([
+      'book-1',
+      'op-create',
+      'excerpt-1',
+      'op-excerpt',
+      'bookmark-1',
+      'op-bookmark',
+    ]);
+    final repository = LibraryRepository(
+      database: database,
+      deviceId: 'device-a',
+      idGenerator: ids.next,
+    );
+    await repository.createBookMetadata(
+      sha256: 'f' * 64,
+      title: 'Annotated Book',
+      mediaType: 'application/epub+zip',
+    );
+
+    await repository.createExcerpt(
+      bookId: 'book-1',
+      locator: 'epubcfi(/6/2!/4/2:0)',
+      quote: 'A durable excerpt',
+      note: 'Remember this',
+    );
+    await repository.createBookmark(
+      bookId: 'book-1',
+      locator: 'epubcfi(/6/4)',
+      title: 'Chapter 2',
+    );
+
+    expect(await database.select(database.excerpts).get(), hasLength(1));
+    expect(await database.select(database.bookmarks).get(), hasLength(1));
+    final operations = await database.select(database.syncOperations).get();
+    expect(operations, hasLength(3));
+    expect(operations[1].entityType, 'excerpt');
+    expect(operations[2].entityType, 'bookmark');
+  });
 }
 
 class _Ids {
