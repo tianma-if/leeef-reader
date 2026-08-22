@@ -11,6 +11,7 @@ import 'package:leeef_reader/src/features/reader/pdf_page_snapshot_renderer.dart
 import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
+import 'package:leeef_reader/src/page_curl/page_texture_cache.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 class PdfReaderScreen extends ConsumerStatefulWidget {
@@ -42,6 +43,7 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
   Offset? _lastPointerPosition;
   Duration? _lastPointerTime;
   double _horizontalVelocity = 0;
+  final PageTextureCache<String> _textureCache = PageTextureCache();
 
   @override
   void initState() {
@@ -53,6 +55,7 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
   void dispose() {
     _progressTimer?.cancel();
     _curlTurn?.dispose();
+    _textureCache.dispose();
     unawaited(_persistProgress());
     super.dispose();
   }
@@ -90,6 +93,9 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
       });
     }
     unawaited(_loadOutline(document));
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => unawaited(_prefetchAdjacentTextures()),
+    );
   }
 
   Future<void> _loadOutline(PdfDocument document) async {
@@ -126,6 +132,9 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
       _progressTimer = null;
       unawaited(_persistProgress());
     });
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => unawaited(_prefetchAdjacentTextures()),
+    );
   }
 
   Future<void> _persistProgress() async {
@@ -246,17 +255,23 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     try {
       await _controller.useDocument((document) async {
         final images = await Future.wait([
-          renderPdfPageSnapshot(
-            page: document.pages[_page - 1],
-            size: size,
-            pixelRatio: pixelRatio,
-            backgroundColor: backgroundColor,
+          _textureCache.get(
+            _textureKey(_page, size, pixelRatio, backgroundColor),
+            () => renderPdfPageSnapshot(
+              page: document.pages[_page - 1],
+              size: size,
+              pixelRatio: pixelRatio,
+              backgroundColor: backgroundColor,
+            ),
           ),
-          renderPdfPageSnapshot(
-            page: document.pages[target - 1],
-            size: size,
-            pixelRatio: pixelRatio,
-            backgroundColor: backgroundColor,
+          _textureCache.get(
+            _textureKey(target, size, pixelRatio, backgroundColor),
+            () => renderPdfPageSnapshot(
+              page: document.pages[target - 1],
+              size: size,
+              pixelRatio: pixelRatio,
+              backgroundColor: backgroundColor,
+            ),
           ),
         ]);
         currentImage = images[0];
@@ -295,6 +310,51 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     setState(() => _curlTurn = null);
     WidgetsBinding.instance.addPostFrameCallback((_) => turn.dispose());
   }
+
+  Future<void> _prefetchAdjacentTextures() async {
+    final renderObject = _bodyKey.currentContext?.findRenderObject();
+    if (!mounted ||
+        !_controller.isReady ||
+        renderObject is! RenderBox ||
+        !renderObject.hasSize) {
+      return;
+    }
+    final size = renderObject.size;
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final backgroundColor = Theme.of(context).scaffoldBackgroundColor;
+    final pages = <int>{
+      _page,
+      if (_page > 1) _page - 1,
+      if (_page < _pageCount) _page + 1,
+    };
+    try {
+      await _controller.useDocument((document) async {
+        await Future.wait([
+          for (final pageNumber in pages)
+            _textureCache.prefetch(
+              _textureKey(pageNumber, size, pixelRatio, backgroundColor),
+              () => renderPdfPageSnapshot(
+                page: document.pages[pageNumber - 1],
+                size: size,
+                pixelRatio: pixelRatio,
+                backgroundColor: backgroundColor,
+              ),
+            ),
+        ]);
+      });
+    } on Object {
+      // Prefetch is opportunistic; on-demand rendering remains available.
+    }
+  }
+
+  String _textureKey(
+    int pageNumber,
+    Size size,
+    double pixelRatio,
+    Color backgroundColor,
+  ) =>
+      '${widget.book.id}:$pageNumber:${size.width}x${size.height}:'
+      '$pixelRatio:${backgroundColor.toARGB32()}';
 
   void _handlePointerDown(PointerDownEvent event) {
     _pointerDownPosition = event.localPosition;

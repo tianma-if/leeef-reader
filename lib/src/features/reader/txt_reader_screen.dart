@@ -12,6 +12,7 @@ import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
 import 'package:leeef_reader/src/features/reader/txt_page_snapshot_renderer.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
+import 'package:leeef_reader/src/page_curl/page_texture_cache.dart';
 
 class TxtReaderScreen extends ConsumerStatefulWidget {
   const TxtReaderScreen({required this.book, super.key, this.pageCurlEnabled});
@@ -39,6 +40,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   Offset? _lastPointerPosition;
   Duration? _lastPointerTime;
   double _horizontalVelocity = 0;
+  final PageTextureCache<String> _textureCache = PageTextureCache();
 
   bool get _supportsPageCurl =>
       widget.pageCurlEnabled ?? (Platform.isIOS || Platform.isAndroid);
@@ -53,6 +55,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   void dispose() {
     _progressTimer?.cancel();
     _curlTurn?.dispose();
+    _textureCache.dispose();
     unawaited(_persistProgress());
     super.dispose();
   }
@@ -73,6 +76,9 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
           _document = document;
           _pageIndex = document.pageIndexForOffset(offset);
         });
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => unawaited(_prefetchAdjacentTextures()),
+        );
       }
     } on Object catch (error) {
       if (mounted) setState(() => _error = error);
@@ -121,22 +127,32 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     ui.Image? currentImage;
     ui.Image? targetImage;
     try {
-      currentImage = await renderTxtPageSnapshot(
-        text: document.pages[_pageIndex].text,
-        size: size,
-        pixelRatio: pixelRatio,
-        backgroundColor: backgroundColor,
-        textStyle: textStyle,
-        textDirection: textDirection,
-      );
-      targetImage = await renderTxtPageSnapshot(
-        text: document.pages[target].text,
-        size: size,
-        pixelRatio: pixelRatio,
-        backgroundColor: backgroundColor,
-        textStyle: textStyle,
-        textDirection: textDirection,
-      );
+      final images = await Future.wait([
+        _textureCache.get(
+          _textureKey(_pageIndex, size, pixelRatio, backgroundColor, textStyle),
+          () => renderTxtPageSnapshot(
+            text: document.pages[_pageIndex].text,
+            size: size,
+            pixelRatio: pixelRatio,
+            backgroundColor: backgroundColor,
+            textStyle: textStyle,
+            textDirection: textDirection,
+          ),
+        ),
+        _textureCache.get(
+          _textureKey(target, size, pixelRatio, backgroundColor, textStyle),
+          () => renderTxtPageSnapshot(
+            text: document.pages[target].text,
+            size: size,
+            pixelRatio: pixelRatio,
+            backgroundColor: backgroundColor,
+            textStyle: textStyle,
+            textDirection: textDirection,
+          ),
+        ),
+      ]);
+      currentImage = images[0];
+      targetImage = images[1];
       if (!mounted) {
         currentImage.dispose();
         targetImage.dispose();
@@ -267,8 +283,65 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       }
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => turn.dispose());
-    if (completed) _scheduleProgressSave();
+    if (completed) {
+      _scheduleProgressSave();
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => unawaited(_prefetchAdjacentTextures()),
+      );
+    }
   }
+
+  Future<void> _prefetchAdjacentTextures() async {
+    final document = _document;
+    final renderObject = _bodyKey.currentContext?.findRenderObject();
+    if (!mounted ||
+        document == null ||
+        renderObject is! RenderBox ||
+        !renderObject.hasSize) {
+      return;
+    }
+    final size = renderObject.size;
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final theme = Theme.of(context);
+    final backgroundColor = theme.scaffoldBackgroundColor;
+    final textStyle =
+        theme.textTheme.bodyLarge?.copyWith(height: 1.8) ??
+        const TextStyle(fontSize: 16, height: 1.8);
+    final textDirection = Directionality.of(context);
+    final indexes = <int>{
+      _pageIndex,
+      if (_pageIndex > 0) _pageIndex - 1,
+      if (_pageIndex + 1 < document.pages.length) _pageIndex + 1,
+    };
+    try {
+      await Future.wait([
+        for (final index in indexes)
+          _textureCache.prefetch(
+            _textureKey(index, size, pixelRatio, backgroundColor, textStyle),
+            () => renderTxtPageSnapshot(
+              text: document.pages[index].text,
+              size: size,
+              pixelRatio: pixelRatio,
+              backgroundColor: backgroundColor,
+              textStyle: textStyle,
+              textDirection: textDirection,
+            ),
+          ),
+      ]);
+    } on Object {
+      // Prefetch is opportunistic; on-demand rendering remains available.
+    }
+  }
+
+  String _textureKey(
+    int pageIndex,
+    Size size,
+    double pixelRatio,
+    Color backgroundColor,
+    TextStyle textStyle,
+  ) =>
+      '${widget.book.id}:$pageIndex:${size.width}x${size.height}:'
+      '$pixelRatio:${backgroundColor.toARGB32()}:${textStyle.hashCode}';
 
   void _scheduleProgressSave() {
     _progressTimer?.cancel();

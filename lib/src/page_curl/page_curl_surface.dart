@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_gesture.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_mesh.dart';
@@ -36,6 +37,11 @@ class PageCurlSurface extends StatefulWidget {
 
 class _PageCurlSurfaceState extends State<PageCurlSurface>
     with SingleTickerProviderStateMixin {
+  static const _paperSpring = SpringDescription(
+    mass: 1,
+    stiffness: 430,
+    damping: 37,
+  );
   final PageCurlGesture _gesture = PageCurlGesture();
   late final AnimationController _animation = AnimationController(
     vsync: this,
@@ -132,7 +138,10 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
             },
             onHorizontalDragEnd: (details) {
               final velocity = details.primaryVelocity! * widget.direction;
-              _settle(_gesture.shouldComplete(velocity));
+              _settle(
+                _gesture.shouldComplete(velocity),
+                normalizedVelocity: velocity,
+              );
             },
             child: CustomPaint(
               painter: _PageCurlPainter(
@@ -159,13 +168,26 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
   double _automaticTouchY(double progress) =>
       0.88 - (math.sin(math.pi * progress) * 0.20);
 
-  Future<void> _settle(bool complete) async {
+  Future<void> _settle(bool complete, {double normalizedVelocity = 0}) async {
+    _animation.stop();
     _animation.value = _progress;
+    final width = context.size?.width ?? 1;
+    final rawProgressVelocity = -normalizedVelocity / math.max(width, 1);
+    final progressVelocity = complete
+        ? math.max(0.0, rawProgressVelocity)
+        : math.min(0.0, rawProgressVelocity);
+    final target = complete ? 1.0 : 0.0;
+    await _animation.animateWith(
+      SpringSimulation(
+        _paperSpring,
+        _animation.value,
+        target,
+        progressVelocity,
+      ),
+    );
     if (complete) {
-      await _animation.animateTo(1, curve: Curves.easeInOutCubic);
       widget.onTurnCompleted();
     } else {
-      await _animation.animateBack(0, curve: Curves.easeOutCubic);
       widget.onTurnCancelled?.call();
     }
     if (mounted) {
@@ -196,7 +218,9 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
         release.forceComplete ||
         _progress >= _gesture.completionThreshold ||
         release.normalizedVelocity <= -_gesture.flingVelocityThreshold;
-    unawaited(_settle(complete));
+    unawaited(
+      _settle(complete, normalizedVelocity: release.normalizedVelocity),
+    );
   }
 
   void _attachController(PageCurlController? controller) {
