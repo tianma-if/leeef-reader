@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -33,9 +34,10 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
   final PageCurlGesture _gesture = PageCurlGesture();
   late final AnimationController _animation = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 260),
+    duration: const Duration(milliseconds: 420),
   )..addListener(() => setState(() => _gesture.setProgress(_animation.value)));
   ui.FragmentShader? _shader;
+  double _touchY = 0.88;
 
   @override
   void initState() {
@@ -78,14 +80,24 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
           child: GestureDetector(
             key: const Key('page-curl-gesture'),
             behavior: HitTestBehavior.opaque,
-            onHorizontalDragStart: (_) => _animation.stop(),
+            onHorizontalDragStart: (details) {
+              _animation.stop();
+              _touchY = _normalizedTouchY(
+                details.localPosition.dy,
+                constraints.maxHeight,
+              );
+            },
             onHorizontalDragUpdate: (details) {
-              setState(
-                () => _gesture.update(
+              setState(() {
+                _touchY = _normalizedTouchY(
+                  details.localPosition.dy,
+                  constraints.maxHeight,
+                );
+                _gesture.update(
                   horizontalDelta: details.delta.dx * widget.direction,
                   width: constraints.maxWidth,
-                ),
-              );
+                );
+              });
             },
             onHorizontalDragEnd: (details) {
               final velocity = details.primaryVelocity! * widget.direction;
@@ -98,6 +110,9 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
                 nextPage: widget.nextPage,
                 progress: _gesture.progress,
                 direction: widget.direction,
+                touchY: widget.autoComplete
+                    ? _automaticTouchY(_gesture.progress)
+                    : _touchY,
               ),
               size: Size.infinite,
             ),
@@ -107,10 +122,16 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
     );
   }
 
+  double _normalizedTouchY(double y, double height) =>
+      (y / height).clamp(0.12, 0.94);
+
+  double _automaticTouchY(double progress) =>
+      0.88 - (math.sin(math.pi * progress) * 0.20);
+
   Future<void> _settle(bool complete) async {
     _animation.value = _gesture.progress;
     if (complete) {
-      await _animation.animateTo(1, curve: Curves.easeOutCubic);
+      await _animation.animateTo(1, curve: Curves.easeInOutCubic);
       widget.onTurnCompleted();
     } else {
       await _animation.animateBack(0, curve: Curves.easeOutCubic);
@@ -127,6 +148,7 @@ class _PageCurlPainter extends CustomPainter {
     required this.nextPage,
     required this.progress,
     required this.direction,
+    required this.touchY,
   });
 
   final ui.FragmentShader shader;
@@ -134,6 +156,7 @@ class _PageCurlPainter extends CustomPainter {
   final ui.Image nextPage;
   final double progress;
   final double direction;
+  final double touchY;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -142,6 +165,7 @@ class _PageCurlPainter extends CustomPainter {
       ..setFloat(1, size.height)
       ..setFloat(2, progress)
       ..setFloat(3, direction)
+      ..setFloat(4, touchY)
       ..setImageSampler(0, currentPage)
       ..setImageSampler(1, nextPage);
     canvas.drawRect(Offset.zero & size, Paint()..shader = shader);
@@ -152,5 +176,6 @@ class _PageCurlPainter extends CustomPainter {
       oldDelegate.progress != progress ||
       oldDelegate.currentPage != currentPage ||
       oldDelegate.nextPage != nextPage ||
-      oldDelegate.direction != direction;
+      oldDelegate.direction != direction ||
+      oldDelegate.touchY != touchY;
 }
