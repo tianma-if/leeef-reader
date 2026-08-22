@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:charset/charset.dart' as charset;
+
 class TxtPage {
   const TxtPage({required this.start, required this.end, required this.text});
 
@@ -24,7 +26,7 @@ class TxtReaderDocument {
   });
 
   factory TxtReaderDocument.decode(Uint8List bytes, {int pageLength = 1800}) {
-    var text = utf8.decode(bytes, allowMalformed: true);
+    var text = _decodeText(bytes);
     if (text.startsWith('\ufeff')) text = text.substring(1);
     return TxtReaderDocument.fromText(text, pageLength: pageLength);
   }
@@ -89,6 +91,24 @@ class TxtReaderDocument {
 
   static bool _isHighSurrogate(int value) => value >= 0xD800 && value <= 0xDBFF;
   static bool _isLowSurrogate(int value) => value >= 0xDC00 && value <= 0xDFFF;
+
+  static String _decodeText(Uint8List bytes) {
+    if (charset.hasUtf16BeBom(bytes) || charset.hasUtf16LeBom(bytes)) {
+      return charset.utf16.decode(bytes);
+    }
+    if (charset.hasUtf32Bom(bytes)) return charset.utf32.decode(bytes);
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xEF &&
+        bytes[1] == 0xBB &&
+        bytes[2] == 0xBF) {
+      return utf8.decode(bytes.sublist(3));
+    }
+    try {
+      return utf8.decode(bytes);
+    } on FormatException {
+      return const charset.GbkCodec(allowMalformed: true).decode(bytes);
+    }
+  }
 }
 
 int parseTxtLocator(String? locator) {

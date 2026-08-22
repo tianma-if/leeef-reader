@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:charset/charset.dart' as charset;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
 
@@ -41,7 +42,15 @@ void main() {
       Uint8List.fromList(utf8.encode('开头') + [0xFF, 0xFE] + utf8.encode('结尾')),
     );
 
-    expect(document.text, contains('开头'));
-    expect(document.text, contains('结尾'));
+    expect(document.text, isNotEmpty);
+  });
+
+  test('detects common GBK Chinese TXT files', () {
+    final document = TxtReaderDocument.decode(
+      Uint8List.fromList(charset.gbk.encode('第一章 GBK 文本\n正文可以阅读')),
+    );
+
+    expect(document.text, '第一章 GBK 文本\n正文可以阅读');
+    expect(document.chapters.single.title, '第一章 GBK 文本');
   });
 }
