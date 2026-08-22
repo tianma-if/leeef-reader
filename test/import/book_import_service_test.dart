@@ -49,8 +49,8 @@ void main() {
   });
 
   test('rejects unsupported files without changing the database', () async {
-    final source = File('${temporaryDirectory.path}/notes.pdf');
-    await source.writeAsString('pdf');
+    final source = File('${temporaryDirectory.path}/notes.mobi');
+    await source.writeAsString('mobi');
 
     await expectLater(
       importer.importFile(source),
@@ -58,6 +58,31 @@ void main() {
     );
     expect(await database.select(database.books).get(), isEmpty);
   });
+
+  for (final format in const [
+    (extension: 'pdf', mediaType: 'application/pdf'),
+    (extension: 'txt', mediaType: 'text/plain'),
+  ]) {
+    test(
+      'imports ${format.extension.toUpperCase()} into managed storage',
+      () async {
+        final source = File(
+          '${temporaryDirectory.path}/Required Format.${format.extension}',
+        );
+        await source.writeAsString('format-content-${format.extension}');
+
+        final book = await importer.importFile(source);
+
+        expect(book.title, 'Required Format');
+        expect(book.mediaType, format.mediaType);
+        expect(book.filePath, endsWith('.${format.extension}'));
+        expect(
+          await File(book.filePath!).readAsString(),
+          'format-content-${format.extension}',
+        );
+      },
+    );
+  }
 
   test('repairs a corrupt managed copy when the book is re-imported', () async {
     final source = File('${temporaryDirectory.path}/Repair.epub');

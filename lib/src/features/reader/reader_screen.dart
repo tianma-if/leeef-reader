@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:leeef_reader/src/app_providers.dart';
 import 'package:leeef_reader/src/data/database/app_database.dart';
 import 'package:leeef_reader/src/domain/reading_location.dart';
+import 'package:leeef_reader/src/features/reader/pdf_reader_screen.dart';
+import 'package:leeef_reader/src/features/reader/txt_reader_screen.dart';
 import 'package:leeef_reader/src/page_curl/foliate_page_snapshot_view.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
 import 'package:leeef_reader/src/page_curl/page_snapshot_cache.dart';
@@ -14,16 +16,33 @@ import 'package:leeef_reader/src/reader/foliate_reader_engine.dart';
 import 'package:leeef_reader/src/reader/foliate_reader_view.dart';
 import 'package:leeef_reader/src/reader/reader_engine.dart';
 
-class ReaderScreen extends ConsumerStatefulWidget {
+class ReaderScreen extends StatelessWidget {
   const ReaderScreen({required this.book, super.key});
 
   final BookRecord book;
 
   @override
-  ConsumerState<ReaderScreen> createState() => _ReaderScreenState();
+  Widget build(BuildContext context) => switch (book.mediaType) {
+    'application/epub+zip' => EpubReaderScreen(book: book),
+    'application/pdf' => PdfReaderScreen(book: book),
+    'text/plain' => TxtReaderScreen(book: book),
+    _ => Scaffold(
+      appBar: AppBar(title: Text(book.title)),
+      body: Center(child: Text('暂不支持此格式：${book.mediaType}')),
+    ),
+  };
 }
 
-class _ReaderScreenState extends ConsumerState<ReaderScreen> {
+class EpubReaderScreen extends ConsumerStatefulWidget {
+  const EpubReaderScreen({required this.book, super.key});
+
+  final BookRecord book;
+
+  @override
+  ConsumerState<EpubReaderScreen> createState() => _EpubReaderScreenState();
+}
+
+class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
   final FoliateReaderEngine _engine = FoliateReaderEngine();
   final FoliatePageSnapshotController _snapshotController =
       FoliatePageSnapshotController();

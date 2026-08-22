@@ -24,7 +24,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   Future<void> _importBook() async {
     final result = await FilePicker.pickFile(
       type: FileType.custom,
-      allowedExtensions: const ['epub'],
+      allowedExtensions: const ['epub', 'pdf', 'txt'],
     );
     final path = result?.path;
     if (path == null || !mounted) return;
@@ -367,7 +367,7 @@ class _EmptyLibrary extends StatelessWidget {
               Text('开始你的书库', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 8),
               Text(
-                '导入 EPUB。阅读进度和书摘会先保存在本地，联网后再安全同步。',
+                '导入 EPUB、PDF 或 TXT。阅读进度和书摘会先保存在本地，联网后再安全同步。',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyLarge,
               ),

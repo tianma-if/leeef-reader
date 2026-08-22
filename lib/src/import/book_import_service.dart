@@ -66,6 +66,12 @@ class BookImportService {
     if (lower.endsWith('.epub')) {
       return const _BookFormat('epub', 'application/epub+zip');
     }
+    if (lower.endsWith('.pdf')) {
+      return const _BookFormat('pdf', 'application/pdf');
+    }
+    if (lower.endsWith('.txt')) {
+      return const _BookFormat('txt', 'text/plain');
+    }
     throw UnsupportedBookFormat(path);
   }
 

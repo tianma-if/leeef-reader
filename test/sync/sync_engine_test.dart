@@ -125,6 +125,56 @@ void main() {
     expect(await repository.pendingSyncOperations(), hasLength(1));
   });
 
+  for (final format in const [
+    (extension: 'pdf', mediaType: 'application/pdf'),
+    (extension: 'txt', mediaType: 'text/plain'),
+  ]) {
+    test(
+      'restores ${format.extension.toUpperCase()} with its original extension',
+      () async {
+        final repositoryA = LibraryRepository(
+          database: databaseA,
+          deviceId: 'device-a',
+          idGenerator: _Ids(['book-1', 'op-book']).next,
+        );
+        final repositoryB = LibraryRepository(
+          database: databaseB,
+          deviceId: 'device-b',
+        );
+        final source = File(
+          '${temporaryDirectory.path}/source.${format.extension}',
+        );
+        await source.writeAsString('synced-${format.extension}');
+        final book = await BookImportService(
+          repository: repositoryA,
+          libraryDirectory: Directory('${temporaryDirectory.path}/device-a'),
+        ).importFile(source);
+        expect(book.mediaType, format.mediaType);
+
+        final backend = DirectorySyncBackend(
+          Directory('${temporaryDirectory.path}/remote'),
+        );
+        await SyncEngine(
+          repository: repositoryA,
+          backend: backend,
+          libraryDirectory: Directory('${temporaryDirectory.path}/device-a'),
+        ).synchronize();
+        await SyncEngine(
+          repository: repositoryB,
+          backend: backend,
+          libraryDirectory: Directory('${temporaryDirectory.path}/device-b'),
+        ).synchronize();
+
+        final restored = await repositoryB.getBook('book-1');
+        expect(restored?.filePath, endsWith('.${format.extension}'));
+        expect(
+          await File(restored!.filePath!).readAsString(),
+          'synced-${format.extension}',
+        );
+      },
+    );
+  }
+
   test('corrupt blob is rejected and a later retry recovers', () async {
     final repositoryA = LibraryRepository(
       database: databaseA,

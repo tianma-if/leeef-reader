@@ -56,9 +56,12 @@ class SyncEngine {
       if (book.isAvailableLocally || !await _backend.hasBlob(book.sha256)) {
         continue;
       }
-      final extension = book.mediaType == 'application/epub+zip'
-          ? 'epub'
-          : 'bin';
+      final extension = switch (book.mediaType) {
+        'application/epub+zip' => 'epub',
+        'application/pdf' => 'pdf',
+        'text/plain' => 'txt',
+        _ => 'bin',
+      };
       final destination = File(
         '${_libraryDirectory.path}/${book.sha256}.$extension',
       );

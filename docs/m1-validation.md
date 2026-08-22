@@ -6,12 +6,12 @@
 
 | 验收项 | 状态 | 可运行闭环 |
 | --- | --- | --- |
-| 导入 → 阅读 → 摘录 → 同步 | 通过 | 原生文件选择、EPUB SHA-256 去重与受管目录落盘、foliate-js 阅读、进度恢复、目录/书签、选中文本书摘、笔记列表及跨设备文件/元数据同步 |
+| 导入 → 阅读 → 摘录 → 同步 | 进行中 | EPUB 闭环已通过；PDF/TXT 属于 P0 必选格式，正在补齐导入、阅读、定位恢复、书摘/书签及跨设备文件同步验证 |
 | MCP 查询与确认写入 | 通过 | `list_books` 查询；`plan_create_excerpt → confirm_write → apply_write` 一次性确认链；书摘、同步操作和审计事件在同一 SQLite 事务提交 |
 | 移动端 Page Curl 与降级 | 通过 | iOS/Android 阅读页使用独立 foliate WebView 预渲染当前与相邻页纹理并交给 Fragment Shader；截图或 Shader 不可用时自动执行普通翻页 |
 | 四端完整性与恢复 | 通过 | macOS、iPhone 真机、Android 16 ARM 模拟器和 Windows WebView2 均运行阅读集成与 M1 数据纵向测试；离线操作保留、幂等重放、冲突合并、损坏 blob 拒绝和修复重试均通过 |
 
-M1 的四项纵向闭环已经完成。当前同步产品入口使用 `DirectorySyncBackend`，可指向共享目录或网络盘，并严格采用与对象存储一致的 `blobs/{sha256}` 与 `ops/{deviceId}` 布局。S3 生产适配器、PDF/TXT 阅读引擎和更完整的书架管理仍属于首个 P0 版本发布前的扩展工作，不影响本阶段对核心架构闭环的验证结论。
+M1 的 EPUB 纵向闭环已经完成，但完整 P0 格式闭环尚未完成。PDF 与 TXT 和 EPUB 一样属于首发必选格式，只有三种格式的导入、阅读、定位恢复、书摘/书签、同步与四端验证全部通过后，才能将本阶段标记完成。当前同步产品入口使用 `DirectorySyncBackend`，可指向共享目录或网络盘，并严格采用与对象存储一致的 `blobs/{sha256}` 与 `ops/{deviceId}` 布局。
 
 ## 关键实现
 

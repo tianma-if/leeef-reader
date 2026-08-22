@@ -51,5 +51,7 @@ flutter test integration_test/foliate_reader_test.dart -d windows
 Assert-NativeSuccess "Windows integration test"
 flutter test integration_test/m1_vertical_slice_test.dart -d windows
 Assert-NativeSuccess "Windows M1 vertical slice test"
+flutter test integration_test/required_formats_test.dart -d windows
+Assert-NativeSuccess "Windows PDF and TXT integration test"
 
 Write-Host "Leeef Reader Windows verification passed."
