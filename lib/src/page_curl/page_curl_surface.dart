@@ -37,6 +37,7 @@ class PageCurlSurface extends StatefulWidget {
 
 class _PageCurlSurfaceState extends State<PageCurlSurface>
     with SingleTickerProviderStateMixin {
+  static Future<ui.FragmentProgram>? _programFuture;
   static const _paperSpring = SpringDescription(
     mass: 1,
     stiffness: 430,
@@ -48,12 +49,14 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
     duration: const Duration(milliseconds: 420),
   )..addListener(_handleAnimationTick);
   late ui.ImageShader _pageTexture;
+  ui.FragmentShader? _curlShader;
   double _touchY = 0.88;
 
   @override
   void initState() {
     super.initState();
     _pageTexture = _createPageTexture(widget.currentPage);
+    unawaited(_loadShader());
     _attachController(widget.controller);
     if (widget.autoComplete) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -105,7 +108,20 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
     _detachController(widget.controller);
     _animation.dispose();
     _pageTexture.dispose();
+    _curlShader?.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadShader() async {
+    try {
+      final program = await (_programFuture ??= ui.FragmentProgram.fromAsset(
+        'shaders/page_curl.frag',
+      ));
+      if (!mounted) return;
+      setState(() => _curlShader = program.fragmentShader());
+    } on Object {
+      // The tessellated painter below remains the portable fallback.
+    }
   }
 
   @override
@@ -145,6 +161,7 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
             },
             child: CustomPaint(
               painter: _PageCurlPainter(
+                curlShader: _curlShader,
                 pageTexture: _pageTexture,
                 currentPage: widget.currentPage,
                 nextPage: widget.nextPage,
@@ -238,6 +255,7 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
 
 class _PageCurlPainter extends CustomPainter {
   const _PageCurlPainter({
+    required this.curlShader,
     required this.pageTexture,
     required this.currentPage,
     required this.nextPage,
@@ -246,6 +264,7 @@ class _PageCurlPainter extends CustomPainter {
     required this.touchY,
   });
 
+  final ui.FragmentShader? curlShader;
   final ui.ImageShader pageTexture;
   final ui.Image currentPage;
   final ui.Image nextPage;
@@ -282,6 +301,38 @@ class _PageCurlPainter extends CustomPainter {
       Paint()..filterQuality = FilterQuality.medium,
     );
     if (progress >= 0.999) return;
+
+    final shader = curlShader;
+    if (shader != null) {
+      final cornerY = touchY < 0.42 ? 0.0 : size.height;
+      final corner = Offset(size.width, cornerY);
+      final travel = math.pow(progress.clamp(0.0, 1.0), 0.84).toDouble();
+      final touch = Offset(
+        size.width * (1 - 1.42 * travel),
+        cornerY + (size.height * touchY - cornerY) * 0.84,
+      );
+      final pull = corner - touch;
+      final pullLength = math.max(pull.distance, 0.001);
+      final normal = pull / pullLength;
+      final tangent = Offset(-normal.dy, normal.dx);
+      final foldCenter = (corner + touch) / 2;
+      final radius = (pullLength * 0.092).clamp(10.0, size.width * 0.105);
+      shader
+        ..setFloat(0, size.width)
+        ..setFloat(1, size.height)
+        ..setFloat(2, foldCenter.dx)
+        ..setFloat(3, foldCenter.dy)
+        ..setFloat(4, normal.dx)
+        ..setFloat(5, normal.dy)
+        ..setFloat(6, tangent.dx)
+        ..setFloat(7, tangent.dy)
+        ..setFloat(8, radius)
+        ..setFloat(9, direction)
+        ..setImageSampler(0, currentPage, filterQuality: FilterQuality.low)
+        ..setImageSampler(1, nextPage, filterQuality: FilterQuality.low);
+      canvas.drawRect(bounds, Paint()..shader = shader);
+      return;
+    }
 
     final mesh = PageCurlMesh.build(
       size: size,
@@ -339,6 +390,7 @@ class _PageCurlPainter extends CustomPainter {
   @override
   bool shouldRepaint(_PageCurlPainter oldDelegate) =>
       oldDelegate.progress != progress ||
+      oldDelegate.curlShader != curlShader ||
       oldDelegate.currentPage != currentPage ||
       oldDelegate.nextPage != nextPage ||
       oldDelegate.direction != direction ||
