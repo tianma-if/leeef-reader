@@ -67,6 +67,8 @@ void main() {
       await tester.pumpWidget(fixture.reader(book));
       await _pumpUntilFound(tester, find.byKey(const Key('txt-reader-text')));
       expect(find.textContaining('2 / '), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
     },
   );
 
@@ -127,6 +129,9 @@ void main() {
         find.text('2 / 2'),
         timeout: const Duration(seconds: 20),
       );
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
     },
   );
 }
@@ -187,7 +192,15 @@ class _Fixture {
 
   Future<void> dispose() async {
     await database.close();
-    await root.delete(recursive: true);
+    for (var attempt = 0; attempt < 5; attempt++) {
+      try {
+        await root.delete(recursive: true);
+        return;
+      } on PathAccessException {
+        if (attempt == 4) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+    }
   }
 }
 
