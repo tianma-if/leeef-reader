@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 导入 → 阅读 → 摘录 → 同步 | 通过 | EPUB、PDF、TXT 均完成导入、基础阅读与导航、稳定定位与进度恢复、书摘/书签，以及跨设备文件同步与完整性恢复验证 |
 | MCP 查询与确认写入 | 通过 | `list_books` 查询；`plan_create_excerpt → confirm_write → apply_write` 一次性确认链；书摘、同步操作和审计事件在同一 SQLite 事务提交 |
-| 移动端 Page Curl 与降级 | 通过 | iOS/Android 的 EPUB 使用独立 foliate WebView、TXT 使用 Canvas 预渲染当前与相邻页纹理并交给 Fragment Shader；TXT 支持左右区域单击自动卷页与交互拖动，纹理或 Shader 不可用时自动执行普通翻页 |
+| 移动端 Page Curl 与降级 | 通过 | iOS/Android 的 EPUB 使用独立 foliate WebView、TXT 使用 Canvas 预渲染当前与相邻页纹理并交给 Fragment Shader；TXT 支持左右区域单击自动卷页，纹理或 Shader 不可用时自动执行普通翻页 |
 | 四端完整性与恢复 | 通过 | macOS、iPhone 真机、Android 16 ARM 模拟器和 Windows WebView2 均运行阅读集成与 M1 数据纵向测试；离线操作保留、幂等重放、冲突合并、损坏 blob 拒绝和修复重试均通过 |
 
 M1 的 P0 格式纵向闭环已经完成。EPUB、PDF 与 TXT 三种首发必选格式均通过导入、阅读、定位恢复、书摘/书签、同步与四端自动化验证。当前同步产品入口使用 `DirectorySyncBackend`，可指向共享目录或网络盘，并严格采用与对象存储一致的 `blobs/{sha256}` 与 `ops/{deviceId}` 布局。
