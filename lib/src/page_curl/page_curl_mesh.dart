@@ -15,11 +15,13 @@ class PageCurlMesh {
     required this.page,
     required this.shadow,
     required this.curledEdge,
+    required this.foldCrease,
   });
 
   final ui.Vertices page;
   final ui.Vertices shadow;
   final Path curledEdge;
+  final Path foldCrease;
 
   static PageCurlMesh build({
     required Size size,
@@ -27,21 +29,26 @@ class PageCurlMesh {
     required double progress,
     required double direction,
     required double touchY,
-    int columns = 56,
-    int rows = 160,
+    int columns = 52,
+    int rows = 112,
   }) {
     final width = size.width;
     final height = size.height;
     final clampedProgress = progress.clamp(0.0, 1.0);
-    final corner = Offset(width, height * 0.94);
-    final touch = Offset(width * (1 - 1.34 * clampedProgress), height * touchY);
+    final cornerY = touchY < 0.42 ? 0.0 : height;
+    final corner = Offset(width, cornerY);
+    final travel = math.pow(clampedProgress, 0.84).toDouble();
+    final touch = Offset(
+      width * (1 - 1.42 * travel),
+      _lerpDouble(cornerY, height * touchY, 0.84),
+    );
     final pull = corner - touch;
     final pullLength = math.max(pull.distance, 0.001);
     final normal = pull / pullLength;
     final tangent = Offset(-normal.dy, normal.dx);
     final foldCenter = (corner + touch) / 2;
-    final baseRadius = (pullLength * 0.105).clamp(14.0, width * 0.09);
-    final cameraDistance = width * 2.35;
+    final baseRadius = (pullLength * 0.092).clamp(10.0, width * 0.105);
+    final cameraDistance = width * 2.8;
     final points = <_MeshPoint>[];
 
     for (var row = 0; row <= rows; row++) {
@@ -52,7 +59,10 @@ class PageCurlMesh {
         final fromFold = source - foldCenter;
         final alongAxis = _dot(fromFold, tangent);
         final distanceFromFold = _dot(fromFold, normal);
-        final radius = baseRadius;
+        // A real hand-held page is not a perfect cylinder. The bend is tighter
+        // near the dragged corner and opens slightly along the crease.
+        final axisDistance = (alongAxis.abs() / height).clamp(0.0, 1.0);
+        final radius = baseRadius * (0.82 + axisDistance * 0.24);
 
         var deformed = source;
         var z = 0.0;
@@ -61,7 +71,10 @@ class PageCurlMesh {
           final cylinderLength = math.pi * radius;
           if (distanceFromFold <= cylinderLength) {
             angle = distanceFromFold / radius;
-            final aroundAxis = -radius * math.sin(angle);
+            // Keep the first derivative continuous at the crease. Using a
+            // negative sine here reflects the sheet immediately and produces
+            // the characteristic "rubber flap" artifact.
+            final aroundAxis = radius * math.sin(angle);
             z = radius * (1 - math.cos(angle));
             deformed = foldCenter + tangent * alongAxis + normal * aroundAxis;
           } else {
@@ -72,7 +85,7 @@ class PageCurlMesh {
           }
         }
 
-        final perspective = cameraDistance / (cameraDistance - z * 1.65);
+        final perspective = cameraDistance / (cameraDistance - z * 1.35);
         final projected = Offset(
           (deformed.dx - width / 2) * perspective + width / 2,
           (deformed.dy - height / 2) * perspective + height / 2,
@@ -88,9 +101,9 @@ class PageCurlMesh {
         final heightRatio = (z / math.max(radius * 2, 0.001)).clamp(0.0, 1.0);
         final shadowPosition = Offset(
           direction > 0
-              ? deformed.dx + z * 0.58
-              : width - deformed.dx - z * 0.58,
-          deformed.dy + z * 0.34,
+              ? deformed.dx + z * 0.34
+              : width - deformed.dx - z * 0.34,
+          deformed.dy + (cornerY == height ? -z * 0.12 : z * 0.12),
         );
 
         points.add(
@@ -99,7 +112,12 @@ class PageCurlMesh {
             screenPosition: screenPosition,
             textureCoordinate: textureCoordinate,
             shadowPosition: shadowPosition,
-            shadowColor: Color.fromARGB((heightRatio * 48).round(), 0, 0, 0),
+            shadowColor: Color.fromARGB(
+              (math.sin(heightRatio * math.pi) * 72).round(),
+              18,
+              13,
+              8,
+            ),
             z: z,
             angle: angle,
           ),
@@ -184,6 +202,13 @@ class PageCurlMesh {
       }
     }
 
+    final foldCrease = _foldLinePath(
+      size: size,
+      center: foldCenter,
+      tangent: tangent,
+      direction: direction,
+    );
+
     return PageCurlMesh(
       page: ui.Vertices.raw(
         ui.VertexMode.triangles,
@@ -199,7 +224,28 @@ class PageCurlMesh {
         indices: triangleIndices,
       ),
       curledEdge: curledEdge,
+      foldCrease: foldCrease,
     );
+  }
+
+  static Path _foldLinePath({
+    required Size size,
+    required Offset center,
+    required Offset tangent,
+    required double direction,
+  }) {
+    final extent = size.longestSide * 2;
+    Offset mirror(Offset point) =>
+        direction > 0 ? point : Offset(size.width - point.dx, point.dy);
+    return Path()
+      ..moveTo(
+        mirror(center - tangent * extent).dx,
+        mirror(center - tangent * extent).dy,
+      )
+      ..lineTo(
+        mirror(center + tangent * extent).dx,
+        mirror(center + tangent * extent).dy,
+      );
   }
 
   static void _addTriangle(
@@ -230,18 +276,18 @@ class PageCurlMesh {
   static Color _paperLight(double angle) {
     if (angle > math.pi / 2) {
       final grazing = math.sin(angle).abs();
-      final light = 0.88 + grazing * 0.10;
+      final light = 0.78 + grazing * 0.12;
       return Color.fromARGB(
         255,
         (255 * light).round(),
-        (250 * light).round(),
-        (238 * light).round(),
+        (246 * light).round(),
+        (224 * light).round(),
       );
     }
     final diffuse = math.cos(angle).clamp(0.0, 1.0);
     final highlight =
-        math.exp(-math.pow((angle - 0.72) * 4.2, 2).toDouble()) * 0.10;
-    final light = (0.88 + diffuse * 0.10 + highlight).clamp(0.0, 1.0);
+        math.exp(-math.pow((angle - 0.62) * 5.0, 2).toDouble()) * 0.13;
+    final light = (0.84 + diffuse * 0.13 + highlight).clamp(0.0, 1.0);
     final channel = (255 * light).round();
     return Color.fromARGB(255, channel, channel, channel);
   }
@@ -249,6 +295,8 @@ class PageCurlMesh {
   static double _dot(Offset a, Offset b) => a.dx * b.dx + a.dy * b.dy;
 
   static double _cross(Offset a, Offset b) => a.dx * b.dy - a.dy * b.dx;
+
+  static double _lerpDouble(double a, double b, double t) => a + (b - a) * t;
 }
 
 class _MeshPoint {

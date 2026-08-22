@@ -219,10 +219,19 @@ class _PageCurlPainter extends CustomPainter {
     );
     canvas.drawVertices(
       mesh.shadow,
-      BlendMode.dst,
+      BlendMode.srcOver,
       Paint()
-        ..blendMode = BlendMode.srcOver
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 11)
+        ..isAntiAlias = true,
+    );
+    canvas.drawPath(
+      mesh.foldCrease,
+      Paint()
+        ..color = const Color(0x3D2B2118)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = math.max(9, size.shortestSide * 0.027)
+        ..strokeCap = StrokeCap.round
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9)
         ..isAntiAlias = true,
     );
     canvas.drawVertices(
@@ -237,15 +246,15 @@ class _PageCurlPainter extends CustomPainter {
       ..drawPath(
         mesh.curledEdge,
         Paint()
-          ..color = const Color(0x66806F58)
+          ..color = const Color(0x7A6E5A43)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.1
+          ..strokeWidth = 1.25
           ..isAntiAlias = true,
       )
       ..drawPath(
         mesh.curledEdge,
         Paint()
-          ..color = const Color(0x99FFFDF7)
+          ..color = const Color(0xB8FFFDF5)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 0.45
           ..isAntiAlias = true,
