@@ -49,5 +49,7 @@ flutter test
 Assert-NativeSuccess "flutter test"
 flutter test integration_test/foliate_reader_test.dart -d windows
 Assert-NativeSuccess "Windows integration test"
+flutter test integration_test/m1_vertical_slice_test.dart -d windows
+Assert-NativeSuccess "Windows M1 vertical slice test"
 
-Write-Host "Leeef Reader M0 Windows verification passed."
+Write-Host "Leeef Reader Windows verification passed."

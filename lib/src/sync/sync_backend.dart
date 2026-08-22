@@ -22,3 +22,12 @@ class SyncUnavailable implements Exception {
   @override
   String toString() => 'Sync unavailable: $message';
 }
+
+class SyncIntegrityException implements Exception {
+  const SyncIntegrityException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => 'Sync integrity failure: $message';
+}

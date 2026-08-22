@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:leeef_reader/src/sync/sync_backend.dart';
 import 'package:leeef_reader/src/sync/sync_operation.dart';
 
@@ -16,10 +17,20 @@ class DirectorySyncBackend implements SyncBackend {
   @override
   Future<void> uploadBlob(String sha256, File source) async {
     _validateSegment(sha256, 'sha256');
+    await _verifyDigest(source, sha256);
     final destination = File('${root.path}/blobs/$sha256/original');
-    if (await destination.exists()) return;
+    if (await destination.exists()) {
+      await _verifyDigest(destination, sha256);
+      return;
+    }
     await destination.parent.create(recursive: true);
     await _copyAtomically(source, destination);
+    try {
+      await _verifyDigest(destination, sha256);
+    } on Object {
+      if (await destination.exists()) await destination.delete();
+      rethrow;
+    }
   }
 
   @override
@@ -37,6 +48,12 @@ class DirectorySyncBackend implements SyncBackend {
     }
     await destination.parent.create(recursive: true);
     await _copyAtomically(source, destination);
+    try {
+      await _verifyDigest(destination, sha256);
+    } on Object {
+      if (await destination.exists()) await destination.delete();
+      rethrow;
+    }
   }
 
   @override
@@ -92,6 +109,18 @@ class DirectorySyncBackend implements SyncBackend {
     } on Object {
       if (await staging.exists()) await staging.delete();
       rethrow;
+    }
+  }
+
+  static Future<void> _verifyDigest(File file, String expected) async {
+    if (!await file.exists()) {
+      throw SyncIntegrityException('Missing file ${file.path}.');
+    }
+    final actual = (await sha256.bind(file.openRead()).first).toString();
+    if (actual != expected.toLowerCase()) {
+      throw SyncIntegrityException(
+        'SHA-256 mismatch for ${file.path}: expected $expected, got $actual.',
+      );
     }
   }
 

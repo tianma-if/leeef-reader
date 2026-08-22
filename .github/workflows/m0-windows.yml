@@ -1,4 +1,4 @@
-name: M0 Windows verification
+name: Leeef Windows verification
 
 on:
   workflow_dispatch:
@@ -18,7 +18,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.47.1
@@ -28,6 +28,6 @@ jobs:
         with:
           go-version-file: sidecars/leeef-mcp/go.mod
           cache-dependency-path: sidecars/leeef-mcp/go.sum
-      - name: Run M0 Windows verification
+      - name: Run Leeef Windows verification
         shell: pwsh
         run: ./tool/verify_m0_windows.ps1

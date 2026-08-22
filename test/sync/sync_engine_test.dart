@@ -124,6 +124,49 @@ void main() {
     await expectLater(engine.synchronize(), throwsA(isA<SyncUnavailable>()));
     expect(await repository.pendingSyncOperations(), hasLength(1));
   });
+
+  test('corrupt blob is rejected and a later retry recovers', () async {
+    final repositoryA = LibraryRepository(
+      database: databaseA,
+      deviceId: 'device-a',
+      idGenerator: _Ids(['book-1', 'op-book']).next,
+    );
+    final repositoryB = LibraryRepository(
+      database: databaseB,
+      deviceId: 'device-b',
+    );
+    final source = File('${temporaryDirectory.path}/source.epub');
+    await source.writeAsString('integrity-protected-book');
+    final book = await BookImportService(
+      repository: repositoryA,
+      libraryDirectory: Directory('${temporaryDirectory.path}/device-a'),
+    ).importFile(source);
+    final remote = Directory('${temporaryDirectory.path}/remote');
+    final backend = DirectorySyncBackend(remote);
+    await SyncEngine(
+      repository: repositoryA,
+      backend: backend,
+      libraryDirectory: Directory('${temporaryDirectory.path}/device-a'),
+    ).synchronize();
+    final remoteBlob = File('${remote.path}/blobs/${book.sha256}/original');
+    await remoteBlob.writeAsString('corrupted');
+
+    final engineB = SyncEngine(
+      repository: repositoryB,
+      backend: backend,
+      libraryDirectory: Directory('${temporaryDirectory.path}/device-b'),
+    );
+    await expectLater(
+      engineB.synchronize(),
+      throwsA(isA<SyncIntegrityException>()),
+    );
+    expect((await repositoryB.getBook('book-1'))?.isAvailableLocally, isFalse);
+
+    await remoteBlob.writeAsString('integrity-protected-book');
+    final recovery = await engineB.synchronize();
+    expect(recovery.downloadedBooks, 1);
+    expect((await repositoryB.getBook('book-1'))?.isAvailableLocally, isTrue);
+  });
 }
 
 class _OfflineBackend implements SyncBackend {
