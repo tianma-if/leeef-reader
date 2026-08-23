@@ -143,6 +143,14 @@ void main() {
         await fixture.database.select(fixture.database.excerpts).get(),
         hasLength(1),
       );
+      await _pumpUntil(
+        tester,
+        () async =>
+            (await fixture.repository.getReadingProgress(
+              book.id,
+            ))?.locator.startsWith('txt:') ??
+            false,
+      );
       final progress = await fixture.repository.getReadingProgress(book.id);
       expect(progress?.locator, startsWith('txt:'));
       expect(progress?.page, 2);
@@ -250,6 +258,19 @@ Future<void> _pumpUntilGone(
     await tester.pump(const Duration(milliseconds: 100));
   }
   expect(finder, findsNothing);
+}
+
+Future<void> _pumpUntil(
+  WidgetTester tester,
+  Future<bool> Function() condition, {
+  Duration timeout = const Duration(seconds: 10),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(deadline)) {
+    if (await condition()) return;
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+  fail('Condition was not met within $timeout.');
 }
 
 class _Fixture {

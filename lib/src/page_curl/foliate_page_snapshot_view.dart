@@ -37,8 +37,8 @@ class FoliatePageSnapshotController implements PageSnapshotSource {
 }
 
 /// An independently laid-out foliate WebView for previous/current/next page
-/// pre-rendering. It must remain mounted with a concrete Flutter layout while
-/// `takeScreenshot` runs; the snapshot key supplies the explicit capture size.
+/// pre-rendering. It exports the current Foliate layout as a platform-neutral
+/// model instead of relying on native WebView screenshots.
 class FoliatePageSnapshotView extends StatefulWidget {
   const FoliatePageSnapshotView({
     required this.controller,
@@ -93,14 +93,6 @@ class _FoliatePageSnapshotViewState extends State<FoliatePageSnapshotView> {
     return IgnorePointer(
       child: FoliateReaderView(
         engine: _engine,
-        // Android's virtual-display mode obeys Flutter's texture z-order, so
-        // this pre-renderer can stay behind the visible hybrid WebView while
-        // continuing to paint valid snapshots.
-        useHybridComposition: false,
-        // WebView.draw(Canvas), used by Android screenshot capture, omits
-        // accelerated iframe layers. Software rendering keeps EPUB iframe
-        // text and images in the captured page texture.
-        hardwareAcceleration: false,
         onWebViewCreated: (controller) {
           if (!_webView.isCompleted) _webView.complete(controller);
         },
@@ -154,59 +146,21 @@ class _FoliatePageSnapshotViewState extends State<FoliatePageSnapshotView> {
           ''',
         );
       }
-      final metrics = await webView.evaluateJavascript(
-        source: '''({
-          width: window.innerWidth,
-          height: window.innerHeight,
-          readyState: document.readyState
-        })''',
-      );
-      final metricMap = metrics is Map
-          ? Map<String, dynamic>.from(metrics)
-          : const <String, dynamic>{};
-      final reportedWidth = (metricMap['width'] as num?)?.toDouble() ?? 0;
-      final reportedHeight = (metricMap['height'] as num?)?.toDouble() ?? 0;
-      final width = reportedWidth > 0
-          ? reportedWidth
-          : key.viewportWidth.toDouble();
-      final height = reportedHeight > 0
-          ? reportedHeight
-          : key.viewportHeight.toDouble();
-      if (Platform.isIOS) {
-        final result = await webView.callAsyncJavaScript(
-          functionBody:
-              'return await globalThis.leeefReader.captureSnapshotModel(viewport)',
-          arguments: {
-            'viewport': {
-              'width': key.viewportWidth,
-              'height': key.viewportHeight,
-            },
+      final result = await webView.callAsyncJavaScript(
+        functionBody:
+            'return await globalThis.leeefReader.captureSnapshotModel(viewport)',
+        arguments: {
+          'viewport': {
+            'width': key.viewportWidth,
+            'height': key.viewportHeight,
           },
-        );
-        return _renderSnapshotModel(
-          result?.value,
-          width: key.viewportWidth,
-          height: key.viewportHeight,
-        );
-      }
-      final bytes = await webView.takeScreenshot(
-        screenshotConfiguration: ScreenshotConfiguration(
-          afterScreenUpdates: true,
-          compressFormat: CompressFormat.PNG,
-          rect: InAppWebViewRect(x: 0, y: 0, width: width, height: height),
-        ),
+        },
       );
-      if (bytes == null || bytes.isEmpty) {
-        throw StateError(
-          'Pre-render WebView returned an empty snapshot: $metrics',
-        );
-      }
-      final codec = await ui.instantiateImageCodec(bytes);
-      try {
-        return (await codec.getNextFrame()).image;
-      } finally {
-        codec.dispose();
-      }
+      return _renderSnapshotModel(
+        result?.value,
+        width: key.viewportWidth,
+        height: key.viewportHeight,
+      );
     }();
     final completion = operation.then<void>((_) {}, onError: (_, _) {});
     _navigation = completion;
