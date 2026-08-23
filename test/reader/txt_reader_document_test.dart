@@ -53,4 +53,50 @@ void main() {
     expect(document.text, '第一章 GBK 文本\n正文可以阅读');
     expect(document.chapters.single.title, '第一章 GBK 文本');
   });
+
+  test('detects common web-novel headings and strips site metadata', () {
+    final document = TxtReaderDocument.fromText('''
+书籍介绍
+正文 第一节
+第一节内容
+第一种人只是正文，不是标题。
+【第二章 新的开始】
+第二章内容
+第三节 重逢 更新时间:2026-08-23 12:00 本章字数:1234
+楔子 往事
+Chapter 5 Finale
+''');
+
+    expect(document.chapters.map((chapter) => chapter.title), [
+      '第一节',
+      '第二章 新的开始',
+      '第三节 重逢',
+      '楔子 往事',
+      'Chapter 5 Finale',
+    ]);
+    for (final chapter in document.chapters) {
+      expect(document.text.substring(chapter.offset), contains(chapter.title));
+      expect(
+        document.pages[document.pageIndexForOffset(chapter.offset)].start,
+        chapter.offset,
+      );
+    }
+  });
+
+  test('detects alternate volume labels and common ending sections', () {
+    final document = TxtReaderDocument.fromText('''
+卷一 初见
+正文
+终章 再会
+番外篇 婚礼
+后记
+''');
+
+    expect(document.chapters.map((chapter) => chapter.title), [
+      '卷一 初见',
+      '终章 再会',
+      '番外篇 婚礼',
+      '后记',
+    ]);
+  });
 }

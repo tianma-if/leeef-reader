@@ -35,17 +35,40 @@ class TxtReaderDocument {
     if (pageLength < 1) {
       throw ArgumentError.value(pageLength, 'pageLength', 'Must be positive.');
     }
+    final chapters = <TxtChapter>[];
+    var lineOffset = 0;
+    for (final line in text.split('\n')) {
+      final title = _extractChapterTitle(line);
+      if (title != null) {
+        chapters.add(TxtChapter(title: title, offset: lineOffset));
+      }
+      lineOffset += line.length + 1;
+    }
+
     final pages = <TxtPage>[];
     if (text.isEmpty) {
       pages.add(const TxtPage(start: 0, end: 0, text: ''));
     } else {
       var start = 0;
+      var nextChapterIndex = 0;
       while (start < text.length) {
         var end = (start + pageLength).clamp(0, text.length);
+        while (nextChapterIndex < chapters.length &&
+            chapters[nextChapterIndex].offset <= start) {
+          nextChapterIndex++;
+        }
+        final nextChapterOffset = nextChapterIndex < chapters.length
+            ? chapters[nextChapterIndex].offset
+            : text.length;
+        if (nextChapterOffset > start && nextChapterOffset < end) {
+          end = nextChapterOffset;
+        }
         if (end < text.length) {
           final searchStart = start + (pageLength * 0.55).round();
           final newline = text.lastIndexOf('\n', end);
-          if (newline >= searchStart) end = newline + 1;
+          if (end != nextChapterOffset && newline >= searchStart) {
+            end = newline + 1;
+          }
           if (end < text.length && _splitsSurrogatePair(text, end)) end--;
         }
         pages.add(
@@ -53,20 +76,6 @@ class TxtReaderDocument {
         );
         start = end;
       }
-    }
-
-    final chapters = <TxtChapter>[];
-    final heading = RegExp(
-      r'^(?:第.{1,12}[章节卷回部篇]|chapter\s+\d+\b).{0,50}$',
-      caseSensitive: false,
-    );
-    var offset = 0;
-    for (final line in text.split('\n')) {
-      final candidate = line.trim();
-      if (candidate.isNotEmpty && heading.hasMatch(candidate)) {
-        chapters.add(TxtChapter(title: candidate, offset: offset));
-      }
-      offset += line.length + 1;
     }
     return TxtReaderDocument(text: text, pages: pages, chapters: chapters);
   }
@@ -91,6 +100,37 @@ class TxtReaderDocument {
 
   static bool _isHighSurrogate(int value) => value >= 0xD800 && value <= 0xDBFF;
   static bool _isLowSurrogate(int value) => value >= 0xDC00 && value <= 0xDFFF;
+
+  static String? _extractChapterTitle(String line) {
+    var candidate = line.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (candidate.isEmpty || candidate.length > 100) return null;
+
+    candidate = candidate
+        .replaceFirst(RegExp(r'\s*(?:更新时间|更新日期|发布时间)\s*[:：].*$'), '')
+        .replaceFirst(RegExp(r'\s*本章字数\s*[:：].*$'), '');
+    if (candidate.length >= 2) {
+      const wrappers = <String, String>{'【': '】', '[': ']', '《': '》'};
+      final closing = wrappers[candidate[0]];
+      if (closing != null && candidate.endsWith(closing)) {
+        candidate = candidate.substring(1, candidate.length - 1).trim();
+      }
+    }
+    candidate = candidate.replaceFirst(RegExp(r'^正文\s+'), '');
+
+    final numberedHeading = RegExp(
+      r'^(?:(?:第\s*[〇零一二三四五六七八九十百千万两\d０-９]{1,12}\s*[章节卷回部篇集幕]|'
+      r'[卷章节]\s*[〇零一二三四五六七八九十百千万两\d０-９]{1,12})'
+      r'(?:$|[\s:：、.．—-].{0,60}$)|chapter\s+\d+\b(?:$|\s+.{1,60}$))',
+      caseSensitive: false,
+    );
+    final namedHeading = RegExp(
+      r'^(?:序章|序言|楔子|引子|前言|后记|尾声|终章|终卷|番外(?:篇|章)?)(?:\s*[-—:：、.]?\s*.{0,50})?$',
+    );
+    return numberedHeading.hasMatch(candidate) ||
+            namedHeading.hasMatch(candidate)
+        ? candidate
+        : null;
+  }
 
   static String _decodeText(Uint8List bytes) {
     if (charset.hasUtf16BeBom(bytes) || charset.hasUtf16LeBom(bytes)) {
