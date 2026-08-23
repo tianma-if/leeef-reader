@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:leeef_reader/src/app_providers.dart';
 import 'package:leeef_reader/src/data/database/app_database.dart';
@@ -13,7 +14,6 @@ import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
 import 'package:leeef_reader/src/features/reader/txt_page_snapshot_renderer.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
-import 'package:leeef_reader/src/page_curl/page_texture_cache.dart';
 
 class TxtReaderScreen extends ConsumerStatefulWidget {
   const TxtReaderScreen({required this.book, super.key, this.pageCurlEnabled});
@@ -34,14 +34,16 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   String? _lastPersistedLocator;
   bool _preparingTurn = false;
   _TxtCurlTurn? _curlTurn;
+  int? _snapshotPageIndex;
   final GlobalKey _bodyKey = GlobalKey();
+  final GlobalKey _visiblePageBoundaryKey = GlobalKey();
+  final GlobalKey _snapshotPageBoundaryKey = GlobalKey();
   Offset? _pointerDownPosition;
   DateTime? _pointerDownAt;
   PageCurlController? _pointerCurlController;
   Offset? _lastPointerPosition;
   Duration? _lastPointerTime;
   double _horizontalVelocity = 0;
-  final PageTextureCache<String> _textureCache = PageTextureCache();
   LibraryRepository? _repository;
 
   bool get _supportsPageCurl =>
@@ -57,7 +59,6 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   void dispose() {
     _progressTimer?.cancel();
     _curlTurn?.dispose();
-    _textureCache.dispose();
     super.dispose();
   }
 
@@ -78,9 +79,6 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
           _document = document;
           _pageIndex = document.pageIndexForOffset(offset);
         });
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => unawaited(_prefetchAdjacentTextures()),
-        );
       }
     } on Object catch (error) {
       if (mounted) setState(() => _error = error);
@@ -125,14 +123,19 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
         const TextStyle(fontSize: 16, height: 1.8);
     final textDirection = Directionality.of(context);
 
-    setState(() => _preparingTurn = true);
+    setState(() {
+      _preparingTurn = true;
+      _snapshotPageIndex = target;
+    });
     ui.Image? currentImage;
     ui.Image? targetImage;
     try {
+      await _waitForSnapshotPagePaint();
       final images = await Future.wait([
-        _textureCache.get(
-          _textureKey(_pageIndex, size, pixelRatio, backgroundColor, textStyle),
-          () => renderTxtPageSnapshot(
+        _captureTxtPage(
+          boundaryKey: _visiblePageBoundaryKey,
+          pixelRatio: pixelRatio,
+          fallback: () => renderTxtPageSnapshot(
             text: document.pages[_pageIndex].text,
             size: size,
             pixelRatio: pixelRatio,
@@ -141,9 +144,10 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
             textDirection: textDirection,
           ),
         ),
-        _textureCache.get(
-          _textureKey(target, size, pixelRatio, backgroundColor, textStyle),
-          () => renderTxtPageSnapshot(
+        _captureTxtPage(
+          boundaryKey: _snapshotPageBoundaryKey,
+          pixelRatio: pixelRatio,
+          fallback: () => renderTxtPageSnapshot(
             text: document.pages[target].text,
             size: size,
             pixelRatio: pixelRatio,
@@ -177,8 +181,37 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       controller?.dispose();
       if (mounted) _goToPage(target);
     } finally {
-      if (mounted) setState(() => _preparingTurn = false);
+      if (mounted) {
+        setState(() {
+          _preparingTurn = false;
+          _snapshotPageIndex = null;
+        });
+      }
     }
+  }
+
+  Future<void> _waitForSnapshotPagePaint() async {
+    for (var frame = 0; frame < 2 && mounted; frame++) {
+      WidgetsBinding.instance.scheduleFrame();
+      await WidgetsBinding.instance.endOfFrame;
+    }
+  }
+
+  Future<ui.Image> _captureTxtPage({
+    required GlobalKey boundaryKey,
+    required double pixelRatio,
+    required Future<ui.Image> Function() fallback,
+  }) async {
+    final renderObject = boundaryKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderRepaintBoundary || !renderObject.hasSize) {
+      return fallback();
+    }
+    if (renderObject.debugNeedsPaint) {
+      WidgetsBinding.instance.scheduleFrame();
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    if (!mounted || renderObject.debugNeedsPaint) return fallback();
+    return renderObject.toImage(pixelRatio: pixelRatio);
   }
 
   void _handlePointerDown(PointerDownEvent event) {
@@ -301,11 +334,6 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     }
     setState(() => _curlTurn = null);
     WidgetsBinding.instance.addPostFrameCallback((_) => turn.dispose());
-    if (completed) {
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => unawaited(_prefetchAdjacentTextures()),
-      );
-    }
   }
 
   Future<void> _waitForTargetPagePaint() async {
@@ -314,58 +342,6 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       await WidgetsBinding.instance.endOfFrame;
     }
   }
-
-  Future<void> _prefetchAdjacentTextures() async {
-    final document = _document;
-    final renderObject = _bodyKey.currentContext?.findRenderObject();
-    if (!mounted ||
-        document == null ||
-        renderObject is! RenderBox ||
-        !renderObject.hasSize) {
-      return;
-    }
-    final size = renderObject.size;
-    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
-    final theme = Theme.of(context);
-    final backgroundColor = theme.scaffoldBackgroundColor;
-    final textStyle =
-        theme.textTheme.bodyLarge?.copyWith(height: 1.8) ??
-        const TextStyle(fontSize: 16, height: 1.8);
-    final textDirection = Directionality.of(context);
-    final indexes = <int>{
-      _pageIndex,
-      if (_pageIndex > 0) _pageIndex - 1,
-      if (_pageIndex + 1 < document.pages.length) _pageIndex + 1,
-    };
-    try {
-      await Future.wait([
-        for (final index in indexes)
-          _textureCache.prefetch(
-            _textureKey(index, size, pixelRatio, backgroundColor, textStyle),
-            () => renderTxtPageSnapshot(
-              text: document.pages[index].text,
-              size: size,
-              pixelRatio: pixelRatio,
-              backgroundColor: backgroundColor,
-              textStyle: textStyle,
-              textDirection: textDirection,
-            ),
-          ),
-      ]);
-    } on Object {
-      // Prefetch is opportunistic; on-demand rendering remains available.
-    }
-  }
-
-  String _textureKey(
-    int pageIndex,
-    Size size,
-    double pixelRatio,
-    Color backgroundColor,
-    TextStyle textStyle,
-  ) =>
-      '${widget.book.id}:$pageIndex:${size.width}x${size.height}:'
-      '$pixelRatio:${backgroundColor.toARGB32()}:${textStyle.hashCode}';
 
   void _scheduleProgressSave() {
     _progressTimer?.cancel();
@@ -503,26 +479,28 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
             )
           else if (page == null)
             const Center(child: CircularProgressIndicator())
-          else
-            Positioned.fill(
-              child: SingleChildScrollView(
-                key: ValueKey('txt-page-$_pageIndex'),
-                padding: const EdgeInsets.fromLTRB(28, 24, 28, 120),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 760),
-                    child: SelectableText(
-                      page.text,
-                      key: const Key('txt-reader-text'),
-                      onSelectionChanged: _onSelectionChanged,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodyLarge?.copyWith(height: 1.8),
+          else ...[
+            if (_snapshotPageIndex case final snapshotPageIndex?)
+              Positioned.fill(
+                child: ExcludeSemantics(
+                  child: IgnorePointer(
+                    child: RepaintBoundary(
+                      key: _snapshotPageBoundaryKey,
+                      child: _buildTxtPage(
+                        document!.pages[snapshotPageIndex],
+                        interactive: false,
+                      ),
                     ),
                   ),
                 ),
               ),
+            Positioned.fill(
+              child: RepaintBoundary(
+                key: _visiblePageBoundaryKey,
+                child: _buildTxtPage(page, interactive: true),
+              ),
             ),
+          ],
           if (page != null && _supportsPageCurl) ...[
             _buildCurlGestureZone(Alignment.centerLeft),
             _buildCurlGestureZone(Alignment.centerRight),
@@ -624,6 +602,30 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       onPointerUp: _handlePointerUp,
       onPointerCancel: _handlePointerCancel,
       child: const SizedBox.expand(),
+    ),
+  );
+
+  Widget _buildTxtPage(TxtPage page, {required bool interactive}) => ColoredBox(
+    color: Theme.of(context).scaffoldBackgroundColor,
+    child: SingleChildScrollView(
+      key: ValueKey(
+        interactive
+            ? 'txt-page-$_pageIndex'
+            : 'txt-snapshot-$_snapshotPageIndex',
+      ),
+      primary: false,
+      padding: const EdgeInsets.fromLTRB(28, 24, 28, 120),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: SelectableText(
+            page.text,
+            key: interactive ? const Key('txt-reader-text') : null,
+            onSelectionChanged: interactive ? _onSelectionChanged : null,
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.8),
+          ),
+        ),
+      ),
     ),
   );
 }
