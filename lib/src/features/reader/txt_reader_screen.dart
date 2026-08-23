@@ -166,6 +166,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
           current: currentImage!,
           target: targetImage!,
           targetIndex: target,
+          direction: target > _pageIndex ? 1 : -1,
           autoComplete: autoComplete,
           controller: controller,
         );
@@ -286,22 +287,31 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     _lastPointerTime = null;
   }
 
-  void _finishTurn({required bool completed}) {
+  Future<void> _finishTurn({required bool completed}) async {
     final turn = _curlTurn;
     if (turn == null) return;
-    setState(() {
-      _curlTurn = null;
-      if (completed) {
+    if (completed) {
+      setState(() {
         _pageIndex = turn.targetIndex;
         _selection = null;
-      }
-    });
+      });
+      _scheduleProgressSave();
+      await _waitForTargetPagePaint();
+      if (!mounted || !identical(_curlTurn, turn)) return;
+    }
+    setState(() => _curlTurn = null);
     WidgetsBinding.instance.addPostFrameCallback((_) => turn.dispose());
     if (completed) {
-      _scheduleProgressSave();
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => unawaited(_prefetchAdjacentTextures()),
       );
+    }
+  }
+
+  Future<void> _waitForTargetPagePaint() async {
+    for (var frame = 0; frame < 2 && mounted; frame++) {
+      WidgetsBinding.instance.scheduleFrame();
+      await WidgetsBinding.instance.endOfFrame;
     }
   }
 
@@ -583,7 +593,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                 key: const Key('txt-page-curl'),
                 currentPage: turn.current,
                 nextPage: turn.target,
-                direction: turn.targetIndex > _pageIndex ? 1 : -1,
+                direction: turn.direction,
                 autoComplete: turn.autoComplete,
                 controller: turn.controller,
                 onTurnCompleted: () => _finishTurn(completed: true),
@@ -623,6 +633,7 @@ class _TxtCurlTurn {
     required this.current,
     required this.target,
     required this.targetIndex,
+    required this.direction,
     required this.autoComplete,
     this.controller,
   });
@@ -630,6 +641,7 @@ class _TxtCurlTurn {
   final ui.Image current;
   final ui.Image target;
   final int targetIndex;
+  final double direction;
   final bool autoComplete;
   final PageCurlController? controller;
 

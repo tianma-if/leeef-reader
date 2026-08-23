@@ -207,7 +207,11 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
     } else {
       widget.onTurnCancelled?.call();
     }
-    if (mounted) {
+    // A completed turn stays on the target-page texture until its parent has
+    // committed the real reader navigation underneath. Resetting to zero here
+    // briefly reveals the old or not-yet-painted live page and makes text look
+    // as if it ripples back into place. Cancellation still returns to zero.
+    if (mounted && !complete) {
       if (widget.controller case final controller?) {
         controller.setProgress(0);
       } else {
