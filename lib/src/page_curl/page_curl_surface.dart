@@ -203,6 +203,21 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
       ),
     );
     if (complete) {
+      // A spring is considered settled while it is still only very close to
+      // its target. Do not let the parent remove this surface at that value:
+      // the shader can still contain a sizeable piece of the outgoing page,
+      // which then disappears in one frame and looks like the new text is
+      // rippling into place. Pin the visual state to the fully revealed target
+      // page and submit that frame before committing the reader navigation.
+      if (!mounted) return;
+      if (widget.controller case final controller?) {
+        controller.setProgress(1);
+      } else {
+        setState(() => _gesture.setProgress(1));
+      }
+      WidgetsBinding.instance.scheduleFrame();
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
       widget.onTurnCompleted();
     } else {
       widget.onTurnCancelled?.call();
@@ -310,10 +325,16 @@ class _PageCurlPainter extends CustomPainter {
     if (shader != null) {
       final cornerY = touchY < 0.42 ? 0.0 : size.height;
       final corner = Offset(size.width, cornerY);
-      // Progress is already normalized from the pointer's horizontal travel;
-      // keep the free corner on that trajectory instead of accelerating it
-      // ahead of the finger with a second easing curve.
-      final travel = progress.clamp(0.0, 1.0);
+      // The finger only has to travel one viewport width, but the loose page
+      // corner has to continue past the opposite edge for the fold crease and
+      // the outgoing sheet to leave the viewport. Keeping both distances at
+      // one width strands a large piece of the old page on screen at p ~= 1,
+      // followed by an abrupt full-page content swap. The cubic term is tiny
+      // near the start (so the page remains attached to the finger) and adds
+      // the extra off-screen travel during the settling half of the turn.
+      final progressValue = progress.clamp(0.0, 1.0);
+      final travel =
+          progressValue + progressValue * progressValue * progressValue;
       final touchX = size.width * (1 - travel);
       final horizontalPull = math.max(size.width - touchX, 1.0);
       final requestedVerticalPull = (size.height * touchY - cornerY) * 0.84;
