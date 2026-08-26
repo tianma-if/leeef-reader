@@ -3,11 +3,20 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  audioplayers_windows
+  connectivity_plus
+  desktop_drop
   flutter_inappwebview_windows
+  flutter_secure_storage_windows
+  flutter_tts
+  screen_retriever_windows
+  share_plus
   url_launcher_windows
+  window_manager
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
+  flutter_local_notifications_windows
   jni
 )
 

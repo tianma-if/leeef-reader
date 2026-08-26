@@ -8,6 +8,8 @@ import 'package:flutter/physics.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_gesture.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_mesh.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_performance.dart';
+import 'package:leeef_reader/src/platform/app_log.dart';
 
 class PageCurlSurface extends StatefulWidget {
   const PageCurlSurface({
@@ -20,6 +22,7 @@ class PageCurlSurface extends StatefulWidget {
     this.controller,
     this.direction = 1,
     this.autoComplete = false,
+    this.onPerformanceReport,
   });
 
   final ui.Image currentPage;
@@ -30,6 +33,7 @@ class PageCurlSurface extends StatefulWidget {
   final PageCurlController? controller;
   final double direction;
   final bool autoComplete;
+  final void Function(PageCurlPerformanceReport report)? onPerformanceReport;
 
   @override
   State<PageCurlSurface> createState() => _PageCurlSurfaceState();
@@ -51,6 +55,9 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
   late ui.ImageShader _pageTexture;
   ui.FragmentShader? _curlShader;
   double _touchY = 0.88;
+  late final PageCurlPerformanceMonitor _performance =
+      PageCurlPerformanceMonitor(onReport: widget.onPerformanceReport);
+  bool _performanceStarted = false;
 
   @override
   void initState() {
@@ -62,6 +69,15 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(_settle(true));
       });
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_performanceStarted) {
+      _performance.start(refreshRate: View.of(context).display.refreshRate);
+      _performanceStarted = true;
     }
   }
 
@@ -105,6 +121,19 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
 
   @override
   void dispose() {
+    if (_performanceStarted) {
+      final report = _performance.stop();
+      if (report.frameCount > 0) {
+        unawaited(
+          AppLog.info(
+            'PageCurl frames=${report.frameCount} '
+            'target=${report.targetRefreshRate.toStringAsFixed(0)}Hz '
+            'p90=${report.p90FrameTime.inMicroseconds / 1000}ms '
+            'slow=${(report.slowFrameRatio * 100).toStringAsFixed(1)}%',
+          ),
+        );
+      }
+    }
     _detachController(widget.controller);
     _animation.dispose();
     _pageTexture.dispose();

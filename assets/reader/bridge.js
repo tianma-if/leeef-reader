@@ -3,6 +3,21 @@ import '../foliate-js/view.js'
 const view = document.querySelector('#reader')
 let currentBookURL
 let selectionTimer
+let ttsHighlight
+let allowBookJavaScript = false
+const originalChineseText = new WeakMap()
+
+const enforceBookScriptPolicy = doc => {
+    if (allowBookJavaScript) return
+    doc.querySelectorAll('script').forEach(node => node.remove())
+    new MutationObserver(records => {
+        for (const record of records) for (const node of record.addedNodes) {
+            if (node.nodeType !== Node.ELEMENT_NODE) continue
+            if (node.matches?.('script')) node.remove()
+            node.querySelectorAll?.('script').forEach(script => script.remove())
+        }
+    }).observe(doc.documentElement, { childList: true, subtree: true })
+}
 
 const send = (type, payload = {}) => {
     const bridge = globalThis.flutter_inappwebview
@@ -40,6 +55,42 @@ view.addEventListener('relocate', ({ detail }) => {
 })
 
 view.addEventListener('load', ({ detail: { doc, index } }) => {
+    enforceBookScriptPolicy(doc)
+    doc.addEventListener('click', async event => {
+        const image = event.target?.closest?.('img,svg image')
+        if (image) {
+            event.preventDefault()
+            event.stopImmediatePropagation()
+            let source = image.currentSrc || image.src || image.getAttribute('href') || ''
+            try {
+                const blob = await fetch(source).then(response => response.blob())
+                source = await new Promise((resolve, reject) => {
+                    const reader = new FileReader()
+                    reader.onload = () => resolve(reader.result)
+                    reader.onerror = reject
+                    reader.readAsDataURL(blob)
+                })
+            } catch (_) { /* Fall back to the resolved source URL. */ }
+            send('image', {
+                source,
+                description: image.alt || image.getAttribute('aria-label') || '',
+            })
+            return
+        }
+        const anchor = event.target?.closest?.('a[href^="#"]')
+        if (!anchor) return
+        const id = decodeURIComponent(anchor.getAttribute('href').slice(1))
+        const target = doc.getElementById(id)
+        if (!target) return
+        const semantics = `${target.getAttribute('epub:type') || ''} ${target.getAttribute('role') || ''}`
+        if (!/(footnote|doc-note|note)/i.test(semantics) && target.innerText.length > 800) return
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        send('footnote', {
+            title: anchor.innerText?.trim() || '脚注',
+            text: target.innerText?.trim() || '',
+        })
+    }, true)
     doc.addEventListener('selectionchange', () => {
         clearTimeout(selectionTimer)
         selectionTimer = setTimeout(() => {
@@ -59,7 +110,7 @@ view.addEventListener('load', ({ detail: { doc, index } }) => {
 
 view.addEventListener('external-link', event => {
     event.preventDefault()
-    send('external-link', { href: event.detail.href_ })
+    send('external-link', { href: event.detail.a?.href || event.detail.href_ })
 })
 
 globalThis.leeefReader = {
@@ -75,15 +126,30 @@ globalThis.leeefReader = {
     },
     next: () => view.next(),
     previous: () => view.prev(),
+    historyBack: () => view.history.back(),
+    historyForward: () => view.history.forward(),
+    historyState: () => ({
+        canGoBack: view.history.canGoBack,
+        canGoForward: view.history.canGoForward,
+    }),
     goTo: locator => view.goTo(locator),
     close: async () => {
         await view.close()
         currentBookURL = null
     },
-    setLayout: ({ flow = 'paginated', maxColumnCount = 1, margin = 24 }) => {
+    setLayout: ({ flow = 'paginated', maxColumnCount = 1, margin = 24,
+        pageTurnEffect = 'slide' }) => {
         view.setAttribute('flow', flow)
         view.setAttribute('max-column-count', String(maxColumnCount))
         view.setAttribute('margin', `${margin}px`)
+        if (pageTurnEffect === 'slide') view.setAttribute('animated', '')
+        else view.removeAttribute('animated')
+    },
+    setBookJavaScriptEnabled: enabled => {
+        allowBookJavaScript = enabled === true
+        if (!allowBookJavaScript) {
+            for (const { doc } of view.renderer.getContents()) enforceBookScriptPolicy(doc)
+        }
     },
     probeLayout() {
         const contents = view.renderer.getContents()
@@ -91,6 +157,7 @@ globalThis.leeefReader = {
             flow: view.getAttribute('flow'),
             maxColumnCount: Number(view.getAttribute('max-column-count')),
             margin: view.getAttribute('margin'),
+            animated: view.hasAttribute('animated'),
             renderedSections: contents.length,
             textLength: contents.reduce(
                 (length, { doc }) => length + (doc.body?.innerText?.length ?? 0),
@@ -100,12 +167,159 @@ globalThis.leeefReader = {
             viewportHeight: window.innerHeight,
         }
     },
-    setTheme: ({ foreground, background, fontSize, lineHeight }) => {
+    setTheme: ({ foreground, background, fontSize, lineHeight, fontFamily,
+        fontWeight, headingScale, letterSpacing, paragraphSpacing, textIndent,
+        textAlign, writingMode, preserveBookStyles, eInkMode, codeHighlight,
+        backgroundImage, backgroundOpacity, backgroundBlur, backgroundFit,
+        importedFontName, importedFontData, customCSS }) => {
         const style = document.documentElement.style
         if (foreground) style.setProperty('--reader-foreground', foreground)
         if (background) style.setProperty('--reader-background', background)
         if (fontSize) style.setProperty('--reader-font-size', `${fontSize}px`)
         if (lineHeight) style.setProperty('--reader-line-height', String(lineHeight))
+        const fontFace = importedFontData && importedFontName ? `
+            @font-face {
+                font-family: 'LeeefImportedFont';
+                src: url('${importedFontData}');
+                font-display: swap;
+            }` : ''
+        const typography = preserveBookStyles ? '' : `
+            body, body *:not(svg):not(svg *) {
+                font-family: ${fontFamily || 'serif'} !important;
+                font-size: ${fontSize || 18}px !important;
+                font-weight: ${fontWeight || 400} !important;
+                line-height: ${lineHeight || 1.65} !important;
+                letter-spacing: ${letterSpacing || 0}px !important;
+                text-align: ${textAlign || 'start'} !important;
+            }`
+        const codeTheme = codeHighlight ? `
+            pre, code { font-family: monospace !important; }
+            pre { padding: .8em; border-radius: .45em; overflow: auto;
+                color: ${eInkMode ? '#000' : '#d8dee9'} !important;
+                background: ${eInkMode ? '#fff' : '#20242b'} !important; }
+            .keyword, .hljs-keyword { color: ${eInkMode ? '#000' : '#c678dd'} !important; font-weight: 700; }
+            .string, .hljs-string { color: ${eInkMode ? '#333' : '#98c379'} !important; }
+            .comment, .hljs-comment { color: ${eInkMode ? '#666' : '#7f848e'} !important; font-style: italic; }
+            .number, .hljs-number { color: ${eInkMode ? '#222' : '#d19a66'} !important; }` : ''
+        const imageLayer = backgroundImage ? `
+            html { background: ${background || 'transparent'} !important; }
+            body { background: transparent !important; isolation: isolate; }
+            body::before {
+                content: ''; position: fixed; inset: -${backgroundBlur || 0}px;
+                z-index: -1; pointer-events: none;
+                opacity: ${backgroundOpacity ?? .18};
+                filter: blur(${backgroundBlur || 0}px);
+                background-image: url('${backgroundImage}');
+                background-position: center;
+                background-repeat: no-repeat;
+                background-size: ${backgroundFit || 'cover'};
+            }` : ''
+        const css = `${fontFace}
+            :root { color-scheme: light dark !important; }
+            html, body {
+                color: ${foreground || 'inherit'} !important;
+                background: ${backgroundImage ? 'transparent' : (background || 'transparent')} !important;
+                font-family: ${fontFamily || 'serif'} !important;
+                font-size: ${fontSize || 18}px !important;
+                font-weight: ${fontWeight || 400} !important;
+                line-height: ${lineHeight || 1.65} !important;
+                letter-spacing: ${letterSpacing || 0}px !important;
+                text-align: ${textAlign || 'start'} !important;
+                writing-mode: ${writingMode || 'horizontal-tb'} !important;
+            }
+            body { ${eInkMode ? 'filter: grayscale(1) contrast(1.12);' : ''} }
+            p { margin-block: ${paragraphSpacing ?? 0.65}em !important;
+                text-indent: ${textIndent || 0}em !important; }
+            h1 { font-size: ${(fontSize || 18) * (headingScale || 1.25) * 1.35}px !important; }
+            h2 { font-size: ${(fontSize || 18) * (headingScale || 1.25) * 1.15}px !important; }
+            h3, h4, h5, h6 { font-size: ${(fontSize || 18) * (headingScale || 1.25)}px !important; }
+            ${typography}
+            ${imageLayer}
+            ${codeTheme}
+            ${customCSS || ''}`
+        view.renderer.setStyles?.(css)
+    },
+    async search(query) {
+        const results = []
+        for await (const result of view.search({ query })) {
+            if (!result || typeof result !== 'object' || !result.subitems) continue
+            for (const item of result.subitems) results.push({
+                label: localizedText(result.label) ?? '',
+                cfi: item.cfi,
+                excerpt: item.excerpt
+                    ? `${item.excerpt.pre}${item.excerpt.match}${item.excerpt.post}`
+                    : '',
+            })
+        }
+        return results
+    },
+    clearSearch: () => view.clearSearch(),
+    currentText: () => view.renderer.getContents()
+        .map(({ doc }) => doc.body?.innerText ?? '')
+        .filter(Boolean)
+        .join('\n'),
+    bookText: async ({ maxCharacters = 2000000 } = {}) => {
+        const output = []
+        let length = 0
+        for (const section of view.book?.sections ?? []) {
+            if (!section.createDocument || length >= maxCharacters) continue
+            const doc = await section.createDocument()
+            const text = (doc.body?.innerText ?? doc.documentElement?.textContent ?? '')
+                .replace(/\s+\n/g, '\n').trim()
+            if (!text) continue
+            const remaining = maxCharacters - length
+            output.push(text.slice(0, remaining))
+            length += Math.min(text.length, remaining)
+        }
+        return output.join('\n\n')
+    },
+    visibleTextNodes() {
+        const nodes = []
+        for (const { doc } of view.renderer.getContents()) {
+            const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                if (!node.data.trim()) continue
+                if (!originalChineseText.has(node)) originalChineseText.set(node, node.data)
+                nodes.push(originalChineseText.get(node))
+            }
+        }
+        return nodes
+    },
+    applyVisibleTextNodes(texts) {
+        let index = 0
+        for (const { doc } of view.renderer.getContents()) {
+            const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                if (!node.data.trim()) continue
+                if (!originalChineseText.has(node)) originalChineseText.set(node, node.data)
+                node.data = texts?.[index] ?? originalChineseText.get(node)
+                index++
+            }
+        }
+        return index
+    },
+    highlightTtsSentence(sentence) {
+        ttsHighlight?.replaceWith(...ttsHighlight.childNodes)
+        ttsHighlight = null
+        if (!sentence) return false
+        for (const { doc } of view.renderer.getContents()) {
+            const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                const index = node.data.indexOf(sentence)
+                if (index < 0) continue
+                const range = doc.createRange()
+                range.setStart(node, index)
+                range.setEnd(node, index + sentence.length)
+                const mark = doc.createElement('mark')
+                mark.dataset.leeefTts = 'true'
+                mark.style.cssText = 'background:#ffd54f;color:inherit;border-radius:.15em;'
+                range.surroundContents(mark)
+                mark.scrollIntoView({ block: 'center', behavior: 'smooth' })
+                ttsHighlight = mark
+                return true
+            }
+        }
+        return false
     },
     async captureSnapshotModel(viewport = {}) {
         const [{ doc }] = view.renderer.getContents()

@@ -25,20 +25,43 @@ class TxtReaderDocument {
     required this.chapters,
   });
 
-  factory TxtReaderDocument.decode(Uint8List bytes, {int pageLength = 1800}) {
+  factory TxtReaderDocument.decode(
+    Uint8List bytes, {
+    int pageLength = 1800,
+    String chapterPattern = '',
+  }) {
     var text = _decodeText(bytes);
     if (text.startsWith('\ufeff')) text = text.substring(1);
-    return TxtReaderDocument.fromText(text, pageLength: pageLength);
+    return TxtReaderDocument.fromText(
+      text,
+      pageLength: pageLength,
+      chapterPattern: chapterPattern,
+    );
   }
 
-  factory TxtReaderDocument.fromText(String text, {int pageLength = 1800}) {
+  factory TxtReaderDocument.fromText(
+    String text, {
+    int pageLength = 1800,
+    String chapterPattern = '',
+  }) {
     if (pageLength < 1) {
       throw ArgumentError.value(pageLength, 'pageLength', 'Must be positive.');
     }
     final chapters = <TxtChapter>[];
+    RegExp? customPattern;
+    if (chapterPattern.trim().isNotEmpty) {
+      try {
+        customPattern = RegExp(chapterPattern, caseSensitive: false);
+      } on FormatException {
+        customPattern = null;
+      }
+    }
     var lineOffset = 0;
     for (final line in text.split('\n')) {
-      final title = _extractChapterTitle(line);
+      final normalized = line.trim().replaceAll(RegExp(r'\s+'), ' ');
+      final title = customPattern?.hasMatch(normalized) == true
+          ? normalized
+          : _extractChapterTitle(line);
       if (title != null) {
         chapters.add(TxtChapter(title: title, offset: lineOffset));
       }

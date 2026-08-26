@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:leeef_reader/src/platform/app_appearance.dart';
 
 Future<String?> showExcerptDialog(
   BuildContext context, {
   required String quote,
 }) async {
+  final strings = AppStrings.of(context);
   final controller = TextEditingController();
   final note = await showDialog<String?>(
     context: context,
     builder: (context) => AlertDialog(
-      title: const Text('保存书摘'),
+      title: Text(strings.text('保存书摘')),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -17,9 +19,9 @@ Future<String?> showExcerptDialog(
           const SizedBox(height: 16),
           TextField(
             controller: controller,
-            decoration: const InputDecoration(
-              labelText: '想法（可选）',
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              labelText: strings.text('想法（可选）'),
+              border: const OutlineInputBorder(),
             ),
             maxLines: 3,
           ),
@@ -28,11 +30,11 @@ Future<String?> showExcerptDialog(
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('取消'),
+          child: Text(strings.text('取消')),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(context, controller.text),
-          child: const Text('保存'),
+          child: Text(strings.text('保存')),
         ),
       ],
     ),

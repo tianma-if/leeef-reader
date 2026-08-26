@@ -98,6 +98,11 @@ type ApplyWriteOutput struct {
 
 type excerptWritePlan struct {
 	Input             PlanCreateExcerptInput
+	Action            string
+	Payload           json.RawMessage
+	EntityID          string
+	OperationID       string
+	Applied           bool
 	ExpiresAt         time.Time
 	ConfirmationToken string
 }
@@ -172,8 +177,10 @@ func New(config Config) (*Server, error) {
 		books, err := readBooks(ctx, db)
 		return nil, ListBooksOutput{Books: books}, err
 	})
+	registerReadCapabilities(mcpServer, db)
 
 	plans := &writePlanStore{plans: make(map[string]excerptWritePlan)}
+	registerManagementTools(mcpServer, db, plans, config)
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "plan_create_excerpt",
 		Description: "Prepare an excerpt write without changing data. The returned plan must be explicitly confirmed and applied.",
@@ -241,11 +248,23 @@ func New(config Config) (*Server, error) {
 		if plan.ConfirmationToken == "" || subtle.ConstantTimeCompare([]byte(plan.ConfirmationToken), []byte(input.ConfirmationToken)) != 1 {
 			return nil, ApplyWriteOutput{}, errors.New("write plan was not confirmed")
 		}
-		entityID, operationID, err := applyExcerptPlan(ctx, db, config.DeviceID, input.PlanID, plan)
+		if plan.Applied {
+			return nil, ApplyWriteOutput{EntityID: plan.EntityID, OperationID: plan.OperationID, Applied: true}, nil
+		}
+		var entityID, operationID string
+		var err error
+		if plan.Action == "" {
+			entityID, operationID, err = applyExcerptPlan(ctx, db, config.DeviceID, input.PlanID, plan)
+		} else {
+			entityID, operationID, err = applyManagedPlan(ctx, db, config.DeviceID, input.PlanID, plan)
+		}
 		if err != nil {
 			return nil, ApplyWriteOutput{}, err
 		}
-		delete(plans.plans, input.PlanID)
+		plan.Applied = true
+		plan.EntityID = entityID
+		plan.OperationID = operationID
+		plans.plans[input.PlanID] = plan
 		return nil, ApplyWriteOutput{EntityID: entityID, OperationID: operationID, Applied: true}, nil
 	})
 

@@ -56,6 +56,30 @@ class ReaderSelectionChanged extends ReaderEvent {
   final String cfi;
 }
 
+class ReaderSelectionCleared extends ReaderEvent {
+  const ReaderSelectionCleared();
+}
+
+class ReaderExternalLinkActivated extends ReaderEvent {
+  const ReaderExternalLinkActivated(this.href);
+
+  final String href;
+}
+
+class ReaderImageActivated extends ReaderEvent {
+  const ReaderImageActivated(this.source, {this.description});
+
+  final String source;
+  final String? description;
+}
+
+class ReaderFootnoteActivated extends ReaderEvent {
+  const ReaderFootnoteActivated({required this.title, required this.text});
+
+  final String title;
+  final String text;
+}
+
 class ReaderFailure extends ReaderEvent {
   const ReaderFailure(this.message);
 

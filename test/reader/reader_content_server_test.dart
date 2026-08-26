@@ -30,6 +30,8 @@ void main() {
     expect(response.statusCode, HttpStatus.ok);
     expect(response.bytes, List<int>.generate(32, (index) => index));
     expect(response.headers.value(HttpHeaders.acceptRangesHeader), 'bytes');
+    expect(server.bookUri('book-1').path, endsWith('/original.epub'));
+    expect(response.headers.contentType?.mimeType, 'application/epub+zip');
 
     final unauthorized = await _get(
       server

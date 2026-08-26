@@ -41,11 +41,12 @@ class ReaderContentServer {
       throw StateError('Book $bookId is not registered.');
     }
     final server = _requireServer();
+    final extension = _bookExtension(_books[bookId]!.path);
     return Uri(
       scheme: 'http',
       host: InternetAddress.loopbackIPv4.address,
       port: server.port,
-      pathSegments: [_sessionToken, 'books', bookId, 'original'],
+      pathSegments: [_sessionToken, 'books', bookId, 'original.$extension'],
     );
   }
 
@@ -103,7 +104,7 @@ class ReaderContentServer {
     }
     if (segments.length == 4 &&
         segments[1] == 'books' &&
-        segments[3] == 'original') {
+        segments[3].startsWith('original.')) {
       await _serveBook(request, segments[2]);
       return;
     }
@@ -159,7 +160,7 @@ class ReaderContentServer {
     final start = range?.start ?? 0;
     final end = range?.end ?? fileLength - 1;
     request.response.headers
-      ..contentType = ContentType.binary
+      ..contentType = _bookContentType(file.path)
       ..set(HttpHeaders.acceptRangesHeader, 'bytes')
       ..contentLength = end - start + 1;
     if (range != null) {
@@ -222,6 +223,27 @@ class ReaderContentServer {
       return ContentType('text', 'css', charset: 'utf-8');
     }
     return ContentType.binary;
+  }
+
+  static String _bookExtension(String path) {
+    final normalized = path.replaceAll('\\', '/');
+    final filename = normalized.substring(normalized.lastIndexOf('/') + 1);
+    final dot = filename.lastIndexOf('.');
+    if (dot < 0 || dot == filename.length - 1) return 'bin';
+    final extension = filename.substring(dot + 1).toLowerCase();
+    return RegExp(r'^[a-z0-9]{1,10}$').hasMatch(extension) ? extension : 'bin';
+  }
+
+  static ContentType _bookContentType(String path) {
+    return switch (_bookExtension(path)) {
+      'epub' => ContentType('application', 'epub+zip'),
+      'mobi' => ContentType('application', 'x-mobipocket-ebook'),
+      'azw3' => ContentType('application', 'vnd.amazon.ebook'),
+      'fb2' => ContentType('application', 'x-fictionbook+xml'),
+      'pdf' => ContentType('application', 'pdf'),
+      'txt' => ContentType.text,
+      _ => ContentType.binary,
+    };
   }
 
   static Future<void> _notFound(HttpResponse response) async {

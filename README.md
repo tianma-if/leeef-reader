@@ -7,7 +7,7 @@
 iOS · Android · macOS · Windows
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Status: Early Development](https://img.shields.io/badge/Status-Early_Development-orange.svg)](#项目状态)
+[![Status: Release Candidate](https://img.shields.io/badge/Status-Release_Candidate-blue.svg)](#项目状态)
 
 </div>
 
@@ -43,7 +43,7 @@ AI / Codex / Claude
  Drift / SQLite ──→ Sync Engine ──→ 其他设备
 ```
 
-计划提供的 MCP Resources：
+提供的 MCP Resources：
 
 ```text
 leeef://library
@@ -54,7 +54,7 @@ leeef://books/{bookId}/bookmarks
 leeef://bookshelves/{bookshelfId}
 ```
 
-计划提供的 MCP Tools：
+提供的 MCP Tools：
 
 ```text
 # 书籍
@@ -111,7 +111,7 @@ update_reading_progress
 
 ## 功能树
 
-以下均为 Leeef 的目标功能，采用分阶段实现。除 MCP 和移动端 3D Page Curl 外，功能范围以 Anx Reader 当前已实现能力为兼容基线；OPDS 单独列为后续能力。
+以下是 Leeef 已完成的功能范围。除 MCP 和移动端 3D Page Curl 外，功能范围以 Anx Reader 的对应能力为兼容基线；OPDS 作为独立生态能力实现。
 
 ```text
 Leeef Reader
@@ -171,7 +171,7 @@ Leeef Reader
 ├── AI 阅读助手
 │   ├── 对话：全局书库、阅读页上下文、弹窗/分栏/自适应显示
 │   ├── 阅读：章节总结、全书总结、回顾前文、分析和思维导图
-│   ├── 书库：查询和整理书架、搜索正文/笔记、阅读历史、标签管理
+│   ├── 书库：动态查询书籍/书架/标签/书摘/书签/历史/进度，并在确认后执行整理写入
 │   ├── 上下文：当前书籍、目录、章节和指定章节正文
 │   ├── 翻译
 │   │   ├── 划词：结合原文上下文进行翻译和词典式解释
@@ -194,7 +194,8 @@ Leeef Reader
 │
 ├── 跨端同步与备份
 │   ├── 后端：默认 S3-compatible，可选 WebDAV
-│   ├── 策略：自动/手动同步、仅 Wi-Fi、能力检测和完成通知
+│   ├── 策略：自动/手动同步、仅 Wi-Fi、能力检测和四端系统完成通知
+│   ├── 后台：移动端/macOS 使用 Workmanager，Windows 使用当前用户计划任务定时同步
 │   ├── 数据：书籍、封面、进度、书摘、笔记、书签、目录、标签、统计
 │   ├── 云端书籍：状态展示、批量下载、释放本地空间
 │   ├── 可靠性：增量操作、幂等应用、冲突合并、删除标记和完整性校验
@@ -231,7 +232,7 @@ Leeef Reader
 │   ├── EPUB JavaScript 开关、HTTP 代理、日志查看和清理
 │   └── 新手引导、提示重置和开发者选项
 │
-└── OPDS（后续）
+└── OPDS
     ├── OPDS 目录订阅
     ├── 自定义目录管理
     ├── 浏览、搜索和下载
@@ -325,7 +326,7 @@ S3 是默认后端；WebDAV 作为可选适配器。启动同步前执行能力�
 
 ## 功能优先级
 
-功能树是长期范围，不代表首版范围。优先级按“是否能证明 Leeef 的独立价值”划分：
+功能树按产品价值分为 P0、P1、P2，并已依次完成；优先级定义如下：
 
 | 优先级 | 目标 | 发布要求 |
 | --- | --- | --- |
@@ -403,20 +404,22 @@ M1 的实现边界和四端验证证据见 [`docs/m1-validation.md`](docs/m1-val
 
 ### M2：P1 日常可用
 
-- [ ] 扩展 MOBI、AZW3、FB2 格式，以及 WebDAV、书库管理和笔记导出
-- [ ] 完善阅读样式、搜索、基础统计、系统 TTS 和 AI 上下文划词翻译
-- [ ] 完善移动端与桌面端平台交互
+- [x] 扩展 MOBI、AZW3、FB2 格式，以及 WebDAV、书库管理和笔记导出
+- [x] 完善阅读样式、搜索、基础统计、系统 TTS 和 AI 上下文划词翻译
+- [x] 完善移动端与桌面端平台交互
 
 ### M3：P2 功能兼容与生态
 
-- [ ] 完成多服务 TTS，以及 AI 助手的全文翻译和应用内对话
-- [ ] 完成高级统计、分享、样式和数据工具
-- [ ] 完成 OPDS 与多语言支持
-- [ ] 持续进行性能、可访问性、数据迁移和发布质量建设
+- [x] 完成多服务 TTS，以及 AI 助手的全文翻译和应用内对话
+- [x] 完成高级统计、分享、样式和数据工具
+- [x] 完成 OPDS 与多语言支持
+- [x] 持续进行性能、可访问性、数据迁移和发布质量建设
+
+M2/M3 的实现边界、测试结果、三端本机构建和 Windows CI 门禁见 [`docs/m2-m3-validation.md`](docs/m2-m3-validation.md)。
 
 ## 项目状态
 
-项目处于早期开发阶段，**M0 技术验证和 M1 P0 纵向闭环均已完成**。当前继续进行首个 P0 版本的生产化扩展，不因功能树中的 P1/P2 项目扩大范围。
+**M0 至 M3 的目标功能均已完成实现。** 项目当前进入发布候选阶段，后续工作以真机性能回归、平台商店签名/打包和缺陷修复为主；功能与验收证据见 [`docs/m0-validation.md`](docs/m0-validation.md)、[`docs/m1-validation.md`](docs/m1-validation.md) 和 [`docs/m2-m3-validation.md`](docs/m2-m3-validation.md)。
 
 ## 本地开发
 

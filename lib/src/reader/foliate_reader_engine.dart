@@ -88,10 +88,31 @@ class FoliateReaderEngine implements ReaderEngine {
   Future<void> previous() =>
       _invokeVoid('return await globalThis.leeefReader.previous();', const {});
 
+  Future<void> historyBack() =>
+      _invokeVoid('return globalThis.leeefReader.historyBack();', const {});
+
+  Future<void> historyForward() =>
+      _invokeVoid('return globalThis.leeefReader.historyForward();', const {});
+
+  Future<({bool canGoBack, bool canGoForward})> historyState() async {
+    _ensureOpen();
+    await _waitForBridge();
+    final value = await _call(
+      'return globalThis.leeefReader.historyState();',
+      const {},
+    );
+    final map = value is Map ? Map<String, dynamic>.from(value) : const {};
+    return (
+      canGoBack: map['canGoBack'] == true,
+      canGoForward: map['canGoForward'] == true,
+    );
+  }
+
   Future<void> setLayout({
     String flow = 'paginated',
     int maxColumnCount = 1,
     double margin = 24,
+    String pageTurnEffect = 'slide',
   }) {
     if (maxColumnCount < 1) {
       throw ArgumentError.value(
@@ -108,9 +129,139 @@ class FoliateReaderEngine implements ReaderEngine {
         'flow': flow,
         'maxColumnCount': maxColumnCount,
         'margin': margin,
+        'pageTurnEffect': pageTurnEffect,
       },
     });
   }
+
+  Future<void> setTheme({
+    required String foreground,
+    required String background,
+    required double fontSize,
+    required double lineHeight,
+    required String fontFamily,
+    required int fontWeight,
+    double headingScale = 1.25,
+    required double letterSpacing,
+    required double paragraphSpacing,
+    double textIndent = 0,
+    required String textAlign,
+    String writingMode = 'horizontal-tb',
+    bool preserveBookStyles = true,
+    bool eInkMode = false,
+    bool codeHighlight = true,
+    String backgroundImage = '',
+    double backgroundOpacity = .18,
+    double backgroundBlur = 0,
+    String backgroundFit = 'cover',
+    String importedFontName = '',
+    String importedFontData = '',
+    String customCss = '',
+  }) => _invokeVoid('return globalThis.leeefReader.setTheme(theme);', {
+    'theme': {
+      'foreground': foreground,
+      'background': background,
+      'fontSize': fontSize,
+      'lineHeight': lineHeight,
+      'fontFamily': fontFamily,
+      'fontWeight': fontWeight,
+      'headingScale': headingScale,
+      'letterSpacing': letterSpacing,
+      'paragraphSpacing': paragraphSpacing,
+      'textIndent': textIndent,
+      'textAlign': textAlign,
+      'writingMode': writingMode,
+      'preserveBookStyles': preserveBookStyles,
+      'eInkMode': eInkMode,
+      'codeHighlight': codeHighlight,
+      'backgroundImage': backgroundImage,
+      'backgroundOpacity': backgroundOpacity,
+      'backgroundBlur': backgroundBlur,
+      'backgroundFit': backgroundFit,
+      'importedFontName': importedFontName,
+      'importedFontData': importedFontData,
+      'customCSS': customCss,
+    },
+  });
+
+  Future<List<ReaderSearchResult>> search(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return const [];
+    _ensureOpen();
+    await _waitForBridge();
+    final value = await _call(
+      'return await globalThis.leeefReader.search(query);',
+      {'query': trimmed},
+    );
+    if (value is! List) throw const FormatException('Invalid search result.');
+    return value
+        .whereType<Map>()
+        .map((item) {
+          final map = Map<String, dynamic>.from(item);
+          return ReaderSearchResult(
+            label: map['label'] as String? ?? '',
+            cfi: map['cfi'] as String? ?? '',
+            excerpt: map['excerpt'] as String? ?? '',
+          );
+        })
+        .where((item) => item.cfi.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  Future<void> clearSearch() =>
+      _invokeVoid('return globalThis.leeefReader.clearSearch();', const {});
+
+  Future<String> currentText() async {
+    _ensureOpen();
+    await _waitForBridge();
+    final value = await _call(
+      'return globalThis.leeefReader.currentText();',
+      const {},
+    );
+    return value is String ? value : '';
+  }
+
+  Future<String> bookText({int maxCharacters = 2000000}) async {
+    if (maxCharacters < 1) {
+      throw ArgumentError.value(maxCharacters, 'maxCharacters');
+    }
+    _ensureOpen();
+    await _waitForBridge();
+    final value = await _call(
+      'return await globalThis.leeefReader.bookText(options);',
+      {
+        'options': {'maxCharacters': maxCharacters},
+      },
+    );
+    return value is String ? value : '';
+  }
+
+  Future<List<String>> visibleTextNodes() async {
+    _ensureOpen();
+    await _waitForBridge();
+    final value = await _call(
+      'return globalThis.leeefReader.visibleTextNodes();',
+      const {},
+    );
+    return value is List
+        ? value.whereType<String>().toList(growable: false)
+        : const [];
+  }
+
+  Future<void> applyVisibleTextNodes(List<String> texts) => _invokeVoid(
+    'return globalThis.leeefReader.applyVisibleTextNodes(texts);',
+    {'texts': texts},
+  );
+
+  Future<void> setBookJavaScriptEnabled(bool enabled) => _invokeVoid(
+    'return globalThis.leeefReader.setBookJavaScriptEnabled(enabled);',
+    {'enabled': enabled},
+  );
+
+  Future<void> highlightTtsSentence(String? sentence) => _invokeVoid(
+    'return globalThis.leeefReader.highlightTtsSentence(sentence);',
+    {'sentence': sentence ?? ''},
+  );
 
   Future<ReaderLayoutProbe> probeLayout() async {
     _ensureOpen();
@@ -125,6 +276,7 @@ class FoliateReaderEngine implements ReaderEngine {
       flow: map['flow'] as String? ?? '',
       maxColumnCount: (map['maxColumnCount'] as num?)?.toInt() ?? 0,
       margin: map['margin'] as String? ?? '',
+      animated: map['animated'] == true,
       renderedSections: (map['renderedSections'] as num?)?.toInt() ?? 0,
       textLength: (map['textLength'] as num?)?.toInt() ?? 0,
       viewportWidth: (map['viewportWidth'] as num?)?.toDouble() ?? 0,
@@ -230,6 +382,33 @@ class FoliateReaderEngine implements ReaderEngine {
         if (quote is String && quote.isNotEmpty && cfi is String) {
           _events.add(ReaderSelectionChanged(quote: quote, cfi: cfi));
         }
+      case 'selection-cleared':
+        _events.add(const ReaderSelectionCleared());
+      case 'external-link':
+        final href = event['href'];
+        if (href is String && href.isNotEmpty) {
+          _events.add(ReaderExternalLinkActivated(href));
+        }
+      case 'image':
+        final source = event['source'];
+        if (source is String && source.isNotEmpty) {
+          _events.add(
+            ReaderImageActivated(
+              source,
+              description: event['description'] as String?,
+            ),
+          );
+        }
+      case 'footnote':
+        final text = event['text'];
+        if (text is String && text.isNotEmpty) {
+          _events.add(
+            ReaderFootnoteActivated(
+              title: event['title'] as String? ?? '脚注',
+              text: text,
+            ),
+          );
+        }
       case 'error':
         _events.add(
           ReaderFailure(
@@ -274,6 +453,7 @@ class ReaderLayoutProbe {
     required this.flow,
     required this.maxColumnCount,
     required this.margin,
+    required this.animated,
     required this.renderedSections,
     required this.textLength,
     required this.viewportWidth,
@@ -283,8 +463,21 @@ class ReaderLayoutProbe {
   final String flow;
   final int maxColumnCount;
   final String margin;
+  final bool animated;
   final int renderedSections;
   final int textLength;
   final double viewportWidth;
   final double viewportHeight;
+}
+
+class ReaderSearchResult {
+  const ReaderSearchResult({
+    required this.label,
+    required this.cfi,
+    required this.excerpt,
+  });
+
+  final String label;
+  final String cfi;
+  final String excerpt;
 }

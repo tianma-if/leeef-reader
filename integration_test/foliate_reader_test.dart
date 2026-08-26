@@ -62,13 +62,39 @@ void main() {
     expect(info.author, 'Leeef Team');
     expect(info.toc.single.label, '第一章');
 
-    await engine.setLayout(maxColumnCount: 1, margin: 32);
+    await engine.setLayout(
+      maxColumnCount: 1,
+      margin: 32,
+      pageTurnEffect: 'slide',
+    );
     final layout = await engine.probeLayout();
     expect(layout.flow, 'paginated');
     expect(layout.maxColumnCount, 1);
     expect(layout.margin, '32px');
+    expect(layout.animated, isTrue);
     expect(layout.renderedSections, greaterThan(0));
     expect(layout.textLength, greaterThan(0));
+    expect(await engine.bookText(), contains('验证'));
+
+    await engine.setLayout(pageTurnEffect: 'none');
+    expect((await engine.probeLayout()).animated, isFalse);
+
+    await engine.setTheme(
+      foreground: '#112233',
+      background: '#f0eadc',
+      fontSize: 21,
+      lineHeight: 1.9,
+      fontFamily: 'serif',
+      fontWeight: 500,
+      letterSpacing: 0.5,
+      paragraphSpacing: 0.8,
+      textAlign: 'justify',
+    );
+    final results = await engine.search('验证');
+    expect(results, isNotEmpty);
+    expect(results.first.cfi, startsWith('epubcfi('));
+    await engine.goTo(results.first.cfi);
+    await engine.clearSearch();
 
     await engine.goTo(info.toc.single.href);
     await engine.next();

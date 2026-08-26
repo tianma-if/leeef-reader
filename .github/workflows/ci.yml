@@ -1,0 +1,75 @@
+name: Leeef cross-platform CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ci.yml"
+      - "android/**"
+      - "assets/**"
+      - "integration_test/**"
+      - "ios/**"
+      - "lib/**"
+      - "macos/**"
+      - "shaders/**"
+      - "sidecars/leeef-mcp/**"
+      - "test/**"
+      - "windows/**"
+      - "pubspec.*"
+
+concurrency:
+  group: leeef-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-test-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.1
+          channel: stable
+          cache: true
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: sidecars/leeef-mcp/go.mod
+          cache-dependency-path: sidecars/leeef-mcp/go.sum
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build apk --debug
+      - name: Test MCP sidecar
+        working-directory: sidecars/leeef-mcp
+        run: go test ./...
+
+  apple-builds:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.1
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter test integration_test/foliate_reader_test.dart -d macos
+      - run: flutter build ios --simulator --debug --no-codesign
+      - run: flutter build macos --debug
+
+  windows-build:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.1
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build windows --debug

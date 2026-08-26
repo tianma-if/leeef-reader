@@ -6,6 +6,27 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
 
 void main() {
+  test('custom chapter regex augments built-in heading detection', () {
+    final document = TxtReaderDocument.fromText(
+      'Part 1\nOpening\nPart 2\nEnding',
+      chapterPattern: r'^Part \d+$',
+    );
+
+    expect(document.chapters.map((chapter) => chapter.title), [
+      'Part 1',
+      'Part 2',
+    ]);
+  });
+
+  test('invalid custom chapter regex safely falls back to built-ins', () {
+    final document = TxtReaderDocument.fromText(
+      '第1章 开始\n正文',
+      chapterPattern: '[',
+    );
+
+    expect(document.chapters.single.title, '第1章 开始');
+  });
+
   test(
     'decodes UTF-8 BOM, detects chapters, and paginates on line boundaries',
     () {
