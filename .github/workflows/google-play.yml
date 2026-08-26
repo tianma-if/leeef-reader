@@ -1,0 +1,72 @@
+name: Publish Google Play
+
+on:
+  workflow_dispatch:
+    inputs:
+      track:
+        description: Google Play track
+        required: true
+        default: internal
+        type: choice
+        options: [internal, alpha, beta, production]
+      release_status:
+        description: Draft keeps the Play release from becoming available
+        required: true
+        default: draft
+        type: choice
+        options: [draft, completed]
+
+concurrency:
+  group: leeef-google-play
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: google-play
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.1
+          channel: stable
+          cache: true
+      - name: Restore upload keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/leeef-upload.jks"
+          chmod 600 "$RUNNER_TEMP/leeef-upload.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/leeef-upload.jks"
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "keyPassword=$ANDROID_KEY_PASSWORD"
+          } > android/key.properties
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - name: Build signed Android App Bundle
+        run: flutter build appbundle --release
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: leeef-reader-android-aab
+          path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+      - name: Publish to Google Play
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: dev.leeef.leeef_reader
+          releaseFiles: build/app/outputs/bundle/release/app-release.aab
+          track: ${{ inputs.track }}
+          status: ${{ inputs.release_status }}
+      - name: Remove signing material
+        if: always()
+        run: rm -f android/key.properties "$RUNNER_TEMP/leeef-upload.jks"

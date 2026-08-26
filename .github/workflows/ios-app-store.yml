@@ -1,0 +1,78 @@
+name: Publish iOS App Store
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_testflight:
+        description: Upload the IPA to App Store Connect / TestFlight
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: leeef-ios-app-store
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    environment: app-store
+    steps:
+      - uses: actions/checkout@v5
+      - name: Select stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.1
+          channel: stable
+          cache: true
+      - name: Import Apple Distribution certificate
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
+          p12-password: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
+      - name: Download app provisioning profile
+        uses: apple-actions/download-provisioning-profiles@v4
+        with:
+          bundle-id: dev.leeef.leeefReader
+          profile-type: IOS_APP_STORE
+          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+      - name: Download share extension provisioning profile
+        uses: apple-actions/download-provisioning-profiles@v4
+        with:
+          bundle-id: dev.leeef.leeefReader.ShareExtension
+          profile-type: IOS_APP_STORE
+          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - name: Build signed IPA
+        run: >-
+          flutter build ipa --release
+          --build-number "${GITHUB_RUN_NUMBER}"
+          --export-options-plist ios/ExportOptions.plist
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: leeef-reader-ios-ipa
+          path: build/ios/ipa/*.ipa
+          if-no-files-found: error
+      - name: Locate IPA
+        id: ipa
+        run: echo "path=$(find build/ios/ipa -maxdepth 1 -name '*.ipa' -print -quit)" >> "$GITHUB_OUTPUT"
+      - name: Upload to App Store Connect
+        if: inputs.upload_testflight
+        uses: apple-actions/upload-testflight-build@v4
+        with:
+          app-path: ${{ steps.ipa.outputs.path }}
+          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          wait-for-processing: true

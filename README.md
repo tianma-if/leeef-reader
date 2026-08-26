@@ -425,6 +425,8 @@ M2/M3 的实现边界、测试结果、三端本机构建和 Windows CI 门禁�
 
 当前代码已包含 Flutter Material 3 响应式应用骨架、四端平台 Runner、Drift 核心数据模型、事务式操作日志写入，以及双设备冲突合并规则。安装包含 Dart 3.10 或更高版本的 Flutter SDK 后执行：
 
+Google Play、App Store Connect/TestFlight 与 macOS DMG 的签名、打包和发布流程见 [`docs/releasing.md`](docs/releasing.md)。
+
 ```bash
 flutter pub get
 dart run build_runner build
