@@ -9,6 +9,10 @@ import UserNotifications
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    WorkmanagerPlugin.registerPeriodicTask(
+      withIdentifier: "dev.leeef.leeefReader.backgroundSync",
+      earliestBeginInSeconds: NSNumber(value: 30 * 60)
+    )
     WorkmanagerPlugin.registerLaunchHandlers()
     UNUserNotificationCenter.current().delegate = self
     WorkmanagerPlugin.setPluginRegistrantCallback { registry in

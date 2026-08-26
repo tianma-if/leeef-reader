@@ -1649,6 +1649,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
       _ => '${(progress * 100).round()}%',
     };
     final bookSource = _bookSource;
+    final compactToolbar = MediaQuery.sizeOf(context).width < 600;
     return Scaffold(
       appBar: _controlsVisible && _preferences.showHeader
           ? AppBar(
@@ -1661,16 +1662,18 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
               ),
               title: Text(headerText),
               actions: [
-                IconButton(
-                  tooltip: strings.text('后退到上次跳转位置'),
-                  onPressed: _canGoBack ? _engine.historyBack : null,
-                  icon: const Icon(Icons.arrow_back),
-                ),
-                IconButton(
-                  tooltip: strings.text('前进到下个跳转位置'),
-                  onPressed: _canGoForward ? _engine.historyForward : null,
-                  icon: const Icon(Icons.arrow_forward),
-                ),
+                if (!compactToolbar) ...[
+                  IconButton(
+                    tooltip: strings.text('后退到上次跳转位置'),
+                    onPressed: _canGoBack ? _engine.historyBack : null,
+                    icon: const Icon(Icons.arrow_back),
+                  ),
+                  IconButton(
+                    tooltip: strings.text('前进到下个跳转位置'),
+                    onPressed: _canGoForward ? _engine.historyForward : null,
+                    icon: const Icon(Icons.arrow_forward),
+                  ),
+                ],
                 IconButton(
                   tooltip: strings.text('朗读'),
                   onPressed: _bookInfo == null ? null : _showTts,
@@ -1695,34 +1698,75 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
                     ),
                   ],
                 ),
-                IconButton(
-                  tooltip: strings.text('书内搜索'),
-                  onPressed: _bookInfo == null ? null : _showSearch,
-                  icon: const Icon(Icons.search),
-                ),
-                IconButton(
-                  tooltip: strings.text('阅读样式'),
-                  onPressed: _bookInfo == null ? null : _showReadingSettings,
-                  icon: const Icon(Icons.text_fields),
-                ),
-                IconButton(
-                  tooltip: strings.text('添加书签'),
-                  onPressed: _location == null ? null : _addBookmark,
-                  icon: const Icon(Icons.bookmark_add_outlined),
-                ),
-                IconButton(
-                  tooltip: strings.text('目录'),
-                  onPressed: _bookInfo == null ? null : _showTableOfContents,
-                  icon: const Icon(Icons.toc),
-                ),
+                if (!compactToolbar) ...[
+                  IconButton(
+                    tooltip: strings.text('书内搜索'),
+                    onPressed: _bookInfo == null ? null : _showSearch,
+                    icon: const Icon(Icons.search),
+                  ),
+                  IconButton(
+                    tooltip: strings.text('阅读样式'),
+                    onPressed: _bookInfo == null ? null : _showReadingSettings,
+                    icon: const Icon(Icons.text_fields),
+                  ),
+                  IconButton(
+                    tooltip: strings.text('添加书签'),
+                    onPressed: _location == null ? null : _addBookmark,
+                    icon: const Icon(Icons.bookmark_add_outlined),
+                  ),
+                  IconButton(
+                    tooltip: strings.text('目录'),
+                    onPressed: _bookInfo == null ? null : _showTableOfContents,
+                    icon: const Icon(Icons.toc),
+                  ),
+                ],
                 PopupMenuButton<String>(
                   tooltip: strings.text('更多阅读操作'),
                   onSelected: (value) {
-                    if (value == 'copy-chapter') {
-                      unawaited(_copyCurrentChapter());
-                    }
+                    final action = switch (value) {
+                      'search' => _showSearch,
+                      'style' => _showReadingSettings,
+                      'bookmark' => _addBookmark,
+                      'toc' => _showTableOfContents,
+                      _ => _copyCurrentChapter,
+                    };
+                    unawaited(action());
                   },
                   itemBuilder: (_) => [
+                    if (compactToolbar) ...[
+                      PopupMenuItem(
+                        value: 'search',
+                        enabled: _bookInfo != null,
+                        child: ListTile(
+                          leading: const Icon(Icons.search),
+                          title: Text(strings.text('书内搜索')),
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'style',
+                        enabled: _bookInfo != null,
+                        child: ListTile(
+                          leading: const Icon(Icons.text_fields),
+                          title: Text(strings.text('阅读样式')),
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'bookmark',
+                        enabled: _location != null,
+                        child: ListTile(
+                          leading: const Icon(Icons.bookmark_add_outlined),
+                          title: Text(strings.text('添加书签')),
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'toc',
+                        enabled: _bookInfo != null,
+                        child: ListTile(
+                          leading: const Icon(Icons.toc),
+                          title: Text(strings.text('目录')),
+                        ),
+                      ),
+                    ],
                     PopupMenuItem(
                       value: 'copy-chapter',
                       child: ListTile(

@@ -12,7 +12,7 @@ class AppNotifications {
     if (Platform.isLinux) return;
     if (!_initialized) {
       const settings = InitializationSettings(
-        android: AndroidInitializationSettings('ic_launcher'),
+        android: AndroidInitializationSettings('ic_stat_leeef'),
         iOS: DarwinInitializationSettings(
           requestAlertPermission: false,
           requestBadgePermission: false,
