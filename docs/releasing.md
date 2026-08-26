@@ -32,6 +32,9 @@ keyPassword=...
 
 然后运行 `flutter build appbundle --release`。该文件和密钥库已被 Git 忽略。
 
+也可以不创建本地文件，改用 `ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、
+`ANDROID_KEY_ALIAS` 和 `ANDROID_KEY_PASSWORD` 环境变量；CI 与临时发布机推荐使用这种方式。
+
 ## App Store Connect / TestFlight
 
 在 GitHub 创建受保护的 `app-store` Environment：

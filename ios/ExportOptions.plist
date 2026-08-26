@@ -11,9 +11,9 @@
 	<key>provisioningProfiles</key>
 	<dict>
 		<key>dev.leeef.leeefReader</key>
-		<string>Leeef Reader App Store</string>
+		<string>Leeef Reader App Store App Groups 2026</string>
 		<key>dev.leeef.leeefReader.ShareExtension</key>
-		<string>Leeef Reader Share Extension App Store</string>
+		<string>Leeef Reader Share Extension App Store App Groups</string>
 	</dict>
 	<key>signingCertificate</key>
 	<string>Apple Distribution</string>
