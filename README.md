@@ -6,7 +6,7 @@
 
 iOS · Android · macOS · Windows
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Status: Release Candidate](https://img.shields.io/badge/Status-Release_Candidate-blue.svg)](#项目状态)
 
 </div>
@@ -439,4 +439,4 @@ flutter run
 
 ## 许可证
 
-本项目采用 [Apache License 2.0](LICENSE) 开源。
+本项目采用 [GNU Affero General Public License v3.0](LICENSE) 开源。
