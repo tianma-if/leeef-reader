@@ -59,7 +59,7 @@ GitHub 的 `macos-distribution` Environment 配置：
 - Variables：`APPSTORE_ISSUER_ID`、`APPSTORE_API_KEY_ID`。
 - Secrets：`MACOS_CERTIFICATES_FILE_BASE64`、`MACOS_CERTIFICATES_PASSWORD`、`MACOS_CERTIFICATE_NAME`、`APPSTORE_API_PRIVATE_KEY`。
 
-手动执行工作流可选择无签名构建用于内部测试。推送 `v*` tag 时会强制签名、公证，并将 universal DMG 附加到同名 GitHub Release；因此应先创建对应 Draft Release。
+手动执行工作流可选择无签名构建用于内部测试，也可传入已有 GitHub Release 的 `release_tag`，将签名、公证后的 universal DMG 上传到该 Release。正式 GitHub Release 发布时，`published` 事件会自动从对应 tag 构建、签名、公证并附加 DMG；tag 必须与 `pubspec.yaml` 的版本一致，例如版本 `1.0.0+2` 对应 `v1.0.0`。
 
 ## 发布检查
 
