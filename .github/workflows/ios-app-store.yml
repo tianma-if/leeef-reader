@@ -58,7 +58,6 @@ jobs:
       - name: Build signed IPA
         run: >-
           flutter build ipa --release
-          --build-number "${GITHUB_RUN_NUMBER}"
           --export-options-plist ios/ExportOptions.plist
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v7
