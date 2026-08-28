@@ -60,6 +60,8 @@ jobs:
       - run: flutter test integration_test/foliate_reader_test.dart -d macos
       - run: flutter build ios --simulator --debug --no-codesign
       - run: flutter build macos --debug
+      - name: Verify macOS app bundle
+        run: ./tool/verify_macos_bundle.sh "build/macos/Build/Products/Debug/Leeef Reader.app"
 
   windows-build:
     runs-on: windows-latest

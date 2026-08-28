@@ -24,12 +24,45 @@ else
   exit 1
 fi
 
-if [[ -n "${MACOS_CERTIFICATE_NAME:-}" ]]; then
-  codesign --force --deep --options runtime --timestamp \
-    --entitlements "$repo_dir/macos/Runner/Release.entitlements" \
-    --sign "$MACOS_CERTIFICATE_NAME" "$app_path"
-  codesign --verify --deep --strict --verbose=2 "$app_path"
+pdfium_binary="$app_path/Contents/Frameworks/PDFium.framework/PDFium"
+if [[ -f "$pdfium_binary" ]]; then
+  expected_pdfium_id='@rpath/PDFium.framework/PDFium'
+  bundle_executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \
+    "$app_path/Contents/Frameworks/PDFium.framework/Resources/Info.plist")"
+  test "$bundle_executable" = 'PDFium'
+  otool -D "$pdfium_binary" | grep -Fxq "$expected_pdfium_id"
+  if otool -D "$pdfium_binary" | awk '/^@rpath\// { print }' | grep -Fvxq "$expected_pdfium_id"; then
+    echo "PDFium has an invalid Mach-O install name:" >&2
+    otool -D "$pdfium_binary" >&2
+    exit 1
+  fi
 fi
+
+# Sign nested code explicitly before the app: codesign --deep may preserve an
+# already-valid framework signed by a different team, which dyld then refuses
+# to load. An unsigned local build uses an ad-hoc identity; release builds
+# replace it with the configured Developer ID identity.
+signing_identity="${MACOS_CERTIFICATE_NAME:--}"
+code_sign_args=(
+  --force
+  --sign "$signing_identity"
+)
+if [[ "$signing_identity" != "-" ]]; then
+  code_sign_args+=(--options runtime --timestamp)
+fi
+
+while IFS= read -r -d '' nested_code; do
+  codesign "${code_sign_args[@]}" "$nested_code"
+done < <(
+  find "$app_path/Contents/Frameworks" -maxdepth 1 \
+    \( -type d -name '*.framework' -o -type f -name '*.dylib' \) \
+    -print0
+)
+
+codesign "${code_sign_args[@]}" \
+  --entitlements "$repo_dir/macos/Runner/Release.entitlements" \
+  "$app_path"
+"$repo_dir/tool/verify_macos_bundle.sh" "$app_path"
 
 output_dir="$repo_dir/build/distribution"
 staging_dir="$(mktemp -d)"
