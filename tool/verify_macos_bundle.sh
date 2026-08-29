@@ -41,3 +41,7 @@ if /usr/bin/otool -D "$pdfium_binary" | \
 fi
 
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$app_path"
+/usr/bin/codesign -d --entitlements :- "$app_path" 2>/dev/null | \
+  /usr/bin/plutil -extract \
+    'com\.apple\.security\.files\.user-selected\.read-write' raw -o - - | \
+  /usr/bin/grep -Fxq 'true'

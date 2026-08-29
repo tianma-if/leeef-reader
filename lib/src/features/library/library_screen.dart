@@ -96,12 +96,27 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
       _importPaths(files.map((file) => file.path), source: '分享');
 
   Future<void> _importBook() async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: _bookExtensions,
-    );
-    final paths = result.map((file) => file.path).whereType<String>().toList();
-    await _importPaths(paths);
+    try {
+      await AppLog.info('opening book import file picker');
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: _bookExtensions,
+      );
+      final paths = result
+          .map((file) => file.path)
+          .whereType<String>()
+          .toList();
+      await AppLog.info(
+        'book import file picker returned ${paths.length} path(s)',
+      );
+      await _importPaths(paths);
+    } on Object catch (error, stackTrace) {
+      await AppLog.error(error, stackTrace);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.of(context).failure('导入', error))),
+      );
+    }
   }
 
   Future<void> _importPaths(
