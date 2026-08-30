@@ -58,6 +58,9 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
   late final PageCurlPerformanceMonitor _performance =
       PageCurlPerformanceMonitor(onReport: widget.onPerformanceReport);
   bool _performanceStarted = false;
+  bool _settling = false;
+  bool _settlingToCompletion = false;
+  double _settleStartProgress = 0;
 
   @override
   void initState() {
@@ -164,10 +167,13 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
             behavior: HitTestBehavior.opaque,
             onHorizontalDragStart: (details) {
               _animation.stop();
-              _touchY = _normalizedTouchY(
-                details.localPosition.dy,
-                constraints.maxHeight,
-              );
+              setState(() {
+                _settling = false;
+                _touchY = _normalizedTouchY(
+                  details.localPosition.dy,
+                  constraints.maxHeight,
+                );
+              });
             },
             onHorizontalDragUpdate: (details) {
               setState(() {
@@ -195,6 +201,7 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
                 currentPage: widget.currentPage,
                 nextPage: widget.nextPage,
                 progress: _progress,
+                travel: _travel,
                 direction: widget.direction,
                 touchY: widget.autoComplete
                     ? _automaticTouchY(_progress)
@@ -217,6 +224,13 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
   Future<void> _settle(bool complete, {double normalizedVelocity = 0}) async {
     _animation.stop();
     _animation.value = _progress;
+    if (mounted) {
+      setState(() {
+        _settling = true;
+        _settlingToCompletion = complete;
+        _settleStartProgress = _progress;
+      });
+    }
     final width = context.size?.width ?? 1;
     final rawProgressVelocity = -normalizedVelocity / math.max(width, 1);
     final progressVelocity = complete
@@ -262,9 +276,19 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
         setState(_gesture.reset);
       }
     }
+    if (mounted) setState(() => _settling = false);
   }
 
   double get _progress => widget.controller?.progress ?? _gesture.progress;
+
+  double get _travel {
+    if (!_settling) return _progress;
+    return pageCurlSettlingTravel(
+      progress: _progress,
+      startProgress: _settleStartProgress,
+      complete: _settlingToCompletion,
+    );
+  }
 
   void _handleAnimationTick() {
     if (widget.controller case final controller?) {
@@ -308,6 +332,7 @@ class _PageCurlPainter extends CustomPainter {
     required this.currentPage,
     required this.nextPage,
     required this.progress,
+    required this.travel,
     required this.direction,
     required this.touchY,
   });
@@ -317,6 +342,7 @@ class _PageCurlPainter extends CustomPainter {
   final ui.Image currentPage;
   final ui.Image nextPage;
   final double progress;
+  final double travel;
   final double direction;
   final double touchY;
 
@@ -354,17 +380,10 @@ class _PageCurlPainter extends CustomPainter {
     if (shader != null) {
       final cornerY = touchY < 0.42 ? 0.0 : size.height;
       final corner = Offset(size.width, cornerY);
-      // The finger only has to travel one viewport width, but the loose page
-      // corner has to continue past the opposite edge for the fold crease and
-      // the outgoing sheet to leave the viewport. Keeping both distances at
-      // one width strands a large piece of the old page on screen at p ~= 1,
-      // followed by an abrupt full-page content swap. The cubic term is tiny
-      // near the start (so the page remains attached to the finger) and adds
-      // the extra off-screen travel during the settling half of the turn.
-      final progressValue = progress.clamp(0.0, 1.0);
-      final travel =
-          progressValue + progressValue * progressValue * progressValue;
-      final touchX = size.width * (1 - travel);
+      // Interactive travel stays one-to-one with the pointer. Once released,
+      // the surface continues from that exact position to two viewport widths
+      // so the outgoing sheet clears the screen without a last-frame swap.
+      final touchX = size.width * (1 - travel.clamp(0.0, 2.0));
       final horizontalPull = math.max(size.width - touchX, 1.0);
       final requestedVerticalPull = (size.height * touchY - cornerY) * 0.84;
       // A page corner cannot follow a steep diagonal finger path literally:
@@ -406,7 +425,7 @@ class _PageCurlPainter extends CustomPainter {
     final mesh = PageCurlMesh.build(
       size: size,
       texture: currentPage,
-      progress: progress,
+      progress: travel,
       direction: direction,
       touchY: touchY,
     );
@@ -459,6 +478,7 @@ class _PageCurlPainter extends CustomPainter {
   @override
   bool shouldRepaint(_PageCurlPainter oldDelegate) =>
       oldDelegate.progress != progress ||
+      oldDelegate.travel != travel ||
       oldDelegate.curlShader != curlShader ||
       oldDelegate.currentPage != currentPage ||
       oldDelegate.nextPage != nextPage ||

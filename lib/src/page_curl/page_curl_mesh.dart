@@ -36,7 +36,10 @@ class PageCurlMesh {
   }) {
     final width = size.width;
     final height = size.height;
-    final clampedProgress = progress.clamp(0.0, 1.0);
+    // Values above one are used by the release animation to carry the loose
+    // page corner beyond the opposite edge. This keeps the fallback painter
+    // continuous with the fragment-shader implementation.
+    final clampedProgress = progress.clamp(0.0, 2.0);
     final cornerY = touchY < 0.42 ? 0.0 : height;
     final corner = Offset(width, cornerY);
     final touchX = width * (1 - clampedProgress);

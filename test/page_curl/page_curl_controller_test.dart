@@ -35,8 +35,8 @@ void main() {
     addTearDown(forward.dispose);
     addTearDown(backward.dispose);
 
-    expect(forward.progress, closeTo(0.5, 0.001));
-    expect(backward.progress, closeTo(0.5, 0.001));
+    expect(forward.progress, closeTo(0.43, 0.001));
+    expect(backward.progress, closeTo(0.43, 0.001));
     expect(forward.touchY, closeTo(0.375, 0.001));
   });
 

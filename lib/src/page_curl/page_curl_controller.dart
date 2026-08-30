@@ -53,7 +53,10 @@ class PageCurlController extends ChangeNotifier {
     final origin = _origin;
     if (origin == null || _size.width <= 0) return;
     final travel = (origin.dx - position.dx) * _direction;
-    _progress = (travel / (_size.width * 0.86)).clamp(0.0, 1.0);
+    // Keep the loose corner under the pointer while it is being dragged.
+    // The extra distance needed to move the sheet fully off-screen belongs to
+    // the release animation, not the interactive gesture.
+    _progress = (travel / _size.width).clamp(0.0, 1.0);
     _touchY = _normalizeY(position.dy);
     notifyListeners();
   }

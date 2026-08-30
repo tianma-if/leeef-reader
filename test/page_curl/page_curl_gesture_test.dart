@@ -2,6 +2,37 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_gesture.dart';
 
 void main() {
+  test('release travel starts without a jump and clears the viewport', () {
+    expect(
+      pageCurlSettlingTravel(
+        progress: 0.43,
+        startProgress: 0.43,
+        complete: true,
+      ),
+      closeTo(0.43, 0.001),
+    );
+    expect(
+      pageCurlSettlingTravel(progress: 1, startProgress: 0.43, complete: true),
+      2,
+    );
+    expect(
+      pageCurlSettlingTravel(
+        progress: 0.44,
+        startProgress: 0.43,
+        complete: true,
+      ),
+      closeTo(0.44, 0.0001),
+    );
+    expect(
+      pageCurlSettlingTravel(
+        progress: 0.2,
+        startProgress: 0.43,
+        complete: false,
+      ),
+      0.2,
+    );
+  });
+
   test('left drag maps to normalized curl progress', () {
     final gesture = PageCurlGesture();
 
