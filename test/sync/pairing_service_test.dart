@@ -55,6 +55,7 @@ void main() {
     final result = await phonePairing.join(
       host.code,
       timeout: const Duration(seconds: 5),
+      discoveryTargets: [InternetAddress.loopbackIPv4],
     );
     final pairedDevice = await host.completion;
 
@@ -111,7 +112,11 @@ void main() {
     await PairingService(
       spaceStore: phoneSpaceStore,
       configuration: phoneConfiguration,
-    ).join(host.code, timeout: const Duration(seconds: 5));
+    ).join(
+      host.code,
+      timeout: const Duration(seconds: 5),
+      discoveryTargets: [InternetAddress.loopbackIPv4],
+    );
     await host.completion;
 
     final desktopSync = TrustedSyncService(

@@ -170,6 +170,7 @@ class PairingService {
   Future<PairingJoinResult> join(
     String rawCode, {
     Duration timeout = const Duration(seconds: 12),
+    List<InternetAddress>? discoveryTargets,
   }) async {
     final code = _normalizeCode(rawCode);
     if (code.length != 12) throw const FormatException('配对码格式不正确。');
@@ -202,21 +203,22 @@ class PairingService {
         'verifier': _codeVerifier(code),
       }),
     );
+    final targets =
+        discoveryTargets ??
+        <InternetAddress>[
+          InternetAddress('255.255.255.255'),
+          InternetAddress.loopbackIPv4,
+        ];
     Timer? retransmit;
     void sendDiscovery() {
-      try {
-        socket.send(
-          discovery,
-          InternetAddress('255.255.255.255'),
-          discoveryPort,
-        );
-      } on SocketException {
-        // Sandboxed hosts can have no broadcast route. Keep loopback discovery
-        // available so local devices and test environments still pair.
+      for (final target in targets) {
+        try {
+          socket.send(discovery, target, discoveryPort);
+        } on SocketException {
+          // Continue with the remaining discovery routes when an interface is
+          // unavailable, which is common in sandboxed desktop environments.
+        }
       }
-      // Loopback keeps pairing available between local simulators and makes
-      // the discovery protocol deterministic in desktop test environments.
-      socket.send(discovery, InternetAddress.loopbackIPv4, discoveryPort);
     }
 
     sendDiscovery();
