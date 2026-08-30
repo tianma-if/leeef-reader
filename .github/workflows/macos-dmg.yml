@@ -71,22 +71,22 @@ jobs:
         with:
           name: leeef-reader-macos-dmg
           path: |
-            build/distribution/*.dmg
-            build/distribution/*.zip
-            build/distribution/appcast.xml
+            build.noindex/distribution/*.dmg
+            build.noindex/distribution/*.zip
+            build.noindex/distribution/appcast.xml
           if-no-files-found: error
       - name: Verify automatic-update assets
         if: github.event_name == 'release' || inputs.release_tag != ''
         run: |
-          test -f build/distribution/appcast.xml
-          test "$(find build/distribution -maxdepth 1 -name '*.zip' | wc -l | tr -d ' ')" = 1
+          test -f build.noindex/distribution/appcast.xml
+          test "$(find build.noindex/distribution -maxdepth 1 -name '*.zip' | wc -l | tr -d ' ')" = 1
       - name: Attach installers and update metadata to GitHub Release
         if: github.event_name == 'release' || inputs.release_tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
         run: gh release upload "$RELEASE_TAG" \
-          build/distribution/*.dmg \
-          build/distribution/*.zip \
-          build/distribution/appcast.xml \
+          build.noindex/distribution/*.dmg \
+          build.noindex/distribution/*.zip \
+          build.noindex/distribution/appcast.xml \
           --clobber
