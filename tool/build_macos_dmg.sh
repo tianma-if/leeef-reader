@@ -94,12 +94,24 @@ if [[ -n "${APPLE_API_PRIVATE_KEY:-}" || -n "${APPLE_API_KEY_ID:-}" || -n "${APP
   : "${APPLE_API_KEY_ID:?APPLE_API_KEY_ID is required for notarization}"
   : "${APPLE_API_ISSUER_ID:?APPLE_API_ISSUER_ID is required for notarization}"
   api_key_path="$staging_dir/AuthKey_${APPLE_API_KEY_ID}.p8"
+  notary_result_path="$staging_dir/notary-result.json"
   printf '%s' "$APPLE_API_PRIVATE_KEY" > "$api_key_path"
   chmod 600 "$api_key_path"
   xcrun notarytool submit "$dmg_path" --wait \
     --key "$api_key_path" \
     --key-id "$APPLE_API_KEY_ID" \
-    --issuer "$APPLE_API_ISSUER_ID"
+    --issuer "$APPLE_API_ISSUER_ID" \
+    --output-format json > "$notary_result_path"
+  sed -n '1,200p' "$notary_result_path"
+  notary_status="$(plutil -extract status raw -o - "$notary_result_path")"
+  if [[ "$notary_status" != "Accepted" ]]; then
+    notary_id="$(plutil -extract id raw -o - "$notary_result_path")"
+    xcrun notarytool log "$notary_id" \
+      --key "$api_key_path" \
+      --key-id "$APPLE_API_KEY_ID" \
+      --issuer "$APPLE_API_ISSUER_ID"
+    exit 1
+  fi
   xcrun stapler staple "$dmg_path"
   xcrun stapler validate "$dmg_path"
 fi
