@@ -55,12 +55,17 @@ if [[ "$signing_identity" != "-" ]]; then
   code_sign_args+=(--options runtime --timestamp)
 fi
 
-while IFS= read -r -d '' nested_code; do
-  codesign "${code_sign_args[@]}" "$nested_code"
+while IFS= read -r -d '' executable; do
+  if file -b "$executable" | grep -q 'Mach-O'; then
+    codesign "${code_sign_args[@]}" "$executable"
+  fi
+done < <(find "$app_path/Contents/Frameworks" -type f -perm -111 -print0)
+
+while IFS= read -r -d '' nested_bundle; do
+  codesign "${code_sign_args[@]}" "$nested_bundle"
 done < <(
   find "$app_path/Contents/Frameworks" \
-    \( -type d -name '*.xpc' -o -type d -name '*.app' -o -type f -name '*.dylib' \) \
-    -print0
+    \( -type d -name '*.xpc' -o -type d -name '*.app' \) -print0
 )
 
 while IFS= read -r -d '' framework; do
