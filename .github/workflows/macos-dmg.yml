@@ -85,8 +85,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
-        run: gh release upload "$RELEASE_TAG" \
-          build.noindex/distribution/*.dmg \
-          build.noindex/distribution/*.zip \
-          build.noindex/distribution/appcast.xml \
-          --clobber
+        run: |
+          gh release upload "$RELEASE_TAG" \
+            build.noindex/distribution/*.dmg \
+            build.noindex/distribution/*.zip \
+            build.noindex/distribution/appcast.xml \
+            --clobber
