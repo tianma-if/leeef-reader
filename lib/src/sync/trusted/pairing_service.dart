@@ -204,7 +204,16 @@ class PairingService {
     );
     Timer? retransmit;
     void sendDiscovery() {
-      socket.send(discovery, InternetAddress('255.255.255.255'), discoveryPort);
+      try {
+        socket.send(
+          discovery,
+          InternetAddress('255.255.255.255'),
+          discoveryPort,
+        );
+      } on SocketException {
+        // Sandboxed hosts can have no broadcast route. Keep loopback discovery
+        // available so local devices and test environments still pair.
+      }
       // Loopback keeps pairing available between local simulators and makes
       // the discovery protocol deterministic in desktop test environments.
       socket.send(discovery, InternetAddress.loopbackIPv4, discoveryPort);
