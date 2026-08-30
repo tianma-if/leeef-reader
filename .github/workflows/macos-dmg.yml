@@ -24,7 +24,10 @@ concurrency:
 
 jobs:
   dmg:
-    if: github.repository == 'tianma-if/leeef-reader'
+    # Public releases are audited below. Build and upload signed assets while
+    # the target release is still a Draft by dispatching this workflow with a
+    # release_tag.
+    if: github.repository == 'tianma-if/leeef-reader' && github.event_name == 'workflow_dispatch'
     name: macOS universal DMG
     # flutter_inappwebview_macos 1.2.0-beta.3 currently needs the Xcode 27
     # Swift compiler. GitHub exposes this toolchain through the xcode-27 image.
@@ -55,10 +58,6 @@ jobs:
         with:
           p12-file-base64: ${{ secrets.MACOS_CERTIFICATES_FILE_BASE64 }}
           p12-password: ${{ secrets.MACOS_CERTIFICATES_PASSWORD }}
-      - name: Test
-        run: |
-          flutter pub get
-          flutter test
       - name: Build DMG
         env:
           MACOS_CERTIFICATE_NAME: ${{ (github.event_name == 'release' || inputs.release_tag != '' || inputs.notarize) && secrets.MACOS_CERTIFICATE_NAME || '' }}
@@ -91,3 +90,47 @@ jobs:
             build.noindex/distribution/*.zip \
             build.noindex/distribution/appcast.xml \
             --clobber
+
+  audit-published-release:
+    if: github.repository == 'tianma-if/leeef-reader' && github.event_name == 'release'
+    name: Audit published macOS assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - name: Download and audit existing release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version="$(sed -nE 's/^version:[[:space:]]*([^+[:space:]]+).*/\1/p' pubspec.yaml)"
+          build_number="$(sed -nE 's/^version:[[:space:]]*[^+[:space:]]+\+([0-9]+).*/\1/p' pubspec.yaml)"
+          test -n "$version"
+          test -n "$build_number"
+          test "$RELEASE_TAG" = "v${version}"
+          asset_dir="$RUNNER_TEMP/release-assets"
+          mkdir -p "$asset_dir"
+          gh release download "$RELEASE_TAG" --dir "$asset_dir"
+          dmg="$asset_dir/Leeef-Reader-${version}-macos-universal.dmg"
+          zip="$asset_dir/Leeef-Reader-${version}-macos-universal.zip"
+          appcast="$asset_dir/appcast.xml"
+          test -s "$dmg"
+          test -s "$zip"
+          test -s "$appcast"
+          test "$(find "$asset_dir" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 3
+          zip_length="$(stat -c '%s' "$zip")"
+          grep -Fq "sparkle:version=\"${build_number}\"" "$appcast"
+          grep -Fq "sparkle:shortVersionString=\"${version}\"" "$appcast"
+          grep -Fq "/releases/download/${RELEASE_TAG}/$(basename "$zip")" "$appcast"
+          grep -Fq "length=\"${zip_length}\"" "$appcast"
+          grep -Eq 'sparkle:edSignature="[^"]+"' "$appcast"
+      - name: Restore a failed release to Draft
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release edit "$RELEASE_TAG" --draft

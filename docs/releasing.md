@@ -1,6 +1,43 @@
 # 商店与 macOS 发布
 
-Leeef Reader 使用三个相互独立的手动 GitHub Actions 工作流。首次发布前，应先在 Apple Developer、App Store Connect 和 Google Play Console 创建应用；已登记的标识不可随意更换。
+Leeef Reader 使用三个相互独立的手动 GitHub Actions 工作流。首次发布前，应先在 Apple Developer、App Store Connect 和 Google Play Console 创建应用；已登记的标识不可随意更换。仓库级发布约束见 [`AGENTS.md`](../AGENTS.md)，本页说明实际操作。
+
+## 正式 Release 规则
+
+- 正式 Tag 与 Release 标题使用 `vX.Y.Z`；`pubspec.yaml` 必须使用匹配的 `X.Y.Z+N`，其中 `N` 严格递增。
+- 必须按 SemVer 显式决定 patch、minor 或 major。用户可感知的新能力和新增平台不能仅因发版方便而归入 patch。
+- 以上一个正式 Release 为基线审计变更，并使用中英文说明公开的用户可感知变化；构建、签名和公证细节留在 Actions 或关联 Issue。
+- 先创建 Draft Release，在 Draft 内准备并核验 macOS 资产，然后才公开。Release 的 `published` 事件只审计已有资产；审计失败会尝试把 Release 恢复为 Draft。
+- Android 与 iOS 是独立的商店交付：先送入 Play internal draft 与 TestFlight，完成真机回归后再进入正式轨道或审核。
+- 当前没有正式 Windows 安装包、签名和更新资产工作流，因此不得在 Release 说明中把 Windows 写成该版本已经交付的平台。
+
+## 标准发布命令
+
+发布规划器借鉴 EdgeEver 的显式版本升级、提交覆盖审计、双语变化映射和 Draft 准备边界。它默认只读，不会修改工作区、提交、Tag 或 GitHub 状态：
+
+```bash
+dart run tool/release.dart \
+  --bump minor \
+  --issue-title "Release Leeef Reader 1.1" \
+  --label enhancement \
+  --change-zh "新增面向用户的能力。" \
+  --change-en "Add a new user-facing capability." \
+  --change-commit "abcdef1"
+```
+
+多项变化按顺序重复 `--change-zh`、`--change-en` 和 `--change-commit`；一项变化可关联逗号分隔的多个提交。上一个正式 Release 之后的每个提交都必须被覆盖。不面向用户的提交使用带具体原因的显式排除：
+
+```bash
+--ignore-commit "1234567:仅调整 CI，不影响用户"
+```
+
+确认 dry run 输出的版本、构建号、提交覆盖和说明后，使用完全相同的参数并增加 `--execute`。执行模式会确认 `main` 与 `origin/main` 一致，并复用该提交已经通过的跨平台 CI（不存在时只补跑一次）；随后创建跟踪 Issue、更新并提交 `pubspec.yaml`、推送正式 Tag、创建 Draft Release，并触发一次 macOS 资产工作流。仅修改版本号的发版提交带 `[skip ci]`，不会把同一套门禁再跑一遍。它不会公开 Release，也不会批准 Google Play production 或 App Store 审核。
+
+发布规划器自身的回归测试：
+
+```bash
+flutter test test/release_tool_test.dart
+```
 
 | 平台 | 应用标识 | 工作流 | 产物/目标 |
 | --- | --- | --- | --- |
@@ -66,7 +103,7 @@ GitHub 的 `macos-distribution` Environment 配置：
 - Secrets：`MACOS_CERTIFICATES_FILE_BASE64`、`MACOS_CERTIFICATES_PASSWORD`、`MACOS_CERTIFICATE_NAME`、`APPSTORE_API_PRIVATE_KEY`。
 - Sparkle 更新签名 Secret：`MACOS_SPARKLE_PRIVATE_KEY`。内容是 Sparkle Ed25519 私钥种子的单行 base64；对应公钥固定在 `macos/Runner/Info.plist`，丢失后不能为已安装客户端发布可信更新。
 
-手动执行工作流可选择无签名构建用于内部测试，也可传入已有 GitHub Release 的 `release_tag`，将签名、公证后的 universal DMG 上传到该 Release。正式 GitHub Release 发布时，`published` 事件会自动从对应 tag 构建、签名、公证，并附加 DMG、供静默下载的 ZIP 以及签名的 `appcast.xml`；tag 必须与 `pubspec.yaml` 的版本一致，例如版本 `1.0.0+2` 对应 `v1.0.0`。已安装的 macOS 客户端每 6 小时静默检查并下载，下载完成后才提示用户重启安装；选择稍后时，正常退出应用也会完成安装。
+手动执行工作流可选择无签名构建用于内部测试。正式发布时，先创建 Draft Release，再以该 Draft 的 Tag 作为 `release_tag` 手动运行工作流；工作流会从 Tag 构建、签名、公证，并向 Draft 附加 DMG、供静默下载的 ZIP 以及签名的 `appcast.xml`。Tag 必须与 `pubspec.yaml` 的版本一致，例如版本 `1.0.0+2` 对应 `v1.0.0`。确认工作流成功且 Draft 中三项资产齐全后才可公开 Release；`published` 事件不会重新构建，只审计已有资产。已安装的 macOS 客户端每 6 小时静默检查并下载，下载完成后才提示用户重启安装；选择稍后时，正常退出应用也会完成安装。
 
 首次配置更新签名时，将仓库外保存的私钥写入 GitHub Environment：
 
@@ -81,8 +118,10 @@ gh secret set MACOS_SPARKLE_PRIVATE_KEY \
 
 ## 发布检查
 
-1. 更新 `pubspec.yaml` 的 `version: X.Y.Z+N`；`N` 必须严格递增。
-2. 运行 `flutter analyze` 与 `flutter test`。
-3. 先发布 Play internal 与 TestFlight，完成真机导入、阅读、分享导入、后台音频和同步回归；Android 还需从旧的 Play 版本验证“确认下载 → 后台下载 → 重启安装”完整流程。
-4. 在 Intel 与 Apple Silicon Mac 上验证 DMG 可挂载、拖入 Applications，并运行 `spctl --assess --type execute --verbose "Leeef Reader.app"`；从前一正式版本启动应用，确认新版 ZIP 静默下载后出现“重启以更新”，重启后版本号已更新。
-5. 最后在受保护 Environment 中批准生产轨道或 App Store 审核提交。
+1. 确认 `main` 与 `origin/main` 一致且工作区干净；以上一个正式 Release 为基线整理中英文用户变更。
+2. 显式选择 SemVer 级别，更新 `pubspec.yaml` 的 `version: X.Y.Z+N`；`N` 必须严格递增。
+3. 等待当前源码提交的跨平台 CI 全部通过；该工作流统一执行 Flutter 分析与测试、MCP `go test ./...` 以及 Android、iOS、macOS、Windows 构建。发布规划器会直接复用这一结果，不重复执行同一套门禁。
+4. 创建 `vX.Y.Z` Draft Release，使用同一 Tag 手动运行 `Build macOS DMG`，确认 DMG、ZIP、`appcast.xml` 已上传且工作流成功。
+5. 先发布 Play internal draft 与 TestFlight，完成真机导入、阅读、分享导入、后台音频和同步回归；Android 还需从旧的 Play 版本验证“确认下载 → 后台下载 → 重启安装”完整流程。
+6. 在 Intel 与 Apple Silicon Mac 上验证 DMG 可挂载、拖入 Applications，并运行 `spctl --assess --type execute --verbose "Leeef Reader.app"`；从前一正式版本启动应用，确认新版 ZIP 静默下载后出现“重启以更新”，重启后版本号已更新。
+7. 公开 GitHub Release 并确认发布后资产审计通过；最后在受保护 Environment 中批准生产轨道或 App Store 审核提交。

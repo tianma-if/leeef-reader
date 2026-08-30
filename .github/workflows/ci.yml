@@ -16,6 +16,7 @@ on:
       - "shaders/**"
       - "sidecars/leeef-mcp/**"
       - "test/**"
+      - "tool/release.dart"
       - "windows/**"
       - "pubspec.*"
 

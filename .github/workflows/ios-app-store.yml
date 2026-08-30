@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.repository == 'tianma-if/leeef-reader'
     runs-on: macos-26
     timeout-minutes: 60
     environment: app-store
