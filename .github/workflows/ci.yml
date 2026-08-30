@@ -47,7 +47,9 @@ jobs:
         run: go test ./...
 
   apple-builds:
-    runs-on: macos-latest
+    # flutter_inappwebview_macos 1.2.0-beta.3 requires the Xcode 27 Swift
+    # compiler, matching the production macOS release workflow.
+    runs-on: xcode-27
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
