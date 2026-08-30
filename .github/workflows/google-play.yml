@@ -53,6 +53,14 @@ jobs:
       - run: flutter test
       - name: Build signed Android App Bundle
         run: flutter build appbundle --release
+      - name: Verify Play build cannot self-install APKs
+        run: |
+          manifest="$(find build/app/intermediates/packaged_manifests/release -name AndroidManifest.xml -print -quit)"
+          test -n "$manifest"
+          if grep -q 'android.permission.REQUEST_INSTALL_PACKAGES' "$manifest"; then
+            echo "Play build must not request REQUEST_INSTALL_PACKAGES"
+            exit 1
+          fi
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:

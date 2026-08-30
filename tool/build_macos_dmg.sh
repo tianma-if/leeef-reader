@@ -5,10 +5,14 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
 version="$(sed -nE 's/^version:[[:space:]]*([^+[:space:]]+).*/\1/p' pubspec.yaml)"
+build_number="$(sed -nE 's/^version:[[:space:]]*[^+[:space:]]+\+([0-9]+).*/\1/p' pubspec.yaml)"
+test -n "$version"
+test -n "$build_number"
+flutter config --build-dir=build.noindex
 flutter pub get
 flutter build macos --release
 
-products_dir="$repo_dir/build/macos/Build/Products/Release"
+products_dir="$repo_dir/build.noindex/macos/Build/Products/Release"
 app_path="$(find "$products_dir" -maxdepth 1 -type d -name '*.app' -print -quit)"
 test -n "$app_path"
 executable_name="$(defaults read "$app_path/Contents/Info" CFBundleExecutable)"
@@ -54,17 +58,21 @@ fi
 while IFS= read -r -d '' nested_code; do
   codesign "${code_sign_args[@]}" "$nested_code"
 done < <(
-  find "$app_path/Contents/Frameworks" -maxdepth 1 \
-    \( -type d -name '*.framework' -o -type f -name '*.dylib' \) \
+  find "$app_path/Contents/Frameworks" \
+    \( -type d -name '*.xpc' -o -type d -name '*.app' -o -type f -name '*.dylib' \) \
     -print0
 )
+
+while IFS= read -r -d '' framework; do
+  codesign "${code_sign_args[@]}" "$framework"
+done < <(find "$app_path/Contents/Frameworks" -type d -name '*.framework' -print0)
 
 codesign "${code_sign_args[@]}" \
   --entitlements "$repo_dir/macos/Runner/Release.entitlements" \
   "$app_path"
 "$repo_dir/tool/verify_macos_bundle.sh" "$app_path"
 
-output_dir="$repo_dir/build/distribution"
+output_dir="$repo_dir/build.noindex/distribution"
 staging_dir="$(mktemp -d)"
 trap 'rm -rf "$staging_dir"' EXIT
 mkdir -p "$output_dir"
@@ -94,6 +102,62 @@ if [[ -n "${APPLE_API_PRIVATE_KEY:-}" || -n "${APPLE_API_KEY_ID:-}" || -n "${APP
     --issuer "$APPLE_API_ISSUER_ID"
   xcrun stapler staple "$dmg_path"
   xcrun stapler validate "$dmg_path"
+fi
+
+if [[ -n "${SPARKLE_PRIVATE_KEY:-}" ]]; then
+  zip_path="$output_dir/Leeef-Reader-${version}-macos-${distribution_arch}.zip"
+  appcast_path="$output_dir/appcast.xml"
+  sign_tool="$repo_dir/macos/Pods/Sparkle/bin/sign_update"
+  test -x "$sign_tool"
+  embedded_public_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' \
+    "$repo_dir/macos/Runner/Info.plist")"
+  private_key_hex="$(printf '%s' "$SPARKLE_PRIVATE_KEY" | \
+    openssl base64 -d -A | xxd -p | tr -d '\n')"
+  if [[ "${#private_key_hex}" -ne 64 ]]; then
+    echo "SPARKLE_PRIVATE_KEY must be a base64-encoded 32-byte Ed25519 seed." >&2
+    exit 1
+  fi
+  private_key_der="$staging_dir/sparkle-private.der"
+  printf '302e020100300506032b657004220420%s' "$private_key_hex" | \
+    xxd -r -p > "$private_key_der"
+  derived_public_key="$(openssl pkey -inform DER -in "$private_key_der" \
+    -pubout -outform DER | tail -c 32 | openssl base64 -A)"
+  if [[ "$derived_public_key" != "$embedded_public_key" ]]; then
+    echo "SPARKLE_PRIVATE_KEY does not match Info.plist SUPublicEDKey." >&2
+    exit 1
+  fi
+  ditto -c -k --sequesterRsrc --keepParent "$app_path" "$zip_path"
+  signature_output="$(printf '%s\n' "$SPARKLE_PRIVATE_KEY" | \
+    "$sign_tool" --ed-key-file - "$zip_path")"
+  signature="$(sed -nE 's/.*sparkle:edSignature="([^"]+)".*/\1/p' <<<"$signature_output")"
+  archive_length="$(sed -nE 's/.*length="([0-9]+)".*/\1/p' <<<"$signature_output")"
+  test -n "$signature"
+  test -n "$archive_length"
+  published_at="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S %z')"
+  archive_name="$(basename "$zip_path")"
+  archive_url="https://github.com/tianma-if/leeef-reader/releases/download/v${version}/${archive_name}"
+  release_url="https://github.com/tianma-if/leeef-reader/releases/tag/v${version}"
+  {
+    printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>'
+    printf '%s\n' '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
+    printf '%s\n' '  <channel>'
+    printf '%s\n' '    <title>Leeef Reader updates</title>'
+    printf '    <link>%s</link>\n' "$release_url"
+    printf '%s\n' '    <description>Leeef Reader stable updates</description>'
+    printf '%s\n' '    <language>zh-CN</language>'
+    printf '%s\n' '    <item>'
+    printf '      <title>Leeef Reader %s</title>\n' "$version"
+    printf '      <link>%s</link>\n' "$release_url"
+    printf '      <pubDate>%s</pubDate>\n' "$published_at"
+    printf '%s\n' '      <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>'
+    printf '      <enclosure url="%s" sparkle:version="%s" sparkle:shortVersionString="%s" sparkle:edSignature="%s" length="%s" type="application/octet-stream"/>\n' \
+      "$archive_url" "$build_number" "$version" "$signature" "$archive_length"
+    printf '%s\n' '    </item>'
+    printf '%s\n' '  </channel>'
+    printf '%s\n' '</rss>'
+  } > "$appcast_path"
+  printf '%s\n' "$SPARKLE_PRIVATE_KEY" | \
+    "$sign_tool" --ed-key-file - --disable-signing-warning "$appcast_path"
 fi
 
 echo "$dmg_path"

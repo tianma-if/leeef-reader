@@ -1,0 +1,21 @@
+name: auto_updater_macos
+description: Leeef Reader's macOS implementation of auto_updater.
+version: 1.0.0
+publish_to: none
+repository: https://github.com/leanflutter/auto_updater/tree/main/packages/auto_updater_macos
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.3.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  plugin_platform_interface: ^2.0.0
+
+flutter:
+  plugin:
+    implements: auto_updater
+    platforms:
+      macos:
+        pluginClass: AutoUpdaterMacosPlugin

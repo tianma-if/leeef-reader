@@ -32,10 +32,12 @@ import 'package:leeef_reader/src/sync/trusted/trusted_sync_service.dart';
 import 'package:leeef_reader/src/sync/webdav_sync_backend.dart';
 import 'package:leeef_reader/src/tts/configured_tts_engine.dart';
 import 'package:leeef_reader/src/platform/app_appearance.dart';
+import 'package:leeef_reader/src/platform/android_auto_update_service.dart';
 import 'package:leeef_reader/src/platform/app_log.dart';
 import 'package:leeef_reader/src/platform/app_notifications.dart';
 import 'package:leeef_reader/src/platform/app_proxy.dart';
 import 'package:leeef_reader/src/platform/app_update_service.dart';
+import 'package:leeef_reader/src/platform/desktop_auto_update_service.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
@@ -2859,6 +2861,24 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
     if (_busy) return;
     setState(() => _busy = true);
     try {
+      if (Platform.isAndroid) {
+        final updater = AndroidAutoUpdateService.instance;
+        await updater.checkNow();
+        if (!mounted) return;
+        if (updater.state.stage == AndroidUpdateStage.idle) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppStrings.of(context).text('已是最新版本'))),
+          );
+          return;
+        }
+        if (updater.state.stage != AndroidUpdateStage.failed &&
+            updater.state.stage != AndroidUpdateStage.unsupported) {
+          return;
+        }
+      }
+      if (Platform.isMacOS) {
+        await DesktopAutoUpdateService.instance.checkNow();
+      }
       final update = await const AppUpdateService().check();
       if (!mounted) return;
       await showDialog<void>(
@@ -4108,14 +4128,76 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
             ),
           ],
         ),
-        ListTile(
-          leading: const Icon(Icons.system_update_outlined),
-          title: Text(strings.text('检查更新与变更日志')),
-          subtitle: Text(strings.text('从 GitHub Releases 获取最新版本和发布说明')),
-          trailing: TextButton(
-            onPressed: _busy ? null : _checkForUpdates,
-            child: Text(strings.text('检查')),
-          ),
+        ListenableBuilder(
+          listenable: Platform.isAndroid
+              ? AndroidAutoUpdateService.instance
+              : DesktopAutoUpdateService.instance,
+          builder: (context, _) {
+            if (Platform.isAndroid) {
+              final updateState = AndroidAutoUpdateService.instance.state;
+              final subtitle = switch (updateState.stage) {
+                AndroidUpdateStage.checking => '正在后台检查更新',
+                AndroidUpdateStage.available => '发现新版本，等待开始下载',
+                AndroidUpdateStage.downloading => '新版本正在后台下载',
+                AndroidUpdateStage.ready => '新版本已下载，重启即可安装',
+                AndroidUpdateStage.installing => '正在安装更新',
+                _ => '通过 Google Play 获取应用更新',
+              };
+              final Widget trailing = switch (updateState.stage) {
+                AndroidUpdateStage.available => FilledButton.tonalIcon(
+                  onPressed:
+                      AndroidAutoUpdateService.instance.startBackgroundDownload,
+                  icon: const Icon(Icons.download_outlined),
+                  label: Text(strings.text('下载更新')),
+                ),
+                AndroidUpdateStage.ready => FilledButton.tonalIcon(
+                  onPressed:
+                      AndroidAutoUpdateService.instance.installDownloadedUpdate,
+                  icon: const Icon(Icons.restart_alt),
+                  label: Text(strings.text('重启以更新')),
+                ),
+                AndroidUpdateStage.downloading ||
+                AndroidUpdateStage.installing => const SizedBox.square(
+                  dimension: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                _ => TextButton(
+                  onPressed: _busy ? null : _checkForUpdates,
+                  child: Text(strings.text('检查')),
+                ),
+              };
+              return ListTile(
+                leading: const Icon(Icons.system_update_outlined),
+                title: Text(strings.text('检查更新与变更日志')),
+                subtitle: Text(strings.text(subtitle)),
+                trailing: trailing,
+              );
+            }
+            final updateState = DesktopAutoUpdateService.instance.state;
+            final subtitle = switch (updateState.stage) {
+              DesktopUpdateStage.checking => '正在后台检查更新',
+              DesktopUpdateStage.downloading => '新版本正在后台下载',
+              DesktopUpdateStage.ready => '新版本已下载，重启即可安装',
+              _ => '从 GitHub Releases 获取最新版本和发布说明',
+            };
+            return ListTile(
+              leading: const Icon(Icons.system_update_outlined),
+              title: Text(strings.text('检查更新与变更日志')),
+              subtitle: Text(strings.text(subtitle)),
+              trailing: updateState.isReady
+                  ? FilledButton.tonalIcon(
+                      onPressed: DesktopAutoUpdateService
+                          .instance
+                          .installDownloadedUpdate,
+                      icon: const Icon(Icons.restart_alt),
+                      label: Text(strings.text('重启以更新')),
+                    )
+                  : TextButton(
+                      onPressed: _busy ? null : _checkForUpdates,
+                      child: Text(strings.text('检查')),
+                    ),
+            );
+          },
         ),
         const Divider(),
         SwitchListTile(

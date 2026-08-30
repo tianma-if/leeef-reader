@@ -65,15 +65,28 @@ jobs:
           APPLE_API_PRIVATE_KEY: ${{ (github.event_name == 'release' || inputs.release_tag != '' || inputs.notarize) && secrets.APPSTORE_API_PRIVATE_KEY || '' }}
           APPLE_API_KEY_ID: ${{ (github.event_name == 'release' || inputs.release_tag != '' || inputs.notarize) && vars.APPSTORE_API_KEY_ID || '' }}
           APPLE_API_ISSUER_ID: ${{ (github.event_name == 'release' || inputs.release_tag != '' || inputs.notarize) && vars.APPSTORE_ISSUER_ID || '' }}
+          SPARKLE_PRIVATE_KEY: ${{ (github.event_name == 'release' || inputs.release_tag != '') && secrets.MACOS_SPARKLE_PRIVATE_KEY || '' }}
         run: ./tool/build_macos_dmg.sh
       - uses: actions/upload-artifact@v7
         with:
           name: leeef-reader-macos-dmg
-          path: build/distribution/*.dmg
+          path: |
+            build/distribution/*.dmg
+            build/distribution/*.zip
+            build/distribution/appcast.xml
           if-no-files-found: error
-      - name: Attach DMG to GitHub Release
+      - name: Verify automatic-update assets
+        if: github.event_name == 'release' || inputs.release_tag != ''
+        run: |
+          test -f build/distribution/appcast.xml
+          test "$(find build/distribution -maxdepth 1 -name '*.zip' | wc -l | tr -d ' ')" = 1
+      - name: Attach installers and update metadata to GitHub Release
         if: github.event_name == 'release' || inputs.release_tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
-        run: gh release upload "$RELEASE_TAG" build/distribution/*.dmg --clobber
+        run: gh release upload "$RELEASE_TAG" \
+          build/distribution/*.dmg \
+          build/distribution/*.zip \
+          build/distribution/appcast.xml \
+          --clobber

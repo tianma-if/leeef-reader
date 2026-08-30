@@ -10,6 +10,8 @@ expected_pdfium_id='@rpath/PDFium.framework/PDFium'
 
 test -f "$app_path/Contents/MacOS/$executable_name"
 test -f "$pdfium_binary"
+test "$(/usr/libexec/PlistBuddy -c 'Print :LSMultipleInstancesProhibited' \
+  "$app_path/Contents/Info.plist")" = 'true'
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \
   "$pdfium_framework/Resources/Info.plist")" = 'PDFium'
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \

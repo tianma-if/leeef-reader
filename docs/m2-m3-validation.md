@@ -25,7 +25,7 @@ flutter analyze
   No issues found
 
 flutter test
-  126 项全部通过
+  137 项全部通过
 
 flutter test integration_test/foliate_reader_test.dart -d macos
   foliate/WebView 与 Page Curl 集成测试 6 项全部通过

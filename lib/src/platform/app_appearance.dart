@@ -444,6 +444,28 @@ class AppStrings {
     '从 GitHub Releases 获取最新版本和发布说明':
         'Get the latest version and notes from GitHub Releases',
     '检查': 'Check',
+    'Leeef Reader 更新已就绪': 'Leeef Reader update ready',
+    '稍后': 'Later',
+    '重启以更新': 'Restart to update',
+    '启动更新安装失败，请稍后重试':
+        'Could not start the update installer. Please try again later.',
+    '正在后台检查更新': 'Checking for updates in the background',
+    '新版本正在后台下载': 'Downloading the new version in the background',
+    '新版本已下载，重启即可安装': 'Update downloaded; restart to install',
+    'Android 更新已就绪': 'Android update ready',
+    '发现新版本': 'New version available',
+    '开始更新': 'Start update',
+    '下载更新': 'Download update',
+    '正在安装更新': 'Installing update',
+    'Google Play 确认后会在后台下载更新，下载完成后再提示安装。':
+        'After Google Play confirmation, the update downloads in the background. You will be prompted again when it is ready to install.',
+    '新版本已通过 Google Play 下载完成。重启应用即可完成安装。':
+        'Google Play has downloaded the new version. Restart the app to finish installing it.',
+    '启动更新下载失败，请稍后重试':
+        'Could not start the update download. Please try again later.',
+    '发现新版本，等待开始下载': 'New version available; ready to download',
+    '通过 Google Play 获取应用更新': 'Get app updates through Google Play',
+    '已是最新版本': 'You are up to date',
     '我的同步设备': 'My synced devices',
     '配对新设备，自动迁移配置、凭据和书库数据':
         'Pair a device and automatically transfer settings, credentials, and library data',
@@ -1025,6 +1047,26 @@ class AppStrings {
     '检查更新与变更日志': '更新とリリースノート',
     '从 GitHub Releases 获取最新版本和发布说明': 'GitHub Releases から最新版と説明を取得',
     '检查': '確認',
+    'Leeef Reader 更新已就绪': 'Leeef Reader の更新準備ができました',
+    '稍后': '後で',
+    '重启以更新': '再起動して更新',
+    '启动更新安装失败，请稍后重试': '更新を開始できませんでした。しばらくしてから再試行してください。',
+    '正在后台检查更新': 'バックグラウンドで更新を確認しています',
+    '新版本正在后台下载': '新しいバージョンをバックグラウンドでダウンロードしています',
+    '新版本已下载，重启即可安装': '更新をダウンロードしました。再起動してインストールできます',
+    'Android 更新已就绪': 'Android の更新準備ができました',
+    '发现新版本': '新しいバージョンがあります',
+    '开始更新': '更新を開始',
+    '下载更新': '更新をダウンロード',
+    '正在安装更新': '更新をインストールしています',
+    'Google Play 确认后会在后台下载更新，下载完成后再提示安装。':
+        'Google Play で確認後、更新をバックグラウンドでダウンロードします。インストール準備ができたら再度お知らせします。',
+    '新版本已通过 Google Play 下载完成。重启应用即可完成安装。':
+        'Google Play から新しいバージョンをダウンロードしました。アプリを再起動するとインストールが完了します。',
+    '启动更新下载失败，请稍后重试': '更新のダウンロードを開始できませんでした。しばらくしてから再試行してください。',
+    '发现新版本，等待开始下载': '新しいバージョンがあります。ダウンロードを開始できます',
+    '通过 Google Play 获取应用更新': 'Google Play からアプリを更新',
+    '已是最新版本': '最新バージョンです',
     '我的同步设备': '同期デバイス',
     '配对新设备，自动迁移配置、凭据和书库数据': '新しいデバイスをペアリングし、設定・認証情報・書庫データを自動移行',
     '让其他设备加入': '別のデバイスを追加',
@@ -1494,6 +1536,23 @@ class AppStrings {
       : _japanese
       ? '現在のバージョン：$current\n最新バージョン：$latest\n\n$notes'
       : '当前版本：$current\n最新版本：$latest\n\n$notes';
+
+  String desktopUpdateReadyDetails(String? version) {
+    final label = version == null ? null : 'v$version';
+    if (_english) {
+      return label == null
+          ? 'The new version was downloaded in the background. Restart the app to finish installing it.'
+          : '$label was downloaded in the background. Restart the app to finish installing it.';
+    }
+    if (_japanese) {
+      return label == null
+          ? '新しいバージョンをバックグラウンドでダウンロードしました。再起動するとインストールが完了します。'
+          : '$label をバックグラウンドでダウンロードしました。再起動するとインストールが完了します。';
+    }
+    return label == null
+        ? '新版本已在后台下载完成。重启应用即可完成安装。'
+        : '新版本 $label 已在后台下载完成。重启应用即可完成安装。';
+  }
 
   String storageSummary({
     required String bookBytes,
