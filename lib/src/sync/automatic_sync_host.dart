@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:leeef_reader/src/app_providers.dart';
 import 'package:leeef_reader/src/sync/configured_sync_backend.dart';
 import 'package:leeef_reader/src/sync/sync_engine.dart';
+import 'package:leeef_reader/src/sync/trusted/trusted_sync_service.dart';
+import 'package:leeef_reader/src/platform/app_appearance.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AutomaticSyncHost extends ConsumerStatefulWidget {
@@ -74,8 +76,12 @@ class _AutomaticSyncHostState extends ConsumerState<AutomaticSyncHost>
         repository: await ref.read(libraryRepositoryProvider.future),
         backend: await loadConfiguredSyncBackend(),
         libraryDirectory: await ref.read(libraryDirectoryProvider.future),
+        trustedSyncService: await loadTrustedSyncService(),
       );
       final report = await engine.synchronize();
+      if ((report.trustedSync?.appliedConfigurationValues ?? 0) > 0) {
+        await AppAppearanceController.instance.load();
+      }
       ref.invalidate(libraryBooksProvider);
       ref.invalidate(allExcerptsProvider);
       ref.invalidate(allBookmarksProvider);
@@ -83,7 +89,8 @@ class _AutomaticSyncHostState extends ConsumerState<AutomaticSyncHost>
           (report.uploadedOperations > 0 ||
               report.downloadedOperations > 0 ||
               report.downloadedBooks > 0 ||
-              report.downloadedCovers > 0)) {
+              report.downloadedCovers > 0 ||
+              (report.trustedSync?.appliedConfigurationValues ?? 0) > 0)) {
         widget.onCompleted(report);
       }
     } on Object {

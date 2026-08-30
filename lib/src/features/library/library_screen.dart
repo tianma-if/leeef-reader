@@ -20,6 +20,7 @@ import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/features/ai/ai_assistant_screen.dart';
 import 'package:leeef_reader/src/features/ai/ai_prompt_manager_screen.dart';
 import 'package:leeef_reader/src/features/statistics/reading_statistics_screen.dart';
+import 'package:leeef_reader/src/features/settings/trusted_devices_screen.dart';
 import 'package:leeef_reader/src/export/note_export_service.dart';
 import 'package:leeef_reader/src/sync/configured_sync_backend.dart';
 import 'package:leeef_reader/src/sync/background_sync_scheduler.dart';
@@ -27,6 +28,7 @@ import 'package:leeef_reader/src/sync/directory_sync_backend.dart';
 import 'package:leeef_reader/src/sync/s3_sync_backend.dart';
 import 'package:leeef_reader/src/sync/sync_engine.dart';
 import 'package:leeef_reader/src/sync/sync_backend.dart';
+import 'package:leeef_reader/src/sync/trusted/trusted_sync_service.dart';
 import 'package:leeef_reader/src/sync/webdav_sync_backend.dart';
 import 'package:leeef_reader/src/tts/configured_tts_engine.dart';
 import 'package:leeef_reader/src/platform/app_appearance.dart';
@@ -2448,57 +2450,54 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
   @override
   void initState() {
     super.initState();
-    SharedPreferences.getInstance().then((preferences) {
-      if (mounted) {
-        setState(() {
-          _syncDirectory = preferences.getString(_syncDirectoryKey);
-          _webDavUrl = preferences.getString(_webDavUrlKey);
-          _webDavUsername = preferences.getString(_webDavUsernameKey);
-          _s3Endpoint = preferences.getString(_s3EndpointKey);
-          _s3Bucket = preferences.getString(_s3BucketKey);
-          _s3Region = preferences.getString(_s3RegionKey) ?? 'us-east-1';
-          _s3Prefix = preferences.getString(_s3PrefixKey) ?? 'leeef';
-          _s3PathStyle = preferences.getBool(_s3PathStyleKey) ?? true;
-          _autoSync = preferences.getBool(_autoSyncKey) ?? true;
-          _wifiOnly = preferences.getBool(_wifiOnlyKey) ?? false;
-          _syncNotifications =
-              preferences.getBool('leeef.sync.completion_notifications') ??
-              true;
-          _aiBaseUrl = preferences.getString(aiBaseUrlPreferenceKey);
-          _aiModel = preferences.getString(aiModelPreferenceKey);
-          _ttsService = TtsService.values.firstWhere(
-            (item) =>
-                item.name == preferences.getString(ttsServicePreferenceKey),
-            orElse: () => TtsService.system,
-          );
-          _locale =
-              preferences.getString('leeef.appearance.locale') ?? 'system';
-          _themeMode = ThemeMode.values.firstWhere(
-            (item) =>
-                item.name ==
-                preferences.getString('leeef.appearance.theme_mode'),
-            orElse: () => ThemeMode.system,
-          );
-          _seedColor = Color(
-            preferences.getInt('leeef.appearance.seed_color') ?? 0xFF356A45,
-          );
-          _customDirectory = preferences.getString(
-            'leeef.storage.custom_directory',
-          );
-          _proxyHost = preferences.getString(AppProxy.hostKey);
-          _proxyPort = preferences.getInt(AppProxy.portKey);
-          _developerMode =
-              preferences.getBool('leeef.developer.enabled') ?? false;
-          _epubJavaScript =
-              preferences.getBool('leeef.reader.epub_javascript') ?? false;
-          _syncBackend = _SyncBackendKind.values.firstWhere(
-            (item) => item.name == preferences.getString(_syncBackendKey),
-            orElse: () => _SyncBackendKind.s3,
-          );
-        });
-      }
-    });
+    unawaited(_loadSettingsPreferences());
     unawaited(_refreshStorage());
+  }
+
+  Future<void> _loadSettingsPreferences() async {
+    final preferences = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _syncDirectory = preferences.getString(_syncDirectoryKey);
+      _webDavUrl = preferences.getString(_webDavUrlKey);
+      _webDavUsername = preferences.getString(_webDavUsernameKey);
+      _s3Endpoint = preferences.getString(_s3EndpointKey);
+      _s3Bucket = preferences.getString(_s3BucketKey);
+      _s3Region = preferences.getString(_s3RegionKey) ?? 'us-east-1';
+      _s3Prefix = preferences.getString(_s3PrefixKey) ?? 'leeef';
+      _s3PathStyle = preferences.getBool(_s3PathStyleKey) ?? true;
+      _autoSync = preferences.getBool(_autoSyncKey) ?? true;
+      _wifiOnly = preferences.getBool(_wifiOnlyKey) ?? false;
+      _syncNotifications =
+          preferences.getBool('leeef.sync.completion_notifications') ?? true;
+      _aiBaseUrl = preferences.getString(aiBaseUrlPreferenceKey);
+      _aiModel = preferences.getString(aiModelPreferenceKey);
+      _ttsService = TtsService.values.firstWhere(
+        (item) => item.name == preferences.getString(ttsServicePreferenceKey),
+        orElse: () => TtsService.system,
+      );
+      _locale = preferences.getString('leeef.appearance.locale') ?? 'system';
+      _themeMode = ThemeMode.values.firstWhere(
+        (item) =>
+            item.name == preferences.getString('leeef.appearance.theme_mode'),
+        orElse: () => ThemeMode.system,
+      );
+      _seedColor = Color(
+        preferences.getInt('leeef.appearance.seed_color') ?? 0xFF356A45,
+      );
+      _customDirectory = preferences.getString(
+        'leeef.storage.custom_directory',
+      );
+      _proxyHost = preferences.getString(AppProxy.hostKey);
+      _proxyPort = preferences.getInt(AppProxy.portKey);
+      _developerMode = preferences.getBool('leeef.developer.enabled') ?? false;
+      _epubJavaScript =
+          preferences.getBool('leeef.reader.epub_javascript') ?? false;
+      _syncBackend = _SyncBackendKind.values.firstWhere(
+        (item) => item.name == preferences.getString(_syncBackendKey),
+        orElse: () => _SyncBackendKind.s3,
+      );
+    });
   }
 
   Future<LibraryMaintenanceService> _maintenanceService() async =>
@@ -3870,15 +3869,19 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         repository: await ref.read(libraryRepositoryProvider.future),
         backend: await _buildSyncBackend(),
         libraryDirectory: await ref.read(libraryDirectoryProvider.future),
+        trustedSyncService: await loadTrustedSyncService(),
       );
       final report = await engine.synchronize();
+      if ((report.trustedSync?.appliedConfigurationValues ?? 0) > 0) {
+        await AppAppearanceController.instance.load();
+      }
       ref.invalidate(libraryBooksProvider);
       ref.invalidate(allExcerptsProvider);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '同步完成：上传 ${report.uploadedOperations}，接收 ${report.downloadedOperations}，下载书籍 ${report.downloadedBooks}、封面 ${report.downloadedCovers}',
+            '同步完成：上传 ${report.uploadedOperations}，接收 ${report.downloadedOperations}，下载书籍 ${report.downloadedBooks}、封面 ${report.downloadedCovers}，配置 ${report.trustedSync?.appliedConfigurationValues ?? 0} 项',
           ),
         ),
       );
@@ -4378,6 +4381,21 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
           ),
         ),
         const Divider(),
+        ListTile(
+          leading: const Icon(Icons.devices_other),
+          title: Text(strings.text('我的同步设备')),
+          subtitle: Text(strings.text('配对新设备，自动迁移配置、凭据和书库数据')),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => const TrustedDevicesScreen(),
+              ),
+            );
+            await _loadSettingsPreferences();
+          },
+        ),
         ListTile(
           leading: const Icon(Icons.cloud_outlined),
           title: Text(strings.text('同步方式')),

@@ -9,7 +9,7 @@ import 'package:leeef_reader/src/sync/sync_operation.dart';
 ///
 /// It uses the same immutable blob/operation layout as the future S3 adapter,
 /// making the full sync protocol executable without cloud credentials.
-class DirectorySyncBackend implements SyncBackend {
+class DirectorySyncBackend implements SyncBackend, SyncDocumentBackend {
   DirectorySyncBackend(this.root);
 
   final Directory root;
@@ -109,6 +109,87 @@ class DirectorySyncBackend implements SyncBackend {
       return time != 0 ? time : left.operationId.compareTo(right.operationId);
     });
     return operations;
+  }
+
+  @override
+  Future<void> writeDocument(String path, List<int> bytes) async {
+    final destination = _documentFile(path);
+    await destination.parent.create(recursive: true);
+    final staging = File(
+      '${destination.path}.tmp-$pid-${DateTime.now().microsecondsSinceEpoch}',
+    );
+    try {
+      await staging.writeAsBytes(bytes, flush: true);
+      if (await destination.exists()) await destination.delete();
+      await staging.rename(destination.path);
+    } on Object {
+      if (await staging.exists()) await staging.delete();
+      rethrow;
+    }
+  }
+
+  @override
+  Future<bool> writeDocumentIfAbsent(String path, List<int> bytes) async {
+    final destination = _documentFile(path);
+    await destination.parent.create(recursive: true);
+    try {
+      await destination.create(exclusive: true);
+    } on FileSystemException {
+      if (await destination.exists()) return false;
+      rethrow;
+    }
+    try {
+      await destination.writeAsBytes(bytes, flush: true);
+      return true;
+    } on Object {
+      if (await destination.exists()) await destination.delete();
+      rethrow;
+    }
+  }
+
+  @override
+  Future<List<int>?> readDocument(String path) async {
+    final file = _documentFile(path);
+    return await file.exists() ? file.readAsBytes() : null;
+  }
+
+  @override
+  Future<List<String>> listDocuments(String prefix) async {
+    final directory = Directory(_documentFile(prefix).path);
+    if (!await directory.exists()) return const [];
+    final normalizedRoot = '${root.absolute.path}${Platform.pathSeparator}';
+    final entries = await directory
+        .list(recursive: true, followLinks: false)
+        .where((entity) => entity is File)
+        .cast<File>()
+        .map(
+          (file) => file.absolute.path
+              .substring(normalizedRoot.length)
+              .replaceAll(Platform.pathSeparator, '/'),
+        )
+        .toList();
+    entries.sort();
+    return entries;
+  }
+
+  @override
+  Future<void> deleteDocument(String path) async {
+    final file = _documentFile(path);
+    if (await file.exists()) await file.delete();
+  }
+
+  File _documentFile(String path) {
+    final segments = path.split('/');
+    if (segments.isEmpty) {
+      throw ArgumentError.value(path, 'path', 'Empty storage path.');
+    }
+    for (final segment in segments) {
+      if (segment == '.' || segment == '..') {
+        throw ArgumentError.value(path, 'path', 'Unsafe storage path.');
+      }
+      _validateSegment(segment, 'path');
+    }
+    return File('${root.path}/${segments.join('/')}');
   }
 
   static Future<void> _copyAtomically(File source, File destination) async {

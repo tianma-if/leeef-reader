@@ -7,7 +7,7 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:leeef_reader/src/sync/sync_backend.dart';
 import 'package:leeef_reader/src/sync/sync_operation.dart';
 
-class S3SyncBackend implements SyncBackend {
+class S3SyncBackend implements SyncBackend, SyncDocumentBackend {
   S3SyncBackend({
     required Uri endpoint,
     required this.bucket,
@@ -171,6 +171,81 @@ class S3SyncBackend implements SyncBackend {
       return time != 0 ? time : left.operationId.compareTo(right.operationId);
     });
     return operations;
+  }
+
+  @override
+  Future<void> writeDocument(String path, List<int> bytes) async {
+    _validateDocumentPath(path);
+    final response = await _request(
+      AWSHttpMethod.put,
+      key: _key(path),
+      headers: {AWSHeaders.contentType: 'application/json; charset=utf-8'},
+      body: Stream.value(bytes),
+      contentLength: bytes.length,
+    );
+    _expect(response, const {
+      HttpStatus.ok,
+      HttpStatus.created,
+      HttpStatus.noContent,
+    }, 'write document');
+  }
+
+  @override
+  Future<bool> writeDocumentIfAbsent(String path, List<int> bytes) async {
+    _validateDocumentPath(path);
+    final response = await _request(
+      AWSHttpMethod.put,
+      key: _key(path),
+      headers: {
+        HttpHeaders.ifNoneMatchHeader: '*',
+        AWSHeaders.contentType: 'application/json; charset=utf-8',
+      },
+      body: Stream.value(bytes),
+      contentLength: bytes.length,
+    );
+    if (response.statusCode == HttpStatus.preconditionFailed ||
+        response.statusCode == HttpStatus.conflict) {
+      return false;
+    }
+    _expect(response, const {
+      HttpStatus.ok,
+      HttpStatus.created,
+      HttpStatus.noContent,
+    }, 'write document if absent');
+    return true;
+  }
+
+  @override
+  Future<List<int>?> readDocument(String path) async {
+    _validateDocumentPath(path);
+    final response = await _request(AWSHttpMethod.get, key: _key(path));
+    if (response.statusCode == HttpStatus.notFound) return null;
+    _expect(response, const {HttpStatus.ok}, 'read document');
+    return response.body;
+  }
+
+  @override
+  Future<List<String>> listDocuments(String prefixPath) async {
+    _validateDocumentPath(prefixPath);
+    final storagePrefix = _key(prefixPath);
+    final rootPrefix = _key('');
+    final offset = rootPrefix.isEmpty ? 0 : rootPrefix.length + 1;
+    final keys = await _listKeys(
+      storagePrefix.endsWith('/') ? storagePrefix : '$storagePrefix/',
+    );
+    return keys.map((key) => key.substring(offset)).toList(growable: false)
+      ..sort();
+  }
+
+  @override
+  Future<void> deleteDocument(String path) async {
+    _validateDocumentPath(path);
+    final response = await _request(AWSHttpMethod.delete, key: _key(path));
+    _expect(response, const {
+      HttpStatus.ok,
+      HttpStatus.noContent,
+      HttpStatus.notFound,
+    }, 'delete document');
   }
 
   Future<void> verifyCapabilities() async {
@@ -377,6 +452,19 @@ class S3SyncBackend implements SyncBackend {
         : RegExp(r'^[A-Za-z0-9_-]+$');
     if (value.isEmpty || !pattern.hasMatch(value)) {
       throw ArgumentError.value(value, name, 'Unsafe S3 value.');
+    }
+  }
+
+  static void _validateDocumentPath(String path) {
+    final segments = path.split('/');
+    if (segments.isEmpty || segments.any((segment) => segment.isEmpty)) {
+      throw ArgumentError.value(path, 'path', 'Invalid storage path.');
+    }
+    for (final segment in segments) {
+      if (segment == '.' || segment == '..') {
+        throw ArgumentError.value(path, 'path', 'Unsafe storage path.');
+      }
+      _validateSegment(segment, 'path', allowDots: true);
     }
   }
 

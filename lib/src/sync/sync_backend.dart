@@ -14,6 +14,21 @@ abstract interface class SyncBackend {
   Future<List<SyncOperation>> listOperations();
 }
 
+/// Optional small-object storage used by encrypted configuration and trusted
+/// device metadata. Paths are relative to the configured Leeef sync root.
+abstract interface class SyncDocumentBackend {
+  Future<void> writeDocument(String path, List<int> bytes);
+
+  /// Writes a document only when the path does not exist.
+  Future<bool> writeDocumentIfAbsent(String path, List<int> bytes);
+
+  Future<List<int>?> readDocument(String path);
+
+  Future<List<String>> listDocuments(String prefix);
+
+  Future<void> deleteDocument(String path);
+}
+
 class SyncUnavailable implements Exception {
   const SyncUnavailable(this.message);
 

@@ -76,6 +76,22 @@ void main() {
       throwsA(isA<SyncIntegrityException>()),
     );
   });
+
+  test('stores encrypted sync metadata as small documents', () async {
+    final path = 'trusted/space/config/device.json';
+    final first = utf8.encode('{"ciphertext":"one"}');
+    final second = utf8.encode('{"ciphertext":"two"}');
+
+    expect(await backend.writeDocumentIfAbsent(path, first), isTrue);
+    expect(await backend.writeDocumentIfAbsent(path, second), isFalse);
+    expect(await backend.readDocument(path), first);
+    expect(await backend.listDocuments('trusted/space/config'), [path]);
+
+    await backend.writeDocument(path, second);
+    expect(await backend.readDocument(path), second);
+    await backend.deleteDocument(path);
+    expect(await backend.readDocument(path), isNull);
+  });
 }
 
 SyncOperation _operation(int index) => SyncOperation(

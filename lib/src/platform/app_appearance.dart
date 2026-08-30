@@ -444,6 +444,41 @@ class AppStrings {
     '从 GitHub Releases 获取最新版本和发布说明':
         'Get the latest version and notes from GitHub Releases',
     '检查': 'Check',
+    '我的同步设备': 'My synced devices',
+    '配对新设备，自动迁移配置、凭据和书库数据':
+        'Pair a device and automatically transfer settings, credentials, and library data',
+    '让其他设备加入': 'Let another device join',
+    '从已有设备恢复': 'Restore from an existing device',
+    '在另一台设备输入下面的配对码。两台设备需要连接同一个局域网。':
+        'Enter this pairing code on the other device. Both devices must be on the same local network.',
+    '配对码 5 分钟内有效且只能使用一次。':
+        'The pairing code expires in 5 minutes and can be used only once.',
+    '复制配对码': 'Copy pairing code',
+    '配对码': 'Pairing code',
+    '两台设备需要连接同一个局域网': 'Both devices must be on the same local network',
+    '开始配对': 'Start pairing',
+    '已添加设备': 'Device added',
+    '设备配对完成，已恢复配置': 'Pairing complete; settings restored',
+    '配置已传输，书库将在同步后端可用时继续同步':
+        'Settings transferred; the library will continue syncing when the backend is available',
+    '设备名称': 'Device name',
+    '移除同步设备': 'Remove synced device',
+    '移除后，该设备将不能再获取后续配置。':
+        'After removal, this device will no longer receive future settings.',
+    '如果设备已经丢失，还应在 S3/WebDAV 服务端更换访问凭据。':
+        'If the device is lost, also rotate its S3/WebDAV credentials at the provider.',
+    '设备已移除': 'Device removed',
+    '尚未建立可信设备空间': 'Trusted devices are not set up yet',
+    '配置、凭据和书库数据将在可信设备间加密同步':
+        'Settings, credentials, and library data are encrypted between trusted devices',
+    '设备配对后会自动迁移 S3/WebDAV、AI、TTS、OPDS 和阅读配置。':
+        'Pairing automatically transfers S3/WebDAV, AI, TTS, OPDS, and reading settings.',
+    '已绑定设备': 'Paired devices',
+    '本机': 'This device',
+    '最近同步': 'Last synced',
+    '已移除': 'Removed',
+    '刚刚': 'just now',
+    '刷新': 'Refresh',
     '自动同步': 'Automatic sync',
     '网络恢复、应用回到前台及定时触发时同步':
         'Sync when the network returns, the app resumes, or a timer fires',
@@ -990,6 +1025,36 @@ class AppStrings {
     '检查更新与变更日志': '更新とリリースノート',
     '从 GitHub Releases 获取最新版本和发布说明': 'GitHub Releases から最新版と説明を取得',
     '检查': '確認',
+    '我的同步设备': '同期デバイス',
+    '配对新设备，自动迁移配置、凭据和书库数据': '新しいデバイスをペアリングし、設定・認証情報・書庫データを自動移行',
+    '让其他设备加入': '別のデバイスを追加',
+    '从已有设备恢复': '既存のデバイスから復元',
+    '在另一台设备输入下面的配对码。两台设备需要连接同一个局域网。':
+        'もう一方のデバイスで次のペアリングコードを入力してください。両方を同じローカルネットワークに接続してください。',
+    '配对码 5 分钟内有效且只能使用一次。': 'ペアリングコードは5分間有効で、一度だけ使用できます。',
+    '复制配对码': 'コードをコピー',
+    '配对码': 'ペアリングコード',
+    '两台设备需要连接同一个局域网': '両方のデバイスを同じローカルネットワークに接続してください',
+    '开始配对': 'ペアリング開始',
+    '已添加设备': 'デバイスを追加しました',
+    '设备配对完成，已恢复配置': 'ペアリングが完了し、設定を復元しました',
+    '配置已传输，书库将在同步后端可用时继续同步': '設定を転送しました。同期バックエンドが利用可能になると書庫の同期を続行します',
+    '设备名称': 'デバイス名',
+    '移除同步设备': '同期デバイスを削除',
+    '移除后，该设备将不能再获取后续配置。': '削除後、このデバイスは今後の設定を受信できません。',
+    '如果设备已经丢失，还应在 S3/WebDAV 服务端更换访问凭据。':
+        'デバイスを紛失した場合は、S3/WebDAV 側でもアクセス認証情報を変更してください。',
+    '设备已移除': 'デバイスを削除しました',
+    '尚未建立可信设备空间': '信頼済みデバイスはまだ設定されていません',
+    '配置、凭据和书库数据将在可信设备间加密同步': '設定・認証情報・書庫データを信頼済みデバイス間で暗号化して同期します',
+    '设备配对后会自动迁移 S3/WebDAV、AI、TTS、OPDS 和阅读配置。':
+        'ペアリングすると、S3/WebDAV、AI、TTS、OPDS、読書設定が自動的に移行されます。',
+    '已绑定设备': 'ペアリング済みデバイス',
+    '本机': 'このデバイス',
+    '最近同步': '最終同期',
+    '已移除': '削除済み',
+    '刚刚': 'たった今',
+    '刷新': '更新',
     '自动同步': '自動同期',
     '网络恢复、应用回到前台及定时触发时同步': 'ネットワーク復帰時、アプリ復帰時、定期実行時に同期',
     '仅 Wi-Fi / 有线网络': 'Wi-Fi / 有線ネットワークのみ',

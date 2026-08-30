@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:leeef_reader/src/data/repositories/library_repository.dart';
 import 'package:leeef_reader/src/domain/entity_type.dart';
 import 'package:leeef_reader/src/sync/sync_backend.dart';
+import 'package:leeef_reader/src/sync/trusted/trusted_sync_service.dart';
 
 class SyncReport {
   const SyncReport({
@@ -10,12 +11,14 @@ class SyncReport {
     required this.downloadedOperations,
     required this.downloadedBooks,
     required this.downloadedCovers,
+    this.trustedSync,
   });
 
   final int uploadedOperations;
   final int downloadedOperations;
   final int downloadedBooks;
   final int downloadedCovers;
+  final TrustedSyncReport? trustedSync;
 }
 
 class SyncEngine {
@@ -23,13 +26,16 @@ class SyncEngine {
     required LibraryRepository repository,
     required SyncBackend backend,
     required Directory libraryDirectory,
+    TrustedSyncService? trustedSyncService,
   }) : _repository = repository,
        _backend = backend,
-       _libraryDirectory = libraryDirectory;
+       _libraryDirectory = libraryDirectory,
+       _trustedSyncService = trustedSyncService;
 
   final LibraryRepository _repository;
   final SyncBackend _backend;
   final Directory _libraryDirectory;
+  final TrustedSyncService? _trustedSyncService;
 
   Future<SyncReport> synchronize() async {
     var uploaded = 0;
@@ -65,11 +71,18 @@ class SyncEngine {
       if (await _downloadCover(book.id)) downloadedCovers++;
     }
 
+    TrustedSyncReport? trustedSync;
+    if (_trustedSyncService case final service?
+        when _backend is SyncDocumentBackend) {
+      trustedSync = await service.synchronize(_backend as SyncDocumentBackend);
+    }
+
     return SyncReport(
       uploadedOperations: uploaded,
       downloadedOperations: downloaded,
       downloadedBooks: downloadedBooks,
       downloadedCovers: downloadedCovers,
+      trustedSync: trustedSync,
     );
   }
 

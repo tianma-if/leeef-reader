@@ -8,6 +8,7 @@ import 'package:leeef_reader/src/data/repositories/library_repository.dart';
 import 'package:leeef_reader/src/platform/app_notifications.dart';
 import 'package:leeef_reader/src/sync/configured_sync_backend.dart';
 import 'package:leeef_reader/src/sync/sync_engine.dart';
+import 'package:leeef_reader/src/sync/trusted/trusted_sync_service.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
@@ -86,6 +87,7 @@ Future<bool> runConfiguredBackgroundSync() async {
       libraryDirectory: customDirectory == null || customDirectory.isEmpty
           ? Directory('${documents.path}/leeef/books')
           : Directory(customDirectory),
+      trustedSyncService: await loadTrustedSyncService(),
     ).synchronize();
     if (preferences.getBool('leeef.sync.completion_notifications') ?? true) {
       await AppNotifications.showSyncCompleted(

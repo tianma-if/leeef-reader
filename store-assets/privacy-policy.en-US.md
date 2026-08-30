@@ -15,7 +15,7 @@ By default, imported books and covers, shelves, reading progress, bookmarks, hig
 
 Data leaves your device only when you configure or use one of these features, and it is sent directly to the service you choose:
 
-- **S3 or WebDAV sync:** book files, covers, reading progress, shelves, tags, bookmarks, highlights, notes, statistics, and sync metadata are uploaded to storage you provide.
+- **S3 or WebDAV sync:** book files, covers, reading progress, shelves, tags, bookmarks, highlights, notes, statistics, sync metadata, and end-to-end encrypted portable settings and service credentials are uploaded to storage you provide.
 - **AI assistant and translation:** submitted text, questions, and selected book or chapter context are sent to the AI provider you configure. Leeef supports user-provided API endpoints and keys.
 - **Cloud text-to-speech:** text selected for narration is sent to the voice provider you configure. System text-to-speech is generally handled within operating-system capabilities.
 - **OPDS and online catalogs:** search terms, catalog requests, and download requests are sent to the OPDS service you access.
@@ -25,7 +25,7 @@ Those services are independently operated. Their privacy policies and your accou
 
 ## 3. Credentials and Security
 
-API keys, storage credentials, and similar sensitive settings are kept in secure storage provided by the operating system. Network connections prefer HTTPS/TLS; end-to-end protection also depends on the service you configure. Protect your device, backups, and service credentials.
+API keys, storage credentials, and similar sensitive settings are kept in secure storage provided by the operating system. When trusted-device sync is enabled, these settings are end-to-end encrypted before leaving the device, only ciphertext is stored in S3/WebDAV, and a receiving device writes the decrypted values back to system secure storage. Books and reading data continue to rely on the protection offered by the configured sync backend. Network connections prefer HTTPS/TLS. Protect your devices, backups, and service credentials.
 
 ## 4. Permissions
 
@@ -50,4 +50,3 @@ For questions about this policy or Leeef's data practices, contact:
 - Provider: Zhengzhou Binggui Network Technology Co., Ltd.
 - Email: 1245207870@qq.com
 - Support: https://edgeever.org/contact
-

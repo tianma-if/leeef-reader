@@ -14,5 +14,8 @@ analyzer:
 
 linter:
   rules:
+    # Public constructors intentionally map readable named parameters to
+    # private fields; initializing formals would expose private parameter names.
+    prefer_initializing_formals: false
     prefer_final_locals: true
     use_super_parameters: true
