@@ -114,8 +114,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
   bool get _supportsPageCurl =>
       widget.book.mediaType == 'application/epub+zip' &&
       _preferences.flow == 'paginated' &&
-      _preferences.pageTurnEffect == 'curl' &&
-      (Platform.isIOS || Platform.isAndroid);
+      _preferences.pageTurnEffect == 'curl';
 
   ReaderBookSource? get _bookSource {
     final path = widget.book.filePath;

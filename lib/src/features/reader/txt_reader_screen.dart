@@ -81,7 +81,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   bool get _supportsPageCurl =>
       _preferences.flow == 'paginated' &&
       _preferences.pageTurnEffect == 'curl' &&
-      (widget.pageCurlEnabled ?? (Platform.isIOS || Platform.isAndroid));
+      (widget.pageCurlEnabled ?? true);
 
   @override
   void initState() {
