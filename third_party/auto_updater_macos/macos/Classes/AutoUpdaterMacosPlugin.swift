@@ -3,6 +3,7 @@ import FlutterMacOS
 
 public final class AutoUpdaterMacosPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     private var eventSink: FlutterEventSink?
+    private var pendingEvents: [[String: Any]] = []
     private let autoUpdater = AutoUpdater()
 
     public static func register(with registrar: FlutterPluginRegistrar) {
@@ -17,8 +18,8 @@ public final class AutoUpdaterMacosPlugin: NSObject, FlutterPlugin, FlutterStrea
             binaryMessenger: registrar.messenger
         )
         eventChannel.setStreamHandler(instance)
-        instance.autoUpdater.onEvent = { eventName, eventData in
-            instance.eventSink?(["type": eventName, "data": eventData])
+        instance.autoUpdater.onEvent = { [weak instance] eventName, eventData in
+            instance?.sendOrQueueEvent(type: eventName, data: eventData)
         }
     }
 
@@ -27,12 +28,25 @@ public final class AutoUpdaterMacosPlugin: NSObject, FlutterPlugin, FlutterStrea
         eventSink events: @escaping FlutterEventSink
     ) -> FlutterError? {
         eventSink = events
+        for event in pendingEvents {
+            events(event)
+        }
+        pendingEvents.removeAll()
         return nil
     }
 
     public func onCancel(withArguments arguments: Any?) -> FlutterError? {
         eventSink = nil
         return nil
+    }
+
+    private func sendOrQueueEvent(type: String, data: NSDictionary) {
+        let event: [String: Any] = ["type": type, "data": data]
+        if let eventSink {
+            eventSink(event)
+        } else {
+            pendingEvents.append(event)
+        }
     }
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {

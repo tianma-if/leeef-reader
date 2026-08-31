@@ -92,6 +92,12 @@ final class AutoUpdater: NSObject, SPUUpdaterDelegate {
         emit("update-available", ["appcastItem": item.leeefDictionary()])
     }
 
+    func updater(_ updater: SPUUpdater, didDownloadUpdate item: SUAppcastItem) {
+        // Download completion alone is not enough to offer an immediate
+        // restart. Sparkle still has to verify and extract the archive before
+        // it supplies the safe installation handler below.
+    }
+
     func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) {
         emit("update-not-available", ["error": error.localizedDescription])
     }
@@ -104,9 +110,8 @@ final class AutoUpdater: NSObject, SPUUpdaterDelegate {
         self.immediateInstallHandler = immediateInstallHandler
         let data: NSDictionary = ["appcastItem": item.leeefDictionary()]
         emit("before-quit-for-update", data)
-        // auto_updater already maps this event, while the second event moves
-        // Leeef's UI to the ready state only after Sparkle exposes its safe
-        // immediate-install handoff.
+        // Move Flutter to ready only after Sparkle exposes its verified,
+        // extracted update through the immediate-install handoff.
         emit("update-downloaded", data)
         return true
     }

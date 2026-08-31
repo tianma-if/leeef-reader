@@ -90,6 +90,7 @@ class DesktopAutoUpdateService extends ChangeNotifier
     _enabled = true;
 
     _driver.addListener(this);
+    unawaited(AppLog.info('desktop update: initializing'));
     try {
       await _driver.setFeedURL(feedUrl);
       await _driver.setScheduledCheckInterval(checkInterval.inSeconds);
@@ -111,6 +112,7 @@ class DesktopAutoUpdateService extends ChangeNotifier
       ),
     );
     try {
+      unawaited(AppLog.info('desktop update: background check requested'));
       await _driver.checkInBackground();
     } on Object catch (error, stackTrace) {
       _setState(
@@ -123,7 +125,12 @@ class DesktopAutoUpdateService extends ChangeNotifier
   Future<bool> installDownloadedUpdate() async {
     if (!_state.isReady) return false;
     try {
-      return await _driver.installDownloadedUpdate();
+      unawaited(AppLog.info('desktop update: immediate install requested'));
+      final started = await _driver.installDownloadedUpdate();
+      unawaited(
+        AppLog.info('desktop update: immediate install started=$started'),
+      );
+      return started;
     } on Object catch (error, stackTrace) {
       _setState(
         DesktopUpdateState(
@@ -174,8 +181,11 @@ class DesktopAutoUpdateService extends ChangeNotifier
 
   @override
   void onUpdaterBeforeQuitForUpdate(AppcastItem? appcastItem) {
-    // The patched macOS driver follows this event with update-downloaded after
-    // Sparkle has exposed its immediate, verified install handoff.
+    unawaited(
+      AppLog.info(
+        'desktop update: install-on-quit ready version=${_displayVersion(appcastItem) ?? 'unknown'}',
+      ),
+    );
   }
 
   @override
@@ -193,6 +203,12 @@ class DesktopAutoUpdateService extends ChangeNotifier
 
   void _setState(DesktopUpdateState value) {
     _state = value;
+    unawaited(
+      AppLog.info(
+        'desktop update: stage=${value.stage.name} version=${value.version ?? 'unknown'}'
+        '${value.error == null ? '' : ' error=${value.error}'}',
+      ),
+    );
     notifyListeners();
   }
 
