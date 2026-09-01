@@ -189,4 +189,14 @@ void main() {
     expect(workflow, isNot(contains('- name: Test')));
     expect(workflow, contains('Restore a failed release to Draft'));
   });
+
+  test('macOS distribution pins and verifies the pubspec version', () {
+    final script = File('tool/build_macos_dmg.sh').readAsStringSync();
+
+    expect(script, contains('--build-name="\$version"'));
+    expect(script, contains('--build-number="\$build_number"'));
+    expect(script, contains('Print :CFBundleShortVersionString'));
+    expect(script, contains('Print :CFBundleVersion'));
+    expect(script, contains('macOS bundle version mismatch'));
+  });
 }

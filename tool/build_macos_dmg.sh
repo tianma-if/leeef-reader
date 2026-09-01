@@ -10,11 +10,22 @@ test -n "$version"
 test -n "$build_number"
 flutter config --build-dir=build.noindex
 flutter pub get
-flutter build macos --release
+flutter build macos --release \
+  --build-name="$version" \
+  --build-number="$build_number"
 
 products_dir="$repo_dir/build.noindex/macos/Build/Products/Release"
 app_path="$(find "$products_dir" -maxdepth 1 -type d -name '*.app' -print -quit)"
 test -n "$app_path"
+built_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+  "$app_path/Contents/Info.plist")"
+built_build_number="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
+  "$app_path/Contents/Info.plist")"
+if [[ "$built_version" != "$version" || "$built_build_number" != "$build_number" ]]; then
+  echo "macOS bundle version mismatch: expected ${version}+${build_number}, " \
+    "built ${built_version}+${built_build_number}" >&2
+  exit 1
+fi
 executable_name="$(defaults read "$app_path/Contents/Info" CFBundleExecutable)"
 executable_archs="$(lipo -archs "$app_path/Contents/MacOS/$executable_name")"
 if [[ "$executable_archs" == *arm64* && "$executable_archs" == *x86_64* ]]; then
