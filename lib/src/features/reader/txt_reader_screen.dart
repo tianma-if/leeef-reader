@@ -19,6 +19,8 @@ import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
 import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
 import 'package:leeef_reader/src/features/reader/txt_page_snapshot_renderer.dart';
+import 'package:leeef_reader/src/features/reader/page_slide_switcher.dart';
+import 'package:leeef_reader/src/features/reader/reader_page_turn_policy.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
 import 'package:leeef_reader/src/platform/app_appearance.dart';
@@ -45,6 +47,7 @@ class TxtReaderScreen extends ConsumerStatefulWidget {
 class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   TxtReaderDocument? _document;
   int _pageIndex = 0;
+  int _pageTurnDirection = 1;
   _TxtSelection? _selection;
   Object? _error;
   Timer? _progressTimer;
@@ -80,8 +83,20 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
 
   bool get _supportsPageCurl =>
       _preferences.flow == 'paginated' &&
-      _preferences.pageTurnEffect == 'curl' &&
+      effectivePageTurnEffect(
+            flow: _preferences.flow,
+            configuredEffect: _preferences.pageTurnEffect,
+          ) ==
+          'curl' &&
       (widget.pageCurlEnabled ?? true);
+
+  bool get _usesPageSlide =>
+      _preferences.flow == 'paginated' &&
+      effectivePageTurnEffect(
+            flow: _preferences.flow,
+            configuredEffect: _preferences.pageTurnEffect,
+          ) ==
+          'slide';
 
   @override
   void initState() {
@@ -229,6 +244,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     final next = index.clamp(0, document.pages.length - 1);
     if (next == _pageIndex) return;
     setState(() {
+      _pageTurnDirection = next > _pageIndex ? 1 : -1;
       _pageIndex = next;
       _history.visit(next);
       _selection = null;
@@ -769,27 +785,40 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                 ),
                 if (draft.flow == 'paginated') ...[
                   const SizedBox(height: 8),
-                  SegmentedButton<String>(
-                    segments: [
-                      ButtonSegment(
-                        value: 'curl',
-                        label: Text(strings.text('仿真')),
+                  if (usesDesktopClickSlide(flow: draft.flow))
+                    SegmentedButton<String>(
+                      segments: [
+                        ButtonSegment(
+                          value: 'slide',
+                          label: Text(strings.text('滑动')),
+                        ),
+                      ],
+                      selected: const {'slide'},
+                      onSelectionChanged: null,
+                    )
+                  else
+                    SegmentedButton<String>(
+                      segments: [
+                        ButtonSegment(
+                          value: 'curl',
+                          label: Text(strings.text('仿真')),
+                        ),
+                        ButtonSegment(
+                          value: 'slide',
+                          label: Text(strings.text('滑动')),
+                        ),
+                        ButtonSegment(
+                          value: 'none',
+                          label: Text(strings.text('无动画')),
+                        ),
+                      ],
+                      selected: {draft.pageTurnEffect},
+                      onSelectionChanged: (value) => setDialogState(
+                        () => draft = draft.copyWith(
+                          pageTurnEffect: value.single,
+                        ),
                       ),
-                      ButtonSegment(
-                        value: 'slide',
-                        label: Text(strings.text('滑动')),
-                      ),
-                      ButtonSegment(
-                        value: 'none',
-                        label: Text(strings.text('无动画')),
-                      ),
-                    ],
-                    selected: {draft.pageTurnEffect},
-                    onSelectionChanged: (value) => setDialogState(
-                      () =>
-                          draft = draft.copyWith(pageTurnEffect: value.single),
                     ),
-                  ),
                 ],
                 _styleSlider(
                   label: strings.text('字号'),
@@ -1633,34 +1662,23 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                 Positioned.fill(
                   child: RepaintBoundary(
                     key: _visiblePageBoundaryKey,
-                    child: AnimatedSwitcher(
-                      duration:
-                          _preferences.flow == 'paginated' &&
-                              _preferences.pageTurnEffect == 'slide'
-                          ? const Duration(milliseconds: 220)
-                          : Duration.zero,
-                      transitionBuilder: (child, animation) => SlideTransition(
-                        position:
-                            Tween<Offset>(
-                              begin: const Offset(.08, 0),
-                              end: Offset.zero,
-                            ).animate(
-                              CurvedAnimation(
-                                parent: animation,
-                                curve: Curves.easeOutCubic,
-                              ),
+                    child: _usesPageSlide
+                        ? PageSlideSwitcher(
+                            key: const Key('txt-page-slide'),
+                            direction: _pageTurnDirection,
+                            child: KeyedSubtree(
+                              key: ValueKey(_pageIndex),
+                              child: _buildTxtPage(page, interactive: true),
                             ),
-                        child: FadeTransition(opacity: animation, child: child),
-                      ),
-                      child: KeyedSubtree(
-                        key: ValueKey(
-                          _preferences.flow == 'scrolled'
-                              ? 'continuous'
-                              : _pageIndex,
-                        ),
-                        child: _buildTxtPage(page, interactive: true),
-                      ),
-                    ),
+                          )
+                        : KeyedSubtree(
+                            key: ValueKey(
+                              _preferences.flow == 'scrolled'
+                                  ? 'continuous'
+                                  : _pageIndex,
+                            ),
+                            child: _buildTxtPage(page, interactive: true),
+                          ),
                   ),
                 ),
               ],

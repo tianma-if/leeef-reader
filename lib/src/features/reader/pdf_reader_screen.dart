@@ -15,6 +15,7 @@ import 'package:leeef_reader/src/data/repositories/library_repository.dart';
 import 'package:leeef_reader/src/domain/reading_location.dart';
 import 'package:leeef_reader/src/features/reader/pdf_page_snapshot_renderer.dart';
 import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
+import 'package:leeef_reader/src/features/reader/reader_page_turn_policy.dart';
 import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
@@ -41,7 +42,7 @@ class PdfReaderScreen extends ConsumerStatefulWidget {
 
 class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
   final PdfViewerController _controller = PdfViewerController();
-  late final PdfTextSearcher _textSearcher = PdfTextSearcher(_controller);
+  PdfTextSearcher? _textSearcher;
   Timer? _progressTimer;
   Timer? _clockTimer;
   int _initialPage = 1;
@@ -74,11 +75,13 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     mediaControls: TtsMediaControlBridge.instance,
   );
 
+  bool get _usesDesktopClickSlide =>
+      usesDesktopClickSlide(flow: _preferences.flow);
+
   @override
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
-    _textSearcher.addListener(_onSearchChanged);
     unawaited(_ttsController.initialize());
     _ttsController.addListener(_onTtsChanged);
     _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
@@ -102,7 +105,7 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     _clockTimer?.cancel();
     _curlTurn?.dispose();
     _textureCache.dispose();
-    _textSearcher.dispose();
+    _textSearcher?.dispose();
     final repository = _repository;
     final startedAt = _sessionStartedAt;
     if (repository != null && startedAt != null) {
@@ -408,8 +411,12 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
   void _onViewerReady(PdfDocument document, PdfViewerController controller) {
     final pageCount = document.pages.length;
     final safePage = _page.clamp(1, pageCount);
+    final textSearcher =
+        _textSearcher ??
+        (PdfTextSearcher(controller)..addListener(_onSearchChanged));
     if (mounted) {
       setState(() {
+        _textSearcher = textSearcher;
         _pageCount = pageCount;
         _page = safePage;
       });
@@ -585,19 +592,23 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     );
     controller.dispose();
     if (query == null || query.isEmpty) return;
+    final textSearcher = _textSearcher;
+    if (textSearcher == null) return;
     setState(() => _searchActive = true);
-    _textSearcher.startTextSearch(query, searchImmediately: true);
+    textSearcher.startTextSearch(query, searchImmediately: true);
   }
 
   void _closeSearch() {
-    _textSearcher.resetTextSearch();
+    _textSearcher?.resetTextSearch();
     setState(() => _searchActive = false);
   }
 
   Future<void> _showTts() async {
+    final textSearcher = _textSearcher;
+    if (textSearcher == null) return;
     final selected = _selection?.quote;
     final pageText = selected == null
-        ? await _textSearcher.loadText(pageNumber: _page)
+        ? await textSearcher.loadText(pageNumber: _page)
         : null;
     if (!mounted) return;
     await showTtsControlsSheet(
@@ -609,8 +620,9 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
 
   Future<void> _translateSelection() async {
     final selection = _selection;
-    if (selection == null) return;
-    final pageText = await _textSearcher.loadText(pageNumber: _page);
+    final textSearcher = _textSearcher;
+    if (selection == null || textSearcher == null) return;
+    final pageText = await textSearcher.loadText(pageNumber: _page);
     if (!mounted) return;
     await showTranslationSheet(
       context,
@@ -631,7 +643,9 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
           mode: LaunchMode.externalApplication,
         );
       case 'ai':
-        final pageText = await _textSearcher.loadText(pageNumber: _page);
+        final textSearcher = _textSearcher;
+        if (textSearcher == null) return;
+        final pageText = await textSearcher.loadText(pageNumber: _page);
         if (!mounted) return;
         final strings = AppStrings.of(context);
         await Navigator.push(
@@ -659,9 +673,11 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
   }
 
   Future<void> _openAi(String action) async {
+    final textSearcher = _textSearcher;
+    if (textSearcher == null) return;
     final buffer = StringBuffer();
     for (var page = 1; page <= _pageCount; page++) {
-      final text = await _textSearcher.loadText(pageNumber: page);
+      final text = await textSearcher.loadText(pageNumber: page);
       if (text?.fullText.trim().isNotEmpty ?? false) {
         buffer.writeln(text!.fullText);
       }
@@ -755,6 +771,9 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
       if (mounted) setState(() => _preparingTurn = false);
     }
   }
+
+  Future<void> _turnPage(int targetPage) =>
+      _usesDesktopClickSlide ? _goToPage(targetPage) : _prepareTurn(targetPage);
 
   Future<void> _finishTurn({required bool completed}) async {
     final turn = _curlTurn;
@@ -1050,7 +1069,8 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
                       onViewerReady: _onViewerReady,
                       onPageChanged: _onPageChanged,
                       pagePaintCallbacks: [
-                        _textSearcher.pageTextMatchPaintCallback,
+                        if (_textSearcher case final textSearcher?)
+                          textSearcher.pageTextMatchPaintCallback,
                       ],
                       textSelectionParams: PdfTextSelectionParams(
                         onTextSelectionChange: (selection) =>
@@ -1060,8 +1080,13 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
                   ),
                 ),
               if (_pageCount > 0 && _preferences.flow == 'paginated') ...[
-                _buildCurlGestureZone(Alignment.centerLeft),
-                _buildCurlGestureZone(Alignment.centerRight),
+                if (_usesDesktopClickSlide) ...[
+                  _buildTapGestureZone(Alignment.centerLeft),
+                  _buildTapGestureZone(Alignment.centerRight),
+                ] else ...[
+                  _buildCurlGestureZone(Alignment.centerLeft),
+                  _buildCurlGestureZone(Alignment.centerRight),
+                ],
               ],
               if (_pageCount > 0 && _controlsVisible && _preferences.showFooter)
                 Align(
@@ -1079,7 +1104,7 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
                             tooltip: strings.text('上一页'),
                             onPressed: _page <= 1 || _preparingTurn
                                 ? null
-                                : () => _prepareTurn(_page - 1),
+                                : () => _turnPage(_page - 1),
                             icon: const Icon(Icons.chevron_left),
                           ),
                           SizedBox(
@@ -1093,7 +1118,7 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
                             tooltip: strings.text('下一页'),
                             onPressed: _page >= _pageCount || _preparingTurn
                                 ? null
-                                : () => _prepareTurn(_page + 1),
+                                : () => _turnPage(_page + 1),
                             icon: const Icon(Icons.chevron_right),
                           ),
                         ],
@@ -1114,7 +1139,7 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (_textSearcher.isSearching)
+                          if (_textSearcher?.isSearching ?? false)
                             const Padding(
                               padding: EdgeInsets.all(12),
                               child: SizedBox.square(
@@ -1126,23 +1151,25 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
                             ),
                           IconButton(
                             tooltip: strings.text('上一个结果'),
-                            onPressed: _textSearcher.matches.isEmpty
+                            onPressed: (_textSearcher?.matches.isEmpty ?? true)
                                 ? null
-                                : () => _textSearcher.goToPrevMatch(),
+                                : () => _textSearcher!.goToPrevMatch(),
                             icon: const Icon(Icons.keyboard_arrow_up),
                           ),
                           Text(
-                            _textSearcher.matches.isEmpty
+                            (_textSearcher?.matches.isEmpty ?? true)
                                 ? strings.text(
-                                    _textSearcher.isSearching ? '搜索中' : '无结果',
+                                    (_textSearcher?.isSearching ?? false)
+                                        ? '搜索中'
+                                        : '无结果',
                                   )
-                                : '${(_textSearcher.currentIndex ?? 0) + 1} / ${_textSearcher.matches.length}',
+                                : '${(_textSearcher?.currentIndex ?? 0) + 1} / ${_textSearcher!.matches.length}',
                           ),
                           IconButton(
                             tooltip: strings.text('下一个结果'),
-                            onPressed: _textSearcher.matches.isEmpty
+                            onPressed: (_textSearcher?.matches.isEmpty ?? true)
                                 ? null
-                                : () => _textSearcher.goToNextMatch(),
+                                : () => _textSearcher!.goToNextMatch(),
                             icon: const Icon(Icons.keyboard_arrow_down),
                           ),
                           IconButton(
@@ -1288,6 +1315,37 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
         onPointerUp: _handlePointerUp,
         onPointerCancel: _handlePointerCancel,
         child: const SizedBox.expand(),
+      ),
+    ),
+  );
+
+  Widget _buildTapGestureZone(Alignment alignment) => Positioned(
+    top: 0,
+    bottom: 0,
+    left: alignment == Alignment.centerLeft ? 0 : null,
+    right: alignment == Alignment.centerRight ? 0 : null,
+    width: MediaQuery.sizeOf(context).width * _preferences.tapZoneRatio,
+    child: Semantics(
+      button: true,
+      label: AppStrings.of(context).text(
+        (_preferences.swapTapZones
+                ? alignment == Alignment.centerLeft
+                : alignment == Alignment.centerRight)
+            ? '下一页'
+            : '上一页',
+      ),
+      child: GestureDetector(
+        key: Key(
+          alignment == Alignment.centerLeft
+              ? 'pdf-tap-left-zone'
+              : 'pdf-tap-right-zone',
+        ),
+        behavior: HitTestBehavior.translucent,
+        onTap: () {
+          final isLeft = alignment == Alignment.centerLeft;
+          final forward = _preferences.swapTapZones ? isLeft : !isLeft;
+          unawaited(_goToPage(_page + (forward ? 1 : -1)));
+        },
       ),
     ),
   );

@@ -15,6 +15,7 @@ import 'package:leeef_reader/src/data/repositories/library_repository.dart';
 import 'package:leeef_reader/src/domain/reading_location.dart';
 import 'package:leeef_reader/src/features/reader/pdf_reader_screen.dart';
 import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
+import 'package:leeef_reader/src/features/reader/reader_page_turn_policy.dart';
 import 'package:leeef_reader/src/features/ai/ai_assistant_screen.dart';
 import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_screen.dart';
@@ -114,7 +115,11 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
   bool get _supportsPageCurl =>
       widget.book.mediaType == 'application/epub+zip' &&
       _preferences.flow == 'paginated' &&
-      _preferences.pageTurnEffect == 'curl';
+      effectivePageTurnEffect(
+            flow: _preferences.flow,
+            configuredEffect: _preferences.pageTurnEffect,
+          ) ==
+          'curl';
 
   ReaderBookSource? get _bookSource {
     final path = widget.book.filePath;
@@ -683,7 +688,14 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
       flow: preferences.flow,
       maxColumnCount: preferences.columns,
       margin: preferences.margin,
-      pageTurnEffect: preferences.pageTurnEffect == 'none' ? 'none' : 'slide',
+      pageTurnEffect:
+          effectivePageTurnEffect(
+                flow: preferences.flow,
+                configuredEffect: preferences.pageTurnEffect,
+              ) ==
+              'none'
+          ? 'none'
+          : 'slide',
     );
     await _engine.setTheme(
       foreground: preferences.foreground,
@@ -846,27 +858,40 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
                 ),
                 if (draft.flow == 'paginated') ...[
                   const SizedBox(height: 8),
-                  SegmentedButton<String>(
-                    segments: [
-                      ButtonSegment(
-                        value: 'curl',
-                        label: Text(strings.text('仿真')),
+                  if (usesDesktopClickSlide(flow: draft.flow))
+                    SegmentedButton<String>(
+                      segments: [
+                        ButtonSegment(
+                          value: 'slide',
+                          label: Text(strings.text('滑动')),
+                        ),
+                      ],
+                      selected: const {'slide'},
+                      onSelectionChanged: null,
+                    )
+                  else
+                    SegmentedButton<String>(
+                      segments: [
+                        ButtonSegment(
+                          value: 'curl',
+                          label: Text(strings.text('仿真')),
+                        ),
+                        ButtonSegment(
+                          value: 'slide',
+                          label: Text(strings.text('滑动')),
+                        ),
+                        ButtonSegment(
+                          value: 'none',
+                          label: Text(strings.text('无动画')),
+                        ),
+                      ],
+                      selected: {draft.pageTurnEffect},
+                      onSelectionChanged: (value) => setDialogState(
+                        () => draft = draft.copyWith(
+                          pageTurnEffect: value.single,
+                        ),
                       ),
-                      ButtonSegment(
-                        value: 'slide',
-                        label: Text(strings.text('滑动')),
-                      ),
-                      ButtonSegment(
-                        value: 'none',
-                        label: Text(strings.text('无动画')),
-                      ),
-                    ],
-                    selected: {draft.pageTurnEffect},
-                    onSelectionChanged: (value) => setDialogState(
-                      () =>
-                          draft = draft.copyWith(pageTurnEffect: value.single),
                     ),
-                  ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(strings.text('双栏')),

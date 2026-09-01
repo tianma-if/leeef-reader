@@ -5,22 +5,35 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:leeef_reader/src/app_providers.dart';
 import 'package:leeef_reader/src/data/database/app_database.dart';
 import 'package:leeef_reader/src/data/repositories/library_repository.dart';
 import 'package:leeef_reader/src/features/reader/reader_screen.dart';
-import 'package:leeef_reader/src/features/reader/pdf_reader_screen.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_screen.dart';
 import 'package:leeef_reader/src/import/book_import_service.dart';
-import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
 import 'package:pdfrx/pdfrx.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('EPUB uses a continuous curl and springs back on a short pull', (
+  setUp(() async {
+    SharedPreferences.setMockInitialValues(const {});
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.clear();
+    await Future.wait([
+      preferences.setString('leeef.reader.flow', 'paginated'),
+      preferences.setString('leeef.reader.page_turn_effect', 'curl'),
+      preferences.setBool('leeef.reader.show_header', true),
+      preferences.setBool('leeef.reader.show_footer', true),
+      preferences.setString('leeef.reader.footer_content', 'page'),
+    ]);
+  });
+
+  testWidgets('desktop EPUB turns pages by clicking a slide zone', (
     tester,
   ) async {
     final fixture = await _Fixture.create();
@@ -38,57 +51,22 @@ void main() {
     await tester.pumpWidget(fixture.reader(book));
     await _pumpUntilFound(
       tester,
-      find.byKey(const Key('epub-curl-right-zone')),
+      find.byKey(const Key('epub-tap-right-zone')),
       timeout: const Duration(seconds: 20),
     );
     await tester.pump(const Duration(milliseconds: 800));
     final initialProgress = await fixture.repository.getReadingProgress(
       book.id,
     );
-    final readerWidth = tester.getSize(find.byType(EpubReaderScreen)).width;
-    final readerBounds = tester.getRect(
-      find.byKey(const Key('epub-curl-right-zone')),
-    );
-
-    final cancelledGesture = await tester.startGesture(readerBounds.center);
-    await cancelledGesture.moveBy(Offset(-readerWidth * 0.08, -24));
-    await _pumpUntilFound(
-      tester,
-      find.byKey(const Key('epub-page-curl')),
-      timeout: const Duration(seconds: 20),
-    );
-    final interactiveCurl = tester.widget<PageCurlSurface>(
-      find.byKey(const Key('epub-page-curl')),
-    );
-    expect(interactiveCurl.autoComplete, isFalse);
-    expect(interactiveCurl.controller, isNotNull);
-    await cancelledGesture.up();
-    await _pumpUntilGone(tester, find.byKey(const Key('epub-page-curl')));
-    expect(
-      (await fixture.repository.getReadingProgress(book.id))?.locator,
-      initialProgress?.locator,
-    );
-
-    final completedGesture = await tester.startGesture(readerBounds.center);
-    await completedGesture.moveBy(Offset(-readerWidth * 0.24, -60));
-    await _pumpUntilFound(
-      tester,
-      find.byKey(const Key('epub-page-curl')),
-      timeout: const Duration(seconds: 20),
-    );
-    final completingCurl = tester.widget<PageCurlSurface>(
-      find.byKey(const Key('epub-page-curl')),
-    );
-    await completedGesture.moveBy(Offset(-readerWidth * 0.48, -50));
-    expect(completingCurl.controller!.progress, greaterThan(0.48));
-    await completedGesture.up();
-    await _pumpUntilGone(tester, find.byKey(const Key('epub-page-curl')));
+    await tester.tap(find.byKey(const Key('epub-tap-right-zone')));
+    expect(find.byKey(const Key('epub-page-curl')), findsNothing);
     await tester.pump(const Duration(milliseconds: 800));
 
     final completedProgress = await fixture.repository.getReadingProgress(
       book.id,
     );
     expect(completedProgress?.locator, startsWith('epubcfi('));
+    expect(completedProgress?.locator, isNot(initialProgress?.locator));
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
   });
@@ -106,19 +84,14 @@ void main() {
 
       await tester.pumpWidget(fixture.reader(book, enableTxtPageCurl: true));
       await _pumpUntilFound(tester, find.byKey(const Key('txt-reader-text')));
-      expect(find.textContaining('1 / '), findsOneWidget);
+      expect(find.byKey(const ValueKey('txt-page-0')), findsOneWidget);
 
-      final readerBounds = tester.getRect(
-        find.byKey(const Key('txt-curl-right-zone')),
-      );
-      final readerWidth = tester.getSize(find.byType(TxtReaderScreen)).width;
-      final gesture = await tester.startGesture(readerBounds.center);
-      await gesture.moveBy(Offset(-readerWidth * 0.24, -80));
-      await _pumpUntilFound(tester, find.byKey(const Key('txt-page-curl')));
-      await gesture.moveBy(Offset(-readerWidth * 0.48, -60));
-      await gesture.up();
-      await _pumpUntilFound(tester, find.textContaining('2 / '));
+      await tester.tap(find.byKey(const Key('txt-tap-right-zone')));
+      expect(find.byKey(const Key('txt-page-curl')), findsNothing);
+      expect(find.byKey(const Key('txt-page-slide')), findsOneWidget);
+      await _pumpUntilFound(tester, find.byKey(const ValueKey('txt-page-1')));
 
+      await _showControlsIfHidden(tester, '添加书签');
       await tester.tap(find.byTooltip('添加书签'));
       await tester.pumpAndSettle();
       expect(
@@ -158,7 +131,7 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpWidget(fixture.reader(book, enableTxtPageCurl: true));
       await _pumpUntilFound(tester, find.byKey(const Key('txt-reader-text')));
-      expect(find.textContaining('2 / '), findsOneWidget);
+      expect(find.byKey(const ValueKey('txt-page-1')), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
     },
@@ -181,18 +154,12 @@ void main() {
         timeout: const Duration(seconds: 20),
       );
 
-      final pdfBounds = tester.getRect(
-        find.byKey(const Key('pdf-curl-right-zone')),
-      );
-      final pdfWidth = tester.getSize(find.byType(PdfReaderScreen)).width;
-      final pdfGesture = await tester.startGesture(pdfBounds.center);
-      await pdfGesture.moveBy(Offset(-pdfWidth * 0.24, -60));
-      await _pumpUntilFound(tester, find.byKey(const Key('pdf-page-curl')));
-      await pdfGesture.moveBy(Offset(-pdfWidth * 0.48, -50));
-      await pdfGesture.up();
+      await tester.tap(find.byKey(const Key('pdf-tap-right-zone')));
+      expect(find.byKey(const Key('pdf-page-curl')), findsNothing);
       await _pumpUntilFound(tester, find.text('2 / 2'));
       await tester.pump(const Duration(milliseconds: 700));
 
+      await _showControlsIfHidden(tester, '添加书签');
       await tester.tap(find.byTooltip('添加书签'));
       await tester.pumpAndSettle();
       expect(
@@ -248,18 +215,6 @@ Future<void> _pumpUntilFound(
   expect(finder, findsOneWidget);
 }
 
-Future<void> _pumpUntilGone(
-  WidgetTester tester,
-  Finder finder, {
-  Duration timeout = const Duration(seconds: 10),
-}) async {
-  final deadline = DateTime.now().add(timeout);
-  while (finder.evaluate().isNotEmpty && DateTime.now().isBefore(deadline)) {
-    await tester.pump(const Duration(milliseconds: 100));
-  }
-  expect(finder, findsNothing);
-}
-
 Future<void> _pumpUntil(
   WidgetTester tester,
   Future<bool> Function() condition, {
@@ -271,6 +226,13 @@ Future<void> _pumpUntil(
     await tester.pump(const Duration(milliseconds: 100));
   }
   fail('Condition was not met within $timeout.');
+}
+
+Future<void> _showControlsIfHidden(WidgetTester tester, String tooltip) async {
+  if (find.byTooltip(tooltip).evaluate().isNotEmpty) return;
+  await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+  await tester.pumpAndSettle();
+  expect(find.byTooltip(tooltip), findsOneWidget);
 }
 
 class _Fixture {
@@ -314,6 +276,13 @@ class _Fixture {
           libraryRepositoryProvider.overrideWith((ref) async => repository),
         ],
         child: MaterialApp(
+          locale: const Locale('zh'),
+          supportedLocales: const [Locale('zh')],
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
           home: enableTxtPageCurl
               ? TxtReaderScreen(book: book, pageCurlEnabled: true)
               : ReaderScreen(book: book),
