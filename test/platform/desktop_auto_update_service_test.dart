@@ -9,6 +9,7 @@ class _FakeDriver implements DesktopAutoUpdateDriver {
   var checks = 0;
   var installs = 0;
   var installResult = true;
+  final operations = <String>[];
 
   @override
   void addListener(UpdaterListener value) => listener = value;
@@ -19,14 +20,22 @@ class _FakeDriver implements DesktopAutoUpdateDriver {
   }
 
   @override
-  Future<void> setFeedURL(String value) async => feedUrl = value;
+  Future<void> setFeedURL(String value) async {
+    operations.add('feed');
+    feedUrl = value;
+  }
 
   @override
-  Future<void> setScheduledCheckInterval(int seconds) async =>
-      interval = seconds;
+  Future<void> setScheduledCheckInterval(int seconds) async {
+    operations.add('interval');
+    interval = seconds;
+  }
 
   @override
-  Future<void> checkInBackground() async => checks++;
+  Future<void> checkInBackground() async {
+    operations.add('check');
+    checks++;
+  }
 
   @override
   Future<bool> installDownloadedUpdate() async {
@@ -58,6 +67,7 @@ void main() {
     expect(driver.feedUrl, DesktopAutoUpdateService.feedUrl);
     expect(driver.interval, DesktopAutoUpdateService.checkInterval.inSeconds);
     expect(driver.checks, 1);
+    expect(driver.operations, ['interval', 'feed', 'check']);
     expect(service.state.stage, DesktopUpdateStage.checking);
     service.dispose();
   });
@@ -76,7 +86,7 @@ void main() {
       expect(await service.installDownloadedUpdate(), isFalse);
       expect(driver.installs, 0);
 
-      service.onUpdaterUpdateDownloaded(
+      service.onUpdaterBeforeQuitForUpdate(
         const AppcastItem(displayVersionString: '1.2.0'),
       );
       expect(service.state.stage, DesktopUpdateStage.ready);
@@ -86,6 +96,20 @@ void main() {
       service.dispose();
     },
   );
+
+  test('also accepts the legacy update-downloaded readiness event', () async {
+    final driver = _FakeDriver();
+    final service = DesktopAutoUpdateService(driver: driver);
+    await service.initialize(enabled: true);
+
+    service.onUpdaterUpdateDownloaded(
+      const AppcastItem(displayVersionString: '1.3.0'),
+    );
+
+    expect(service.state.stage, DesktopUpdateStage.ready);
+    expect(service.state.version, '1.3.0');
+    service.dispose();
+  });
 
   test('keeps update-check failures non-blocking', () async {
     final driver = _FakeDriver();

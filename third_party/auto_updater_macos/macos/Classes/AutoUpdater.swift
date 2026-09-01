@@ -35,6 +35,7 @@ final class AutoUpdater: NSObject, SPUUpdaterDelegate {
     private var userDriver: SPUStandardUserDriver?
     private var updater: SPUUpdater?
     private var feedURL: URL?
+    private var started = false
     private var immediateInstallHandler: (() -> Void)?
     var onEvent: ((String, NSDictionary) -> Void)?
 
@@ -49,19 +50,48 @@ final class AutoUpdater: NSObject, SPUUpdaterDelegate {
             delegate: self
         )
         updater?.clearFeedURLFromUserDefaults()
-        try? updater?.start()
     }
 
     func feedURLString(for updater: SPUUpdater) -> String? {
         feedURL?.absoluteString
     }
 
-    func setFeedURL(_ url: URL?) {
+    func setFeedURL(_ url: URL?) throws {
+        guard let url else {
+            throw NSError(
+                domain: "dev.leeef.auto_updater",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "The update feed URL is invalid."]
+            )
+        }
+        guard let updater else {
+            throw NSError(
+                domain: "dev.leeef.auto_updater",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "The Sparkle updater is unavailable."]
+            )
+        }
+
         feedURL = url
-        try? updater?.start()
+        if !started {
+            try updater.start()
+            started = true
+        }
     }
 
-    func checkForUpdates(inBackground: Bool) {
+    func checkForUpdates(inBackground: Bool) throws {
+        guard started else {
+            throw NSError(
+                domain: "dev.leeef.auto_updater",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "The Sparkle updater has not started."]
+            )
+        }
+        // Starting Sparkle may already have scheduled a check for this runloop.
+        // Do not collide with that session when Flutter requests its launch check.
+        if updater?.sessionInProgress == true {
+            return
+        }
         if inBackground {
             updater?.checkForUpdatesInBackground()
         } else {
@@ -81,7 +111,14 @@ final class AutoUpdater: NSObject, SPUUpdaterDelegate {
     }
 
     func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
-        emit("error", ["error": error.localizedDescription])
+        let sparkleError = error as NSError
+        if sparkleError.domain == SUSparkleErrorDomain && sparkleError.code == 1001 {
+            // Sparkle reports "already up to date" as SUNoUpdateError (1001)
+            // after an automatic cycle. That is an idle result, not a failure.
+            emit("update-not-available", ["error": sparkleError.localizedDescription])
+        } else {
+            emit("error", ["error": sparkleError.localizedDescription])
+        }
     }
 
     func updater(_ updater: SPUUpdater, didFinishLoading appcast: SUAppcast) {

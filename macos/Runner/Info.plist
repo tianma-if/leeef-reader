@@ -38,11 +38,15 @@
 	<true/>
 	<key>SUEnableInstallerLauncherService</key>
 	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/tianma-if/leeef-reader/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>rGu3Snv90vzCh2AYChae6DUW22OIzTQcXuACpdbjsH0=</string>
 	<key>SURequireSignedFeed</key>
 	<true/>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
 	<key>SUScheduledCheckInterval</key>
-	<integer>21600</integer>
+	<integer>300</integer>
 </dict>
 </plist>

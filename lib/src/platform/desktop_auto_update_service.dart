@@ -73,7 +73,7 @@ class DesktopAutoUpdateService extends ChangeNotifier
   static final instance = DesktopAutoUpdateService();
   static const feedUrl =
       'https://github.com/tianma-if/leeef-reader/releases/latest/download/appcast.xml';
-  static const checkInterval = Duration(hours: 6);
+  static const checkInterval = Duration(minutes: 5);
 
   final DesktopAutoUpdateDriver _driver;
   var _initialized = false;
@@ -92,8 +92,8 @@ class DesktopAutoUpdateService extends ChangeNotifier
     _driver.addListener(this);
     unawaited(AppLog.info('desktop update: initializing'));
     try {
-      await _driver.setFeedURL(feedUrl);
       await _driver.setScheduledCheckInterval(checkInterval.inSeconds);
+      await _driver.setFeedURL(feedUrl);
       await checkNow();
     } on Object catch (error, stackTrace) {
       _setState(
@@ -181,9 +181,13 @@ class DesktopAutoUpdateService extends ChangeNotifier
 
   @override
   void onUpdaterBeforeQuitForUpdate(AppcastItem? appcastItem) {
+    final version = _displayVersion(appcastItem) ?? _state.version;
+    _setState(
+      DesktopUpdateState(stage: DesktopUpdateStage.ready, version: version),
+    );
     unawaited(
       AppLog.info(
-        'desktop update: install-on-quit ready version=${_displayVersion(appcastItem) ?? 'unknown'}',
+        'desktop update: install-on-quit ready version=${version ?? 'unknown'}',
       ),
     );
   }

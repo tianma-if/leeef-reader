@@ -53,13 +53,31 @@ public final class AutoUpdaterMacosPlugin: NSObject, FlutterPlugin, FlutterStrea
         let arguments = call.arguments as? [String: Any] ?? [:]
         switch call.method {
         case "setFeedURL":
-            autoUpdater.setFeedURL(URL(string: arguments["feedURL"] as? String ?? ""))
-            result(true)
+            do {
+                try autoUpdater.setFeedURL(
+                    URL(string: arguments["feedURL"] as? String ?? "")
+                )
+                result(true)
+            } catch {
+                result(FlutterError(
+                    code: "UPDATER_START_FAILED",
+                    message: error.localizedDescription,
+                    details: nil
+                ))
+            }
         case "checkForUpdates":
-            autoUpdater.checkForUpdates(
-                inBackground: arguments["inBackground"] as? Bool ?? false
-            )
-            result(true)
+            do {
+                try autoUpdater.checkForUpdates(
+                    inBackground: arguments["inBackground"] as? Bool ?? false
+                )
+                result(true)
+            } catch {
+                result(FlutterError(
+                    code: "UPDATER_NOT_STARTED",
+                    message: error.localizedDescription,
+                    details: nil
+                ))
+            }
         case "setScheduledCheckInterval":
             autoUpdater.setScheduledCheckInterval(arguments["interval"] as? Int ?? 86400)
             result(true)
