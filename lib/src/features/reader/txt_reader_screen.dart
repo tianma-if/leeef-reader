@@ -16,6 +16,7 @@ import 'package:leeef_reader/src/data/database/app_database.dart';
 import 'package:leeef_reader/src/data/repositories/library_repository.dart';
 import 'package:leeef_reader/src/domain/reading_location.dart';
 import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
+import 'package:leeef_reader/src/features/reader/txt_layout_paginator.dart';
 import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
 import 'package:leeef_reader/src/features/reader/txt_page_snapshot_renderer.dart';
@@ -70,7 +71,12 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   ReaderPreferences _preferences = const ReaderPreferences();
   final ChineseTextConverter _chineseConverter = const ChineseTextConverter();
   final Map<String, String> _convertedPageCache = {};
-  final Map<String, _TxtDisplayText> _displayTextCache = {};
+  final Map<String, TxtDisplayText> _displayTextCache = {};
+  List<TxtPage>? _paginatedPages;
+  String? _paginationSignature;
+  Size? _paginationBodySize;
+  bool _paginationRefreshScheduled = false;
+  int? _pendingPaginationOffset;
   bool _controlsVisible = true;
   DateTime? _lastWheelTurn;
   String? _loadedFontData;
@@ -148,7 +154,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     }
     final page = _preferences.flow == 'scrolled'
         ? TxtPage(start: 0, end: document.text.length, text: document.text)
-        : document.pages[_pageIndex];
+        : _pagesFor(document)[_pageIndex];
     final index = page.text.indexOf(sentence);
     if (index < 0) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -177,7 +183,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     if (key == LogicalKeyboardKey.arrowRight ||
         key == LogicalKeyboardKey.pageDown ||
         key == LogicalKeyboardKey.space) {
-      if (_pageIndex + 1 < document.pages.length) {
+      if (_pageIndex + 1 < _pagesFor(document).length) {
         unawaited(_prepareTurn(_pageIndex + 1));
       }
       return true;
@@ -194,7 +200,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     }
     if (_preferences.volumeKeyPaging &&
         key == LogicalKeyboardKey.audioVolumeDown) {
-      if (_pageIndex + 1 < document.pages.length) {
+      if (_pageIndex + 1 < _pagesFor(document).length) {
         unawaited(_prepareTurn(_pageIndex + 1));
       }
       return true;
@@ -230,6 +236,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
           _preferences = preferences;
           _sessionStartedAt ??= DateTime.now();
           _pageIndex = document.pageIndexForOffset(offset);
+          _pendingPaginationOffset = offset;
           _history.reset(_pageIndex);
         });
       }
@@ -241,7 +248,8 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   void _goToPage(int index) {
     final document = _document;
     if (document == null) return;
-    final next = index.clamp(0, document.pages.length - 1);
+    final pages = _pagesFor(document);
+    final next = index.clamp(0, pages.length - 1);
     if (next == _pageIndex) return;
     setState(() {
       _pageTurnDirection = next > _pageIndex ? 1 : -1;
@@ -256,7 +264,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     if (_preferences.flow == 'scrolled') {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!_textScrollController.hasClients) return;
-        final denominator = (document.pages.length - 1).clamp(1, 1 << 30);
+        final denominator = (pages.length - 1).clamp(1, 1 << 30);
         unawaited(
           _textScrollController.animateTo(
             _textScrollController.position.maxScrollExtent * next / denominator,
@@ -273,15 +281,15 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     if (_preferences.flow != 'scrolled' ||
         document == null ||
         !_textScrollController.hasClients ||
-        document.pages.length < 2) {
+        _pagesFor(document).length < 2) {
       return;
     }
     final maximum = _textScrollController.position.maxScrollExtent;
     if (maximum <= 0) return;
-    final next =
-        ((_textScrollController.offset / maximum) * (document.pages.length - 1))
-            .round()
-            .clamp(0, document.pages.length - 1);
+    final pages = _pagesFor(document);
+    final next = ((_textScrollController.offset / maximum) * (pages.length - 1))
+        .round()
+        .clamp(0, pages.length - 1);
     if (next == _pageIndex) return;
     setState(() => _pageIndex = next);
     _scheduleProgressSave();
@@ -294,7 +302,8 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   }) async {
     final document = _document;
     if (document == null || _preparingTurn || _curlTurn != null) return;
-    final target = targetIndex.clamp(0, document.pages.length - 1);
+    final pages = _pagesFor(document);
+    final target = targetIndex.clamp(0, pages.length - 1);
     if (target == _pageIndex) return;
     if (!_supportsPageCurl) {
       _goToPage(target);
@@ -331,7 +340,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
           boundaryKey: _visiblePageBoundaryKey,
           pixelRatio: pixelRatio,
           fallback: () => renderTxtPageSnapshot(
-            text: document.pages[_pageIndex].text,
+            text: pages[_pageIndex].text,
             size: size,
             pixelRatio: pixelRatio,
             backgroundColor: backgroundColor,
@@ -343,7 +352,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
           boundaryKey: _snapshotPageBoundaryKey,
           pixelRatio: pixelRatio,
           fallback: () => renderTxtPageSnapshot(
-            text: document.pages[target].text,
+            text: pages[target].text,
             size: size,
             pixelRatio: pixelRatio,
             backgroundColor: backgroundColor,
@@ -436,7 +445,9 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
         : 0.0;
     if (_preferences.swapTapZones) direction = -direction;
     final target = _pageIndex + direction.toInt();
-    if (direction == 0 || target < 0 || target >= document.pages.length) return;
+    if (direction == 0 || target < 0 || target >= _pagesFor(document).length) {
+      return;
+    }
 
     final controller = PageCurlController()
       ..begin(position: position, size: size, direction: direction);
@@ -556,7 +567,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     final document = _document;
     final repository = _repository;
     if (document == null || repository == null) return;
-    final page = document.pages[_pageIndex];
+    final page = _pagesFor(document)[_pageIndex];
     final locator = txtLocator(page.start);
     if (locator == _lastPersistedLocator) return;
     await repository.updateReadingProgress(
@@ -581,7 +592,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     }
     final page = _preferences.flow == 'scrolled'
         ? TxtPage(start: 0, end: document.text.length, text: document.text)
-        : document.pages[_pageIndex];
+        : _pagesFor(document)[_pageIndex];
     final display = _displayText(page);
     final start = display.originalOffset(selection.start);
     final end = display.originalOffset(selection.end);
@@ -619,7 +630,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     final strings = AppStrings.of(context);
     await (await ref.read(libraryRepositoryProvider.future)).createBookmark(
       bookId: widget.book.id,
-      locator: txtLocator(document.pages[_pageIndex].start),
+      locator: txtLocator(_pagesFor(document)[_pageIndex].start),
       title: strings.pageNumber(_pageIndex + 1),
     );
     if (mounted) {
@@ -649,7 +660,9 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
         ),
       ),
     );
-    if (offset != null) _goToPage(document.pageIndexForOffset(offset));
+    if (offset != null) {
+      _goToPage(_pageIndexForOffset(_pagesFor(document), offset));
+    }
   }
 
   Future<void> _showSearch() async {
@@ -725,7 +738,9 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
               ),
       ),
     );
-    if (offset != null) _goToPage(document.pageIndexForOffset(offset));
+    if (offset != null) {
+      _goToPage(_pageIndexForOffset(_pagesFor(document), offset));
+    }
   }
 
   static String _chapterAt(
@@ -1282,7 +1297,9 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     await _applyReadingState(result);
     if (mounted) {
       final document = _document;
-      final offset = document?.pages[_pageIndex].start ?? 0;
+      final offset = document == null
+          ? 0
+          : _pagesFor(document)[_pageIndex].start;
       setState(() {
         _preferences = result;
         _convertedPageCache.clear();
@@ -1292,6 +1309,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
             document.text,
             chapterPattern: result.txtChapterPattern,
           );
+          _pendingPaginationOffset = offset;
           _pageIndex = _document!.pageIndexForOffset(offset);
           _history.reset(_pageIndex);
         }
@@ -1324,40 +1342,43 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     () => _chineseConverter.convert(page.text, _preferences.chineseConversion),
   );
 
-  _TxtDisplayText _displayText(TxtPage page) =>
+  TxtDisplayText _displayText(TxtPage page) =>
       _displayTextCache.putIfAbsent('${page.start}:${page.end}', () {
-        final source = _pageText(page);
-        final output = StringBuffer();
-        final offsets = <int>[0];
-        final indent = _preferences.textIndent.round();
-        final extraBreaks = _preferences.paragraphSpacing.round();
-        var sourceOffset = 0;
-        for (final line in source.split('\n')) {
-          if (line.trim().isNotEmpty) {
-            for (var index = 0; index < indent; index++) {
-              output.write('　');
-              offsets.add(sourceOffset);
-            }
-          }
-          for (var index = 0; index < line.length; index++) {
-            output.writeCharCode(line.codeUnitAt(index));
-            sourceOffset++;
-            offsets.add(sourceOffset);
-          }
-          if (sourceOffset < source.length) {
+        return _buildDisplayText(_pageText(page));
+      });
+
+  TxtDisplayText _buildDisplayText(String source) {
+    final output = StringBuffer();
+    final offsets = <int>[0];
+    final indent = _preferences.textIndent.round();
+    final extraBreaks = _preferences.paragraphSpacing.round();
+    var sourceOffset = 0;
+    for (final line in source.split('\n')) {
+      if (line.trim().isNotEmpty) {
+        for (var index = 0; index < indent; index++) {
+          output.write('　');
+          offsets.add(sourceOffset);
+        }
+      }
+      for (var index = 0; index < line.length; index++) {
+        output.writeCharCode(line.codeUnitAt(index));
+        sourceOffset++;
+        offsets.add(sourceOffset);
+      }
+      if (sourceOffset < source.length) {
+        output.write('\n');
+        sourceOffset++;
+        offsets.add(sourceOffset);
+        if (line.trim().isNotEmpty) {
+          for (var index = 0; index < extraBreaks; index++) {
             output.write('\n');
-            sourceOffset++;
             offsets.add(sourceOffset);
-            if (line.trim().isNotEmpty) {
-              for (var index = 0; index < extraBreaks; index++) {
-                output.write('\n');
-                offsets.add(sourceOffset);
-              }
-            }
           }
         }
-        return _TxtDisplayText(text: output.toString(), offsets: offsets);
-      });
+      }
+    }
+    return TxtDisplayText(text: output.toString(), offsets: offsets);
+  }
 
   void _handlePointerSignal(PointerSignalEvent event) {
     final document = _document;
@@ -1374,7 +1395,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     }
     _lastWheelTurn = now;
     final target = _pageIndex + (event.scrollDelta.dy > 0 ? 1 : -1);
-    if (target >= 0 && target < document.pages.length) {
+    if (target >= 0 && target < _pagesFor(document).length) {
       unawaited(_prepareTurn(target));
     }
   }
@@ -1401,7 +1422,8 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       case 'previous':
         if (_pageIndex > 0) unawaited(_prepareTurn(_pageIndex - 1));
       case 'next':
-        if (_document != null && _pageIndex + 1 < _document!.pages.length) {
+        if (_document case final document?
+            when _pageIndex + 1 < _pagesFor(document).length) {
           unawaited(_prepareTurn(_pageIndex + 1));
         }
       case 'search':
@@ -1419,7 +1441,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     await showTtsControlsSheet(
       context,
       controller: _ttsController,
-      text: _selection?.quote ?? document.pages[_pageIndex].text,
+      text: _selection?.quote ?? _pagesFor(document)[_pageIndex].text,
     );
   }
 
@@ -1430,7 +1452,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     await showTranslationSheet(
       context,
       text: selection.quote,
-      contextText: document.pages[_pageIndex].text,
+      contextText: _pagesFor(document)[_pageIndex].text,
     );
   }
 
@@ -1455,7 +1477,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
             builder: (_) => AiAssistantScreen(
               title: '${widget.book.title} · ${strings.text('选中文本')}',
               contextText:
-                  '选中文本：${selection.quote}\n\n页面上下文：${document.pages[_pageIndex].text}',
+                  '选中文本：${selection.quote}\n\n页面上下文：${_pagesFor(document)[_pageIndex].text}',
             ),
           ),
         );
@@ -1512,25 +1534,138 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     ],
   );
 
+  List<TxtPage> _pagesFor(TxtReaderDocument document) =>
+      _preferences.flow == 'paginated'
+      ? (_paginatedPages ?? document.pages)
+      : document.pages;
+
+  void _ensurePagination(TxtReaderDocument document) {
+    if (_preferences.flow != 'paginated') return;
+    final renderObject = _bodyKey.currentContext?.findRenderObject();
+    final mediaSize = MediaQuery.sizeOf(context);
+    final bodySize = renderObject is RenderBox && renderObject.hasSize
+        ? renderObject.size
+        : Size(
+            mediaSize.width,
+            (mediaSize.height -
+                    (_controlsVisible && _preferences.showHeader
+                        ? kToolbarHeight
+                        : 0))
+                .clamp(1, double.infinity),
+          );
+    final contentWidth = (bodySize.width - _preferences.margin * 2).clamp(
+      1.0,
+      760.0,
+    );
+    final contentHeight = (bodySize.height - 24 - 120 - 2).clamp(
+      1.0,
+      double.infinity,
+    );
+    final signature = <Object>[
+      identityHashCode(document),
+      bodySize.width.toStringAsFixed(2),
+      bodySize.height.toStringAsFixed(2),
+      _preferences.fontSize,
+      _preferences.lineHeight,
+      _preferences.margin,
+      _preferences.fontFamily,
+      _preferences.importedFontName,
+      _preferences.importedFontData.hashCode,
+      _preferences.fontWeight,
+      _preferences.letterSpacing,
+      _preferences.paragraphSpacing,
+      _preferences.textIndent,
+      _preferences.textAlign,
+      _preferences.chineseConversion,
+    ].join('|');
+    if (_paginationSignature == signature && _paginatedPages != null) {
+      _schedulePaginationSizeCheck();
+      return;
+    }
+
+    final oldPages = _paginatedPages ?? document.pages;
+    final oldIndex = _pageIndex.clamp(0, oldPages.length - 1);
+    final currentOffset = _pendingPaginationOffset ?? oldPages[oldIndex].start;
+    final foreground = _preferences.eInkMode
+        ? Colors.black
+        : _hexColor(_preferences.foreground);
+    final textStyle = TextStyle(
+      color: foreground,
+      fontSize: _preferences.fontSize,
+      height: _preferences.lineHeight,
+      fontFamily: _preferences.fontFamily == 'system-ui'
+          ? null
+          : _preferences.fontFamily,
+      fontWeight:
+          FontWeight.values[(_preferences.fontWeight ~/ 100 - 1).clamp(0, 8)],
+      letterSpacing: _preferences.letterSpacing,
+    );
+    final pages = paginateTxtForLayout(
+      text: document.text,
+      maxWidth: contentWidth,
+      maxHeight: contentHeight,
+      style: textStyle,
+      textDirection: Directionality.of(context),
+      buildDisplayText: (source) => _buildDisplayText(
+        _chineseConverter.convert(source, _preferences.chineseConversion),
+      ),
+    );
+    _paginatedPages = pages;
+    _paginationSignature = signature;
+    _paginationBodySize = bodySize;
+    _displayTextCache.clear();
+    _convertedPageCache.clear();
+    _pageIndex = _pageIndexForOffset(pages, currentOffset);
+    _pendingPaginationOffset = null;
+    _history.reset(_pageIndex);
+    _schedulePaginationSizeCheck();
+  }
+
+  void _schedulePaginationSizeCheck() {
+    if (_paginationRefreshScheduled) return;
+    _paginationRefreshScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _paginationRefreshScheduled = false;
+      if (!mounted || _preferences.flow != 'paginated') return;
+      final renderObject = _bodyKey.currentContext?.findRenderObject();
+      if (renderObject is! RenderBox || !renderObject.hasSize) return;
+      final previous = _paginationBodySize;
+      if (previous == null ||
+          (renderObject.size.width - previous.width).abs() > 0.5 ||
+          (renderObject.size.height - previous.height).abs() > 0.5) {
+        setState(() => _paginationSignature = null);
+      }
+    });
+  }
+
+  static int _pageIndexForOffset(List<TxtPage> pages, int offset) {
+    final index = pages.indexWhere(
+      (page) => offset >= page.start && offset < page.end,
+    );
+    return index < 0 ? pages.length - 1 : index;
+  }
+
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
     final document = _document;
+    if (document != null) _ensurePagination(document);
+    final pages = document == null ? const <TxtPage>[] : _pagesFor(document);
     final page = document == null
         ? null
         : _preferences.flow == 'scrolled'
         ? TxtPage(start: 0, end: document.text.length, text: document.text)
-        : document.pages[_pageIndex];
+        : pages[_pageIndex];
     final chapter = document == null
         ? null
         : _chapterAt(
             document,
-            document.pages[_pageIndex].start,
+            pages[_pageIndex].start,
             defaultLabel: strings.text('正文'),
           );
-    final progress = document == null || document.pages.isEmpty
+    final progress = document == null || pages.isEmpty
         ? 0.0
-        : (_pageIndex + 1) / document.pages.length;
+        : (_pageIndex + 1) / pages.length;
     final headerText = switch (_preferences.headerContent) {
       'chapter' => chapter ?? widget.book.title,
       'progress' => '${(progress * 100).round()}%',
@@ -1540,8 +1675,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       'progress' => '${(progress * 100).round()}%',
       'chapter' => chapter ?? widget.book.title,
       'time' => _txtReaderClock(),
-      _ =>
-        document == null ? '—' : '${_pageIndex + 1} / ${document.pages.length}',
+      _ => document == null ? '—' : '${_pageIndex + 1} / ${pages.length}',
     };
     return Scaffold(
       appBar: _controlsVisible && _preferences.showHeader
@@ -1652,7 +1786,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                           child: RepaintBoundary(
                             key: _snapshotPageBoundaryKey,
                             child: _buildTxtPage(
-                              document!.pages[snapshotPageIndex],
+                              pages[snapshotPageIndex],
                               interactive: false,
                             ),
                           ),
@@ -1720,8 +1854,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                           IconButton(
                             tooltip: strings.text('下一页'),
                             onPressed:
-                                _pageIndex == document.pages.length - 1 ||
-                                    _preparingTurn
+                                _pageIndex == pages.length - 1 || _preparingTurn
                                 ? null
                                 : () => _prepareTurn(_pageIndex + 1),
                             icon: const Icon(Icons.chevron_right),
@@ -1830,7 +1963,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
         final isLeft = alignment == Alignment.centerLeft;
         final forward = _preferences.swapTapZones ? isLeft : !isLeft;
         final target = _pageIndex + (forward ? 1 : -1);
-        if (target >= 0 && target < document.pages.length) {
+        if (target >= 0 && target < _pagesFor(document).length) {
           unawaited(_prepareTurn(target));
         }
       },
@@ -1878,7 +2011,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
           final isLeft = alignment == Alignment.centerLeft;
           final forward = _preferences.swapTapZones ? isLeft : !isLeft;
           final target = _pageIndex + (forward ? 1 : -1);
-          if (target >= 0 && target < document.pages.length) {
+          if (target >= 0 && target < _pagesFor(document).length) {
             unawaited(_prepareTurn(target));
           }
         },
@@ -1901,48 +2034,57 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     final backgroundBytes = _preferences.eInkMode
         ? null
         : _decodeDataUri(selectedBackground);
-    final content = SingleChildScrollView(
-      key: ValueKey(
-        interactive
-            ? 'txt-page-$_pageIndex'
-            : 'txt-snapshot-$_snapshotPageIndex',
-      ),
-      primary: false,
-      controller: interactive ? _textScrollController : null,
-      padding: EdgeInsets.fromLTRB(
-        _preferences.margin,
-        24,
-        _preferences.margin,
-        120,
-      ),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760),
-          child: SelectableText.rich(
-            _ttsTextSpan(_displayText(page).text, interactive: interactive),
-            key: interactive ? const Key('txt-reader-text') : null,
-            onSelectionChanged: interactive ? _onSelectionChanged : null,
-            textAlign: switch (_preferences.textAlign) {
-              'center' => TextAlign.center,
-              'justify' => TextAlign.justify,
-              'left' => TextAlign.left,
-              _ => TextAlign.start,
-            },
-            style: TextStyle(
-              color: foreground,
-              fontSize: _preferences.fontSize,
-              height: _preferences.lineHeight,
-              fontFamily: _preferences.fontFamily == 'system-ui'
-                  ? null
-                  : _preferences.fontFamily,
-              fontWeight: FontWeight
-                  .values[(_preferences.fontWeight ~/ 100 - 1).clamp(0, 8)],
-              letterSpacing: _preferences.letterSpacing,
-            ),
+    final pageKey = ValueKey(
+      interactive ? 'txt-page-$_pageIndex' : 'txt-snapshot-$_snapshotPageIndex',
+    );
+    final text = Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: SelectableText.rich(
+          _ttsTextSpan(_displayText(page).text, interactive: interactive),
+          key: interactive ? const Key('txt-reader-text') : null,
+          onSelectionChanged: interactive ? _onSelectionChanged : null,
+          textAlign: switch (_preferences.textAlign) {
+            'center' => TextAlign.center,
+            'justify' => TextAlign.justify,
+            'left' => TextAlign.left,
+            _ => TextAlign.start,
+          },
+          style: TextStyle(
+            color: foreground,
+            fontSize: _preferences.fontSize,
+            height: _preferences.lineHeight,
+            fontFamily: _preferences.fontFamily == 'system-ui'
+                ? null
+                : _preferences.fontFamily,
+            fontWeight: FontWeight
+                .values[(_preferences.fontWeight ~/ 100 - 1).clamp(0, 8)],
+            letterSpacing: _preferences.letterSpacing,
           ),
         ),
       ),
     );
+    final padding = EdgeInsets.fromLTRB(
+      _preferences.margin,
+      24,
+      _preferences.margin,
+      120,
+    );
+    final content = _preferences.flow == 'scrolled'
+        ? SingleChildScrollView(
+            key: pageKey,
+            primary: false,
+            controller: interactive ? _textScrollController : null,
+            padding: padding,
+            child: text,
+          )
+        : ClipRect(
+            key: pageKey,
+            child: Padding(
+              padding: padding,
+              child: Align(alignment: Alignment.topCenter, child: text),
+            ),
+          );
     return ColoredBox(
       color: background,
       child: Stack(
@@ -2062,14 +2204,4 @@ class _TxtSelection {
 
   final String quote;
   final String locator;
-}
-
-class _TxtDisplayText {
-  const _TxtDisplayText({required this.text, required this.offsets});
-
-  final String text;
-  final List<int> offsets;
-
-  int originalOffset(int displayOffset) =>
-      offsets[displayOffset.clamp(0, offsets.length - 1)];
 }

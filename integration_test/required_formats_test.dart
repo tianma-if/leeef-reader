@@ -137,6 +137,132 @@ void main() {
     },
   );
 
+  testWidgets('TXT visible pages are contiguous across repeated desktop taps', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final fixture = await _Fixture.create();
+    addTearDown(fixture.dispose);
+    final sourceText = List.generate(
+      6000,
+      (index) => String.fromCharCode(0x4E00 + index % 2000),
+    ).join();
+    final source = File('${fixture.root.path}/Continuous TXT.txt');
+    await source.writeAsString(sourceText);
+    final book = await fixture.importer.importFile(source);
+
+    await tester.pumpWidget(fixture.reader(book, enableTxtPageCurl: true));
+    await _pumpUntilFound(tester, find.byKey(const Key('txt-reader-text')));
+
+    var sourceOffset = 0;
+    for (var pageIndex = 0; pageIndex < 5; pageIndex++) {
+      final pageFinder = find.byKey(ValueKey('txt-page-$pageIndex'));
+      await _pumpUntilFound(tester, pageFinder);
+      final selectable = tester.widget<SelectableText>(
+        find.byKey(const Key('txt-reader-text')),
+      );
+      final visibleText = selectable.textSpan!.toPlainText();
+      expect(visibleText, isNotEmpty);
+      expect(sourceText.substring(sourceOffset), startsWith(visibleText));
+
+      final pageRect = tester.getRect(pageFinder);
+      final textRect = tester.getRect(find.byKey(const Key('txt-reader-text')));
+      expect(textRect.top, greaterThanOrEqualTo(pageRect.top + 23));
+      expect(textRect.bottom, lessThanOrEqualTo(pageRect.bottom - 119));
+      sourceOffset += visibleText.length;
+
+      if (pageIndex < 4) {
+        await tester.tap(find.byKey(const Key('txt-tap-right-zone')));
+        await tester.pump(const Duration(milliseconds: 800));
+      }
+    }
+
+    await tester.tap(find.byKey(const Key('txt-tap-left-zone')));
+    await tester.pump(const Duration(milliseconds: 800));
+    expect(find.byKey(const ValueKey('txt-page-3')), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('TXT visible pages are contiguous through mobile page curl', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final fixture = await _Fixture.create();
+    addTearDown(fixture.dispose);
+    final sourceText = List.generate(
+      2400,
+      (index) => '第${index.toString().padLeft(4, '0')}段内容连续验证。',
+    ).join();
+    final source = File('${fixture.root.path}/Mobile Continuous TXT.txt');
+    await source.writeAsString(sourceText);
+    final book = await fixture.importer.importFile(source);
+
+    await tester.pumpWidget(fixture.reader(book, enableTxtPageCurl: true));
+    await _pumpUntilFound(tester, find.byKey(const Key('txt-reader-text')));
+    expect(find.byKey(const Key('txt-curl-right-zone')), findsOneWidget);
+    expect(find.byKey(const Key('txt-page-slide')), findsNothing);
+
+    var sourceOffset = 0;
+    for (var pageIndex = 0; pageIndex < 5; pageIndex++) {
+      final pageFinder = find.byKey(ValueKey('txt-page-$pageIndex'));
+      await _pumpUntilFound(
+        tester,
+        pageFinder,
+        timeout: const Duration(seconds: 20),
+      );
+      final selectable = tester.widget<SelectableText>(
+        find.byKey(const Key('txt-reader-text')),
+      );
+      final visibleText = selectable.textSpan!.toPlainText();
+      expect(visibleText, isNotEmpty);
+      expect(
+        sourceText.substring(sourceOffset, sourceOffset + visibleText.length),
+        visibleText,
+      );
+
+      final pageRect = tester.getRect(pageFinder);
+      final textRect = tester.getRect(find.byKey(const Key('txt-reader-text')));
+      expect(textRect.top, greaterThanOrEqualTo(pageRect.top + 23));
+      expect(textRect.bottom, lessThanOrEqualTo(pageRect.bottom - 119));
+      sourceOffset += visibleText.length;
+
+      if (pageIndex < 4) {
+        await tester.tap(find.byKey(const Key('txt-curl-right-zone')));
+        await _pumpUntilFound(
+          tester,
+          find.byKey(ValueKey('txt-page-${pageIndex + 1}')),
+          timeout: const Duration(seconds: 20),
+        );
+        await _pumpUntilNotFound(
+          tester,
+          find.byKey(const Key('txt-page-curl')),
+          timeout: const Duration(seconds: 20),
+        );
+      }
+    }
+
+    await tester.tap(find.byKey(const Key('txt-curl-left-zone')));
+    await _pumpUntilFound(
+      tester,
+      find.byKey(const ValueKey('txt-page-3')),
+      timeout: const Duration(seconds: 20),
+    );
+    await _pumpUntilNotFound(
+      tester,
+      find.byKey(const Key('txt-page-curl')),
+      timeout: const Duration(seconds: 20),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  }, skip: !(Platform.isAndroid || Platform.isIOS));
+
   testWidgets(
     'PDF renders, navigates, restores progress, bookmarks, and excerpts',
     (tester) async {
@@ -213,6 +339,18 @@ Future<void> _pumpUntilFound(
     await tester.pump(const Duration(milliseconds: 100));
   }
   expect(finder, findsOneWidget);
+}
+
+Future<void> _pumpUntilNotFound(
+  WidgetTester tester,
+  Finder finder, {
+  Duration timeout = const Duration(seconds: 10),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (finder.evaluate().isNotEmpty && DateTime.now().isBefore(deadline)) {
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+  expect(finder, findsNothing);
 }
 
 Future<void> _pumpUntil(
