@@ -74,8 +74,9 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: dev.leeef.leeef_reader
           releaseFiles: build/app/outputs/bundle/release/app-release.aab
-          track: ${{ inputs.track }}
+          tracks: ${{ inputs.track }}
           status: ${{ inputs.release_status }}
+          changesNotSentForReview: true
       - name: Remove signing material
         if: always()
         run: rm -f android/key.properties "$RUNNER_TEMP/leeef-upload.jks"
