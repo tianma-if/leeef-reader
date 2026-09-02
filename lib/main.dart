@@ -9,19 +9,12 @@ import 'package:leeef_reader/src/platform/desktop_window_state.dart';
 import 'package:leeef_reader/src/platform/app_log.dart';
 import 'package:leeef_reader/src/platform/app_proxy.dart';
 import 'package:leeef_reader/src/platform/app_notifications.dart';
+import 'package:leeef_reader/src/platform/app_startup.dart';
 import 'package:leeef_reader/src/sync/background_sync_scheduler.dart';
 import 'package:leeef_reader/src/tts/tts_media_controls.dart';
 
 Future<void> main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (arguments.contains('--background-sync')) {
-    await AppNotifications.initialize();
-    await runConfiguredBackgroundSync();
-    return;
-  }
-  await AppProxy.initialize();
-  await AppLog.initialize();
-  await AppNotifications.initialize();
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     unawaited(AppLog.error(details.exception, details.stack));
@@ -30,10 +23,34 @@ Future<void> main(List<String> arguments) async {
     unawaited(AppLog.error(error, stackTrace));
     return true;
   };
-  if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
-    await TtsMediaControlBridge.initialize();
+  if (arguments.contains('--background-sync')) {
+    await AppNotifications.initialize();
+    await runConfiguredBackgroundSync();
+    return;
   }
-  await BackgroundSyncScheduler.initialize();
   await initializeDesktopWindow();
-  runApp(const ProviderScope(child: DesktopWindowStateHost(child: LeeefApp())));
+  runApp(
+    ProviderScope(
+      child: AppStartupHost(
+        initialize: _initializeForegroundServices,
+        child: const DesktopWindowStateHost(child: LeeefApp()),
+      ),
+    ),
+  );
 }
+
+Future<void> _initializeForegroundServices() => runStartupInitializers(
+  [
+    StartupInitializer('network proxy', AppProxy.initialize),
+    StartupInitializer('application log', AppLog.initialize),
+    StartupInitializer('notifications', AppNotifications.initialize),
+    if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS)
+      StartupInitializer('media controls', TtsMediaControlBridge.initialize),
+    StartupInitializer('background sync', BackgroundSyncScheduler.initialize),
+  ],
+  onError: (service, error, stackTrace) async {
+    final message = '$service initialization failed: $error';
+    debugPrint(message);
+    await AppLog.error(message, stackTrace);
+  },
+);
