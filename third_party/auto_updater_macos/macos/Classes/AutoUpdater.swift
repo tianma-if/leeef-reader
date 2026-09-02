@@ -117,7 +117,7 @@ final class AutoUpdater: NSObject, SPUUpdaterDelegate {
             // after an automatic cycle. That is an idle result, not a failure.
             emit("update-not-available", ["error": sparkleError.localizedDescription])
         } else {
-            emit("error", ["error": sparkleError.localizedDescription])
+            emit("error", ["error": detailedDescription(for: sparkleError)])
         }
     }
 
@@ -155,5 +155,23 @@ final class AutoUpdater: NSObject, SPUUpdaterDelegate {
 
     private func emit(_ eventName: String, _ data: NSDictionary) {
         onEvent?(eventName, data)
+    }
+
+    private func detailedDescription(for error: NSError) -> String {
+        var details = [error.localizedDescription]
+        if let reason = error.localizedFailureReason, !details.contains(reason) {
+            details.append(reason)
+        }
+        if let suggestion = error.localizedRecoverySuggestion,
+           !details.contains(suggestion) {
+            details.append(suggestion)
+        }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            let description = detailedDescription(for: underlying)
+            if !details.contains(description) {
+                details.append(description)
+            }
+        }
+        return details.joined(separator: " ")
     }
 }

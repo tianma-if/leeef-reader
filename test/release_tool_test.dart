@@ -199,4 +199,22 @@ void main() {
     expect(script, contains('Print :CFBundleVersion'));
     expect(script, contains('macOS bundle version mismatch'));
   });
+
+  test('macOS release allows Sparkle installer sandbox communication', () {
+    final entitlements = File(
+      'macos/Runner/Release.entitlements',
+    ).readAsStringSync();
+    final verifier = File('tool/verify_macos_bundle.sh').readAsStringSync();
+
+    expect(
+      entitlements,
+      contains(
+        'com.apple.security.temporary-exception.mach-lookup.global-name',
+      ),
+    );
+    expect(entitlements, contains('dev.leeef.leeefReader-spks'));
+    expect(entitlements, contains('dev.leeef.leeefReader-spki'));
+    expect(verifier, contains('mach-lookup\\.global-name'));
+    expect(verifier, contains('service_suffix in spks spki'));
+  });
 }

@@ -47,3 +47,16 @@ fi
   /usr/bin/plutil -extract \
     'com\.apple\.security\.files\.user-selected\.read-write' raw -o - - | \
   /usr/bin/grep -Fxq 'true'
+
+bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+  "$app_path/Contents/Info.plist")"
+signed_entitlements="$(/usr/bin/mktemp)"
+trap '/bin/rm -f "$signed_entitlements"' EXIT
+/usr/bin/codesign -d --entitlements :- "$app_path" \
+  > "$signed_entitlements" 2>/dev/null
+for service_suffix in spks spki; do
+  /usr/bin/plutil -extract \
+    'com\.apple\.security\.temporary-exception\.mach-lookup\.global-name' \
+    json -o - "$signed_entitlements" | \
+    /usr/bin/grep -Fq "\"${bundle_identifier}-${service_suffix}\""
+done

@@ -105,6 +105,8 @@ GitHub 的 `macos-distribution` Environment 配置：
 
 手动执行工作流可选择无签名构建用于内部测试。正式发布时，先创建 Draft Release，再以该 Draft 的 Tag 作为 `release_tag` 手动运行工作流；工作流会从 Tag 构建、签名、公证，并向 Draft 附加 DMG、供静默下载的 ZIP 以及签名的 `appcast.xml`。Tag 必须与 `pubspec.yaml` 的版本一致，例如版本 `1.0.0+2` 对应 `v1.0.0`。确认工作流成功且 Draft 中三项资产齐全后才可公开 Release；`published` 事件不会重新构建，只审计已有资产。已安装的 macOS 客户端启动时立即检查，持续运行期间每 5 分钟静默检查并下载；下载、验签和解压完成后才提示用户重启安装，选择稍后时正常退出应用也会完成安装。
 
+macOS 客户端启用了 App Sandbox，因此 Release 签名必须保留 Sparkle 要求的 `<bundle-id>-spks` 与 `<bundle-id>-spki` Mach lookup 权限。`tool/verify_macos_bundle.sh` 会从最终签名产物中核验这两项；缺失时安装器无法把下载结果交回应用，发布必须中止。
+
 首次配置更新签名时，将仓库外保存的私钥写入 GitHub Environment：
 
 ```bash
