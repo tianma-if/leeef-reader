@@ -63,6 +63,8 @@ Apple Team ID 当前为 `9KA3NM38B6`，App Group 为 `group.dev.leeef.leeefReade
 
 首次 AAB 通常需在 Play Console 手工创建应用并上传；随后工作流才能通过 API 更新轨道。建议先选择 `internal` + `draft`，审核确认后再使用 `completed`。每次上传前必须递增 `pubspec.yaml` 中 `version` 的 build number（`+1` 部分）。Play App Signing 与仓库外保存的 upload key 应同时启用。
 
+`changes_not_sent_for_review` 默认关闭；只有 Play 明确要求人工送审时才开启。若签名 AAB 已成功构建并保留为 Actions artifact，但商店提交失败，可在最新工作流上设置 `artifact_run_id` 和 `release_tag` 重试上传：工作流会校验原始运行来自官方仓库、对应同一 Tag 提交，且签名构建、权限检查和资产保存均成功，然后复用该 AAB，不重编译、不移动 Tag。复用来源仅接受原始构建工作流，不接受仅上传的重试运行。
+
 本地正式构建时，在 `android/key.properties` 写入：
 
 ```properties
