@@ -1,7 +1,7 @@
 name: leeef_reader
 description: A cross-platform, sync-first and MCP-native ebook reader.
 publish_to: none
-version: 1.1.4+11
+version: 1.1.5+12
 environment:
   sdk: ">=3.12.0 <4.0.0"
 
