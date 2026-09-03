@@ -5,7 +5,101 @@ import 'package:flutter_test/flutter_test.dart';
 import '../tool/release.dart';
 
 void main() {
+  test('mobile testing is advisory rather than a release gate', () {
+    final body = buildIssueBody(
+      previousTag: 'v1.1.5',
+      targetTag: 'v1.1.6',
+      changesZh: ['修复阅读问题。'],
+      coverage: auditCommitCoverage(
+        commits: const [ReleaseCommit('abcdef1234567890', 'Fix reader')],
+        changeCommitRefs: ['abcdef1'],
+        ignoredCommitRefs: const [],
+      ),
+    );
+
+    final gates = body.split('## 发布门禁').last.split('## 移动端交付记录').first;
+    expect(gates, contains('跨平台 CI 通过'));
+    expect(gates, contains('签名、公证与更新元数据通过'));
+    expect(gates, isNot(contains('真机')));
+    expect(gates, isNot(contains('TestFlight')));
+    expect(body, contains('正式上架不要求先经过测试渠道或真机回归'));
+    expect(body, contains('未执行时如实记录，不作为发布门禁'));
+  });
+
   group('release options', () {
+    test(
+      'maintenance releases retain explicit coverage without fake changes',
+      () {
+        final options = parseReleaseOptions([
+          '--bump',
+          'patch',
+          '--issue-title',
+          'Maintenance release',
+          '--label',
+          'documentation',
+          '--maintenance',
+          '--ignore-commit',
+          'abcdef1:Release tooling only',
+        ]);
+        expect(options.changesZh, isEmpty);
+        expect(options.changesEn, isEmpty);
+        expect(options.execute, isFalse);
+        final coverage = auditCommitCoverage(
+          commits: const [ReleaseCommit('abcdef1234567890', 'Release tooling')],
+          changeCommitRefs: options.changeCommitRefs,
+          ignoredCommitRefs: options.ignoredCommitRefs,
+        );
+        expect(coverage.ignoredCommits, hasLength(1));
+        expect(
+          () => auditCommitCoverage(
+            commits: const [
+              ReleaseCommit('abcdef1234567890', 'Release tooling'),
+              ReleaseCommit('1234567890abcdef', 'Unaccounted change'),
+            ],
+            changeCommitRefs: options.changeCommitRefs,
+            ignoredCommitRefs: options.ignoredCommitRefs,
+          ),
+          throwsStateError,
+        );
+        final notes = buildReleaseNotes(
+          changesZh: options.changesZh,
+          changesEn: options.changesEn,
+          issueReference: '#42',
+        );
+        expect(notes, contains('无用户可感知的功能变化'));
+        expect(notes, contains('no user-visible functionality changes'));
+        expect(notes, isNot(contains('Release tooling')));
+      },
+    );
+
+    test(
+      'maintenance mode rejects missing reasons, feature bullets and non-patch bumps',
+      () {
+        for (final extra in [
+          <String>[],
+          ['--ignore-commit', 'abcdef1:Tooling', '--change-zh', '功能'],
+          ['--ignore-commit', 'abcdef1:Tooling', '--change-en', 'Feature'],
+          ['--ignore-commit', 'abcdef1:Tooling', '--change-commit', 'abcdef1'],
+          ['--ignore-commit', 'abcdef1:Tooling', '--bump', 'minor'],
+          ['--ignore-commit', 'abcdef1:Tooling', '--bump', 'major'],
+        ]) {
+          expect(
+            () => parseReleaseOptions([
+              '--bump',
+              'patch',
+              '--issue-title',
+              'Maintenance release',
+              '--label',
+              'documentation',
+              '--maintenance',
+              ...extra,
+            ]),
+            throwsArgumentError,
+          );
+        }
+      },
+    );
+
     test('parses paired bilingual changes and explicit execution', () {
       final options = parseReleaseOptions([
         '--bump',

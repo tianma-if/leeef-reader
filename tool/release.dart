@@ -173,6 +173,8 @@ Options:
   --change-en <text>          Required English release bullet; repeatable
   --change-commit <sha,...>   Commits covered by the paired release bullet
   --ignore-commit <sha:why>   Explicit non-user-facing commit exclusion
+  --maintenance              No user-facing changes; exclude every commit with
+                              --ignore-commit and use --bump patch
   --repository <owner/name>   Default: tianma-if/leeef-reader
   --execute                   Apply the plan; omission means dry run
   --pending-draft <vX.Y.Z>     Advance beyond an existing Draft matching pubspec;
@@ -186,6 +188,7 @@ ReleaseOptions parseReleaseOptions(List<String> arguments) {
   var issueTitle = '';
   var execute = false;
   var help = false;
+  var maintenance = false;
   String? pendingDraft;
   final labels = <String>[];
   final changesZh = <String>[];
@@ -222,6 +225,10 @@ ReleaseOptions parseReleaseOptions(List<String> arguments) {
       help = true;
       continue;
     }
+    if (argument == '--maintenance') {
+      maintenance = true;
+      continue;
+    }
     final target = valueTargets[argument];
     if (target == null) {
       throw ArgumentError('Unknown option: $argument');
@@ -255,7 +262,17 @@ ReleaseOptions parseReleaseOptions(List<String> arguments) {
   }
   if (issueTitle.isEmpty) throw ArgumentError('--issue-title is required.');
   if (labels.isEmpty) throw ArgumentError('At least one --label is required.');
-  if (changesZh.isEmpty || changesEn.isEmpty) {
+  if (maintenance &&
+      (resolvedBump != VersionBump.patch ||
+          changesZh.isNotEmpty ||
+          changesEn.isNotEmpty ||
+          changeCommitRefs.isNotEmpty ||
+          ignoredCommitRefs.isEmpty)) {
+    throw ArgumentError(
+      '--maintenance requires --bump patch, explicit ignored commits, and no change bullets.',
+    );
+  }
+  if (!maintenance && (changesZh.isEmpty || changesEn.isEmpty)) {
     throw ArgumentError(
       'At least one --change-zh and --change-en are required.',
     );
@@ -462,13 +479,13 @@ String buildReleaseNotes({
 
 ## 主要更新
 
-${changesZh.map((change) => '- $change').join('\n')}
+${changesZh.isEmpty ? '- 本次为维护版本，无用户可感知的功能变化，无需调整现有设置。' : changesZh.map((change) => '- $change').join('\n')}
 
 关联 Issue：$issueReference
 
 ## Key Changes
 
-${changesEn.map((change) => '- $change').join('\n')}
+${changesEn.isEmpty ? '- Maintenance release with no user-visible functionality changes. No settings changes are needed.' : changesEn.map((change) => '- $change').join('\n')}
 
 Related Issue: $issueReference
 ''';
@@ -503,7 +520,7 @@ String buildIssueBody({
 
 | 用户变化 | Commits |
 | --- | --- |
-${mappingRows.join('\n')}
+${mappingRows.isEmpty ? '| 无用户可感知变化；全部提交的排除原因见下文 | — |' : mappingRows.join('\n')}
 
 ## 明确排除的提交
 
@@ -513,8 +530,13 @@ $ignoredRows
 
 - [ ] 当前源码提交的跨平台 CI 通过（含 Flutter 与 MCP 测试）
 - [ ] macOS Draft 资产、签名、公证与更新元数据通过
-- [ ] Play internal 与 TestFlight 真机回归通过
 - [ ] GitHub Release 公开后资产审计通过
+
+## 移动端交付记录
+
+- 按用户指定渠道交付；正式上架不要求先经过测试渠道或真机回归。
+- 分别记录 Google Play 与 App Store 的上传、送审和上架状态，不将上传成功等同于正式上架。
+- 真机回归为建议检查，未执行时如实记录，不作为发布门禁。
 ''';
 }
 
