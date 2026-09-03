@@ -17,6 +17,7 @@ import 'package:leeef_reader/src/data/repositories/library_repository.dart';
 import 'package:leeef_reader/src/domain/reading_location.dart';
 import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
 import 'package:leeef_reader/src/features/reader/txt_layout_paginator.dart';
+import 'package:leeef_reader/src/features/reader/txt_page_layout.dart';
 import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
 import 'package:leeef_reader/src/features/reader/txt_page_snapshot_renderer.dart';
@@ -316,15 +317,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
         : MediaQuery.sizeOf(context);
     final pixelRatio = MediaQuery.devicePixelRatioOf(context);
     final backgroundColor = _hexColor(_preferences.background);
-    final textStyle = TextStyle(
-      color: _hexColor(_preferences.foreground),
-      fontSize: _preferences.fontSize,
-      height: _preferences.lineHeight,
-      fontFamily: _preferences.fontFamily == 'system-ui'
-          ? null
-          : _preferences.fontFamily,
-      letterSpacing: _preferences.letterSpacing,
-    );
+    final textStyle = _pageTextStyle;
     final textDirection = Directionality.of(context);
 
     setState(() {
@@ -340,24 +333,30 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
           boundaryKey: _visiblePageBoundaryKey,
           pixelRatio: pixelRatio,
           fallback: () => renderTxtPageSnapshot(
-            text: pages[_pageIndex].text,
+            text: _displayText(pages[_pageIndex]).text,
             size: size,
             pixelRatio: pixelRatio,
             backgroundColor: backgroundColor,
             textStyle: textStyle,
             textDirection: textDirection,
+            textScaler: MediaQuery.textScalerOf(context),
+            textAlign: _pageTextAlign,
+            padding: _pageLayout.padding,
           ),
         ),
         _captureTxtPage(
           boundaryKey: _snapshotPageBoundaryKey,
           pixelRatio: pixelRatio,
           fallback: () => renderTxtPageSnapshot(
-            text: pages[target].text,
+            text: _displayText(pages[target]).text,
             size: size,
             pixelRatio: pixelRatio,
             backgroundColor: backgroundColor,
             textStyle: textStyle,
             textDirection: textDirection,
+            textScaler: MediaQuery.textScalerOf(context),
+            textAlign: _pageTextAlign,
+            padding: _pageLayout.padding,
           ),
         ),
       ]);
@@ -1539,6 +1538,38 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       ? (_paginatedPages ?? document.pages)
       : document.pages;
 
+  TxtPageLayout get _pageLayout => TxtPageLayout(
+    margin: _preferences.margin,
+    bottomInset: MediaQuery.paddingOf(context).bottom,
+  );
+
+  TextAlign get _pageTextAlign => switch (_preferences.textAlign) {
+    'center' => TextAlign.center,
+    'justify' => TextAlign.justify,
+    'left' => TextAlign.left,
+    _ => TextAlign.start,
+  };
+
+  // Resolve the Material typography here, outside the Scaffold's child tree.
+  // An inheriting style would otherwise gain different leading/strut metrics
+  // only when SelectableText renders, after pagination has already measured it.
+  TextStyle get _pageTextStyle =>
+      Theme.of(context).textTheme.bodyMedium!.copyWith(
+        inherit: false,
+        textBaseline: TextBaseline.alphabetic,
+        color: _preferences.eInkMode
+            ? Colors.black
+            : _hexColor(_preferences.foreground),
+        fontSize: _preferences.fontSize,
+        height: _preferences.lineHeight,
+        fontFamily: _preferences.fontFamily == 'system-ui'
+            ? null
+            : _preferences.fontFamily,
+        fontWeight:
+            FontWeight.values[(_preferences.fontWeight ~/ 100 - 1).clamp(0, 8)],
+        letterSpacing: _preferences.letterSpacing,
+      );
+
   void _ensurePagination(TxtReaderDocument document) {
     if (_preferences.flow != 'paginated') return;
     final renderObject = _bodyKey.currentContext?.findRenderObject();
@@ -1553,18 +1584,15 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                         : 0))
                 .clamp(1, double.infinity),
           );
-    final contentWidth = (bodySize.width - _preferences.margin * 2).clamp(
-      1.0,
-      760.0,
-    );
-    final contentHeight = (bodySize.height - 24 - 120 - 2).clamp(
-      1.0,
-      double.infinity,
-    );
+    final contentSize = _pageLayout.contentSize(bodySize);
     final signature = <Object>[
       identityHashCode(document),
       bodySize.width.toStringAsFixed(2),
       bodySize.height.toStringAsFixed(2),
+      contentSize.height,
+      MediaQuery.textScalerOf(context).scale(_preferences.fontSize),
+      Directionality.of(context),
+      _pageTextStyle,
       _preferences.fontSize,
       _preferences.lineHeight,
       _preferences.margin,
@@ -1586,26 +1614,14 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     final oldPages = _paginatedPages ?? document.pages;
     final oldIndex = _pageIndex.clamp(0, oldPages.length - 1);
     final currentOffset = _pendingPaginationOffset ?? oldPages[oldIndex].start;
-    final foreground = _preferences.eInkMode
-        ? Colors.black
-        : _hexColor(_preferences.foreground);
-    final textStyle = TextStyle(
-      color: foreground,
-      fontSize: _preferences.fontSize,
-      height: _preferences.lineHeight,
-      fontFamily: _preferences.fontFamily == 'system-ui'
-          ? null
-          : _preferences.fontFamily,
-      fontWeight:
-          FontWeight.values[(_preferences.fontWeight ~/ 100 - 1).clamp(0, 8)],
-      letterSpacing: _preferences.letterSpacing,
-    );
     final pages = paginateTxtForLayout(
       text: document.text,
-      maxWidth: contentWidth,
-      maxHeight: contentHeight,
-      style: textStyle,
+      maxWidth: contentSize.width,
+      maxHeight: contentSize.height,
+      style: _pageTextStyle,
       textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      textAlign: _pageTextAlign,
       buildDisplayText: (source) => _buildDisplayText(
         _chineseConverter.convert(source, _preferences.chineseConversion),
       ),
@@ -2023,9 +2039,6 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     final background = _preferences.eInkMode
         ? Colors.white
         : _hexColor(_preferences.background);
-    final foreground = _preferences.eInkMode
-        ? Colors.black
-        : _hexColor(_preferences.foreground);
     final selectedBackground =
         Theme.of(context).brightness == Brightness.dark &&
             _preferences.darkBackgroundImage.isNotEmpty
@@ -2037,54 +2050,28 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     final pageKey = ValueKey(
       interactive ? 'txt-page-$_pageIndex' : 'txt-snapshot-$_snapshotPageIndex',
     );
-    final text = Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 760),
-        child: SelectableText.rich(
-          _ttsTextSpan(_displayText(page).text, interactive: interactive),
-          key: interactive ? const Key('txt-reader-text') : null,
-          onSelectionChanged: interactive ? _onSelectionChanged : null,
-          textAlign: switch (_preferences.textAlign) {
-            'center' => TextAlign.center,
-            'justify' => TextAlign.justify,
-            'left' => TextAlign.left,
-            _ => TextAlign.start,
-          },
-          style: TextStyle(
-            color: foreground,
-            fontSize: _preferences.fontSize,
-            height: _preferences.lineHeight,
-            fontFamily: _preferences.fontFamily == 'system-ui'
-                ? null
-                : _preferences.fontFamily,
-            fontWeight: FontWeight
-                .values[(_preferences.fontWeight ~/ 100 - 1).clamp(0, 8)],
-            letterSpacing: _preferences.letterSpacing,
-          ),
-        ),
-      ),
-    );
-    final padding = EdgeInsets.fromLTRB(
-      _preferences.margin,
-      24,
-      _preferences.margin,
-      120,
+    final text = SelectableText.rich(
+      _ttsTextSpan(_displayText(page).text, interactive: interactive),
+      key: interactive ? const Key('txt-reader-text') : null,
+      onSelectionChanged: interactive ? _onSelectionChanged : null,
+      textAlign: _pageTextAlign,
+      style: _pageTextStyle,
+      textScaler: MediaQuery.textScalerOf(context),
     );
     final content = _preferences.flow == 'scrolled'
         ? SingleChildScrollView(
             key: pageKey,
             primary: false,
             controller: interactive ? _textScrollController : null,
-            padding: padding,
-            child: text,
-          )
-        : ClipRect(
-            key: pageKey,
-            child: Padding(
-              padding: padding,
-              child: Align(alignment: Alignment.topCenter, child: text),
+            padding: _pageLayout.padding,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 760),
+                child: text,
+              ),
             ),
-          );
+          )
+        : TxtPageBody(key: pageKey, layout: _pageLayout, child: text);
     return ColoredBox(
       color: background,
       child: Stack(
@@ -2126,17 +2113,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
             _preferences.chineseConversion,
           );
     final index = sentence == null ? -1 : text.indexOf(sentence);
-    final base = TextStyle(
-      color: _hexColor(_preferences.foreground),
-      fontSize: _preferences.fontSize,
-      height: _preferences.lineHeight,
-      fontFamily: _preferences.fontFamily == 'system-ui'
-          ? null
-          : _preferences.fontFamily,
-      fontWeight:
-          FontWeight.values[(_preferences.fontWeight ~/ 100 - 1).clamp(0, 8)],
-      letterSpacing: _preferences.letterSpacing,
-    );
+    final base = _pageTextStyle;
     if (index < 0 || sentence == null) return TextSpan(text: text, style: base);
     return TextSpan(
       style: base,

@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:leeef_reader/src/features/reader/txt_page_layout.dart';
 
 Future<ui.Image> renderTxtPageSnapshot({
   required String text,
@@ -9,7 +10,9 @@ Future<ui.Image> renderTxtPageSnapshot({
   required Color backgroundColor,
   required TextStyle textStyle,
   required TextDirection textDirection,
-  EdgeInsets padding = const EdgeInsets.fromLTRB(28, 24, 28, 120),
+  EdgeInsets padding = const EdgeInsets.fromLTRB(24, 24, 24, 72),
+  TextScaler textScaler = TextScaler.noScaling,
+  TextAlign textAlign = TextAlign.start,
 }) async {
   if (size.isEmpty || !size.isFinite) {
     throw ArgumentError.value(size, 'size', 'Must be finite and non-empty.');
@@ -21,12 +24,20 @@ Future<ui.Image> renderTxtPageSnapshot({
     ..drawRect(Offset.zero & size, Paint()..color = backgroundColor)
     ..save()
     ..clipRect(Offset.zero & size);
-  final contentWidth = (size.width - padding.horizontal).clamp(1.0, 760.0);
+  final contentWidth =
+      (size.width - padding.horizontal - TxtPageLayout.caretMargin).clamp(
+        1.0,
+        double.infinity,
+      );
   final painter = TextPainter(
     text: TextSpan(text: text, style: textStyle),
     textDirection: textDirection,
+    textScaler: textScaler,
+    textAlign: textAlign,
+    strutStyle: StrutStyle.fromTextStyle(textStyle),
   )..layout(maxWidth: contentWidth);
-  painter.paint(canvas, Offset((size.width - contentWidth) / 2, padding.top));
+  painter.paint(canvas, Offset(padding.left, padding.top));
+  painter.dispose();
   canvas.restore();
   final picture = recorder.endRecording();
   try {

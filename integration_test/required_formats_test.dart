@@ -147,8 +147,8 @@ void main() {
     final fixture = await _Fixture.create();
     addTearDown(fixture.dispose);
     final sourceText = List.generate(
-      6000,
-      (index) => String.fromCharCode(0x4E00 + index % 2000),
+      12000,
+      (index) => String.fromCharCode(0x4E00 + index),
     ).join();
     final source = File('${fixture.root.path}/Continuous TXT.txt');
     await source.writeAsString(sourceText);
@@ -170,8 +170,17 @@ void main() {
 
       final pageRect = tester.getRect(pageFinder);
       final textRect = tester.getRect(find.byKey(const Key('txt-reader-text')));
-      expect(textRect.top, greaterThanOrEqualTo(pageRect.top + 23));
-      expect(textRect.bottom, lessThanOrEqualTo(pageRect.bottom - 119));
+      expect(textRect.top, closeTo(pageRect.top + 24, 1));
+      expect(textRect.width, closeTo(pageRect.width - 48, 1));
+      expect(textRect.bottom, lessThanOrEqualTo(pageRect.bottom - 71));
+      final measured = TextPainter(
+        text: TextSpan(text: visibleText, style: selectable.style),
+        textDirection: TextDirection.ltr,
+        strutStyle: StrutStyle.fromTextStyle(selectable.style!),
+      )..layout(maxWidth: textRect.width - 3);
+      expect(measured.height, closeTo(textRect.height, 1));
+      measured.dispose();
+      expect(textRect.bottom, greaterThan(pageRect.bottom - 110));
       sourceOffset += visibleText.length;
 
       if (pageIndex < 4) {
@@ -183,6 +192,25 @@ void main() {
     await tester.tap(find.byKey(const Key('txt-tap-left-zone')));
     await tester.pump(const Duration(milliseconds: 800));
     expect(find.byKey(const ValueKey('txt-page-3')), findsOneWidget);
+    var anchor = tester
+        .widget<SelectableText>(find.byKey(const Key('txt-reader-text')))
+        .textSpan!
+        .toPlainText()
+        .characters
+        .first;
+    for (final size in [const Size(1920, 960), const Size(700, 800)]) {
+      tester.view.physicalSize = size;
+      await tester.pumpAndSettle();
+      final text = tester
+          .widget<SelectableText>(find.byKey(const Key('txt-reader-text')))
+          .textSpan!
+          .toPlainText();
+      expect(text, contains(anchor));
+      final rect = tester.getRect(find.byKey(const Key('txt-reader-text')));
+      expect(rect.width, closeTo(size.width - 48, 1));
+      expect(rect.top, 80);
+      anchor = text.characters.first;
+    }
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
   });
@@ -229,8 +257,8 @@ void main() {
 
       final pageRect = tester.getRect(pageFinder);
       final textRect = tester.getRect(find.byKey(const Key('txt-reader-text')));
-      expect(textRect.top, greaterThanOrEqualTo(pageRect.top + 23));
-      expect(textRect.bottom, lessThanOrEqualTo(pageRect.bottom - 119));
+      expect(textRect.top, closeTo(pageRect.top + 24, 1));
+      expect(textRect.bottom, lessThanOrEqualTo(pageRect.bottom - 71));
       sourceOffset += visibleText.length;
 
       if (pageIndex < 4) {
