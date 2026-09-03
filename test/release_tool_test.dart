@@ -68,6 +68,61 @@ void main() {
   });
 
   group('version planning', () {
+    test('advances past an explicitly identified pending Draft', () {
+      final next = planNextVersion(
+        current: AppVersion(SemanticVersion.parse('1.1.4'), 11),
+        baseline: AppVersion(SemanticVersion.parse('1.1.3'), 10),
+        bump: VersionBump.patch,
+        pendingDraft: 'v1.1.4',
+      );
+      expect(next.version.toString(), '1.1.5');
+      expect(next.buildNumber, 12);
+    });
+
+    test('rejects unexplained, mismatched, or non-increasing versions', () {
+      for (final entry in [
+        ('1.1.4', 11, null),
+        ('1.1.4', 11, 'v1.1.5'),
+        ('1.1.4', 10, 'v1.1.4'),
+        ('1.1.2', 9, null),
+        ('1.1.3', 10, 'v1.1.3'),
+      ]) {
+        expect(
+          () => planNextVersion(
+            current: AppVersion(SemanticVersion.parse(entry.$1), entry.$2),
+            baseline: AppVersion(SemanticVersion.parse('1.1.3'), 10),
+            bump: VersionBump.patch,
+            pendingDraft: entry.$3,
+          ),
+          throwsStateError,
+        );
+      }
+    });
+
+    test('pending Draft does not narrow commit coverage to its tag', () {
+      expect(
+        () => auditCommitCoverage(
+          commits: const [
+            ReleaseCommit(
+              '1111111111111111',
+              'Fix included in unpublished Draft',
+            ),
+            ReleaseCommit('2222222222222222', 'New fix after Draft'),
+          ],
+          changeCommitRefs: ['2222222'],
+          ignoredCommitRefs: const [],
+        ),
+        throwsStateError,
+      );
+      final source = File('tool/release.dart').readAsStringSync();
+      expect(source, contains(r'$baselineCommit..HEAD'));
+      expect(source, contains("release['isDraft'] != true"));
+      expect(
+        RegExp(r"'merge-base',\s*'--is-ancestor'").hasMatch(source),
+        isTrue,
+      );
+    });
+
     test('bumps SemVer without carrying lower components', () {
       final version = SemanticVersion.parse('1.4.9');
 

@@ -3,7 +3,7 @@ import 'dart:io';
 
 enum VersionBump { patch, minor, major }
 
-final class SemanticVersion {
+final class SemanticVersion implements Comparable<SemanticVersion> {
   const SemanticVersion(this.major, this.minor, this.patch);
 
   factory SemanticVersion.parse(String value) {
@@ -23,6 +23,19 @@ final class SemanticVersion {
   final int major;
   final int minor;
   final int patch;
+
+  @override
+  int compareTo(SemanticVersion other) {
+    for (final pair in [
+      (major, other.major),
+      (minor, other.minor),
+      (patch, other.patch),
+    ]) {
+      final result = pair.$1.compareTo(pair.$2);
+      if (result != 0) return result;
+    }
+    return 0;
+  }
 
   SemanticVersion bump(VersionBump level) => switch (level) {
     VersionBump.major => SemanticVersion(major + 1, 0, 0),
@@ -117,6 +130,7 @@ final class ReleaseOptions {
     required this.repository,
     required this.execute,
     required this.help,
+    this.pendingDraft,
   });
 
   final VersionBump bump;
@@ -129,6 +143,7 @@ final class ReleaseOptions {
   final String repository;
   final bool execute;
   final bool help;
+  final String? pendingDraft;
 }
 
 const releaseUsage = '''Usage:
@@ -160,6 +175,8 @@ Options:
   --ignore-commit <sha:why>   Explicit non-user-facing commit exclusion
   --repository <owner/name>   Default: tianma-if/leeef-reader
   --execute                   Apply the plan; omission means dry run
+  --pending-draft <vX.Y.Z>     Advance beyond an existing Draft matching pubspec;
+                              keep the last public Release as the audit baseline
   --help                      Show this help
 ''';
 
@@ -169,6 +186,7 @@ ReleaseOptions parseReleaseOptions(List<String> arguments) {
   var issueTitle = '';
   var execute = false;
   var help = false;
+  String? pendingDraft;
   final labels = <String>[];
   final changesZh = <String>[];
   final changesEn = <String>[];
@@ -191,6 +209,7 @@ ReleaseOptions parseReleaseOptions(List<String> arguments) {
     '--change-en': changesEn.add,
     '--change-commit': changeCommitRefs.add,
     '--ignore-commit': ignoredCommitRefs.add,
+    '--pending-draft': (value) => pendingDraft = value,
   };
 
   for (var index = 0; index < arguments.length; index += 1) {
@@ -226,6 +245,7 @@ ReleaseOptions parseReleaseOptions(List<String> arguments) {
       repository: repository,
       execute: execute,
       help: true,
+      pendingDraft: pendingDraft,
     );
   }
   final resolvedBump = bump;
@@ -261,6 +281,7 @@ ReleaseOptions parseReleaseOptions(List<String> arguments) {
     repository: repository,
     execute: execute,
     help: false,
+    pendingDraft: pendingDraft,
   );
 }
 
@@ -402,6 +423,34 @@ String updatePubspecVersion(String source, AppVersion next) {
     pattern,
     'version: ${next.version}+${next.buildNumber}',
   );
+}
+
+AppVersion planNextVersion({
+  required AppVersion current,
+  required AppVersion baseline,
+  required VersionBump bump,
+  String? pendingDraft,
+}) {
+  final order = current.version.compareTo(baseline.version);
+  if (order < 0 || current.buildNumber < baseline.buildNumber) {
+    throw StateError(
+      'Current version/build must not precede the public baseline.',
+    );
+  }
+  if (order > 0 && pendingDraft != 'v${current.version}') {
+    throw StateError(
+      'pubspec is ahead of the public baseline; explicitly name its existing Draft with --pending-draft v${current.version}.',
+    );
+  }
+  if (pendingDraft != null &&
+      (order <= 0 ||
+          pendingDraft != 'v${current.version}' ||
+          current.buildNumber <= baseline.buildNumber)) {
+    throw StateError(
+      'Pending Draft must match pubspec and be newer than the public baseline in both version and build number.',
+    );
+  }
+  return AppVersion(current.version.bump(bump), current.buildNumber + 1);
 }
 
 String buildReleaseNotes({
@@ -647,20 +696,83 @@ Future<void> runRelease(List<String> arguments) async {
   ], cwd: repoRoot);
 
   final current = AppVersion.fromPubspec(await pubspecFile.readAsString());
-  final baseline = SemanticVersion.parse(previousTag.substring(1));
-  if (current.version.toString() != baseline.toString()) {
-    throw StateError(
-      'pubspec version ${current.version} must match baseline $previousTag before planning.',
+  final baselineCommit = await _output('git', [
+    'rev-parse',
+    'FETCH_HEAD^{commit}',
+  ], cwd: repoRoot);
+  final baseline = AppVersion.fromPubspec(
+    await _output('git', [
+      'show',
+      '$baselineCommit:pubspec.yaml',
+    ], cwd: repoRoot),
+  );
+  final next = planNextVersion(
+    current: current,
+    baseline: baseline,
+    bump: options.bump,
+    pendingDraft: options.pendingDraft,
+  );
+  if (options.pendingDraft case final pendingDraft?) {
+    final release =
+        jsonDecode(
+              await _output('gh', [
+                'release',
+                'view',
+                pendingDraft,
+                '--repo',
+                options.repository,
+                '--json',
+                'tagName,isDraft',
+              ], cwd: repoRoot),
+            )
+            as Map<String, dynamic>;
+    if (release['tagName'] != pendingDraft || release['isDraft'] != true) {
+      throw StateError(
+        '--pending-draft must identify an existing unpublished Draft.',
+      );
+    }
+    await _run('git', [
+      'fetch',
+      '--no-tags',
+      'origin',
+      'refs/tags/$pendingDraft',
+    ], cwd: repoRoot);
+    final draftCommit = await _output('git', [
+      'rev-parse',
+      'FETCH_HEAD^{commit}',
+    ], cwd: repoRoot);
+    await _run('git', [
+      'merge-base',
+      '--is-ancestor',
+      baselineCommit,
+      draftCommit,
+    ], cwd: repoRoot);
+    await _run('git', [
+      'merge-base',
+      '--is-ancestor',
+      draftCommit,
+      'HEAD',
+    ], cwd: repoRoot);
+    final tagged = AppVersion.fromPubspec(
+      await _output('git', [
+        'show',
+        '$draftCommit:pubspec.yaml',
+      ], cwd: repoRoot),
+    );
+    if (tagged.version.toString() != current.version.toString() ||
+        tagged.buildNumber != current.buildNumber) {
+      throw StateError(
+        'Pending Draft tag version/build must match current pubspec.',
+      );
+    }
+    stdout.writeln(
+      'Keeping $pendingDraft unchanged; auditing from public baseline $previousTag.',
     );
   }
-  final next = AppVersion(
-    current.version.bump(options.bump),
-    current.buildNumber + 1,
-  );
   final targetTag = 'v${next.version}';
   final log = await _output('git', [
     'log',
-    'FETCH_HEAD..HEAD',
+    '$baselineCommit..HEAD',
     '--format=%H%x1f%s%x1e',
   ], cwd: repoRoot);
   final commits = parseGitLog(log);

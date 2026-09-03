@@ -33,6 +33,11 @@ dart run tool/release.dart \
 
 确认 dry run 输出的版本、构建号、提交覆盖和说明后，使用完全相同的参数并增加 `--execute`。执行模式会确认 `main` 与 `origin/main` 一致，并复用该提交已经通过的跨平台 CI（不存在时只补跑一次）；随后创建跟踪 Issue、更新并提交 `pubspec.yaml`、推送正式 Tag、创建 Draft Release，并触发一次 macOS 资产工作流。仅修改版本号的发版提交带 `[skip ci]`，不会把同一套门禁再跑一遍。它不会公开 Release，也不会批准 Google Play production 或 App Store 审核。
 
+若 `pubspec.yaml` 已因未公开的 Draft 递增，显式添加 `--pending-draft vX.Y.Z`。
+工具会验证该 Draft 的 Tag、构建号与当前版本一致，并且位于上一正式 Release 与当前提交之间；
+新版本从该 Draft 继续递增，但变更覆盖仍从上一正式 Release 开始，不能漏掉未公开版本中的用户变化。
+旧 Draft、Tag 和资产保持不变。该选项不会跳过 CI、真机回归或公开前的资产审计。
+
 发布规划器自身的回归测试：
 
 ```bash
