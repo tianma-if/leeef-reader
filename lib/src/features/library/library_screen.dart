@@ -4296,22 +4296,23 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
             child: Text(strings.text('检测')),
           ),
         ),
-        ListTile(
-          leading: const Icon(Icons.record_voice_over_outlined),
-          title: Text(strings.text('TTS 朗读服务')),
-          subtitle: Text(
-            strings.text(switch (_ttsService) {
-              TtsService.system => '系统 TTS',
-              TtsService.openAi => 'OpenAI TTS',
-              TtsService.azure => 'Azure Speech',
-              TtsService.alibaba => '阿里云智能语音',
-            }),
+        if (!Platform.isIOS)
+          ListTile(
+            leading: const Icon(Icons.record_voice_over_outlined),
+            title: Text(strings.text('TTS 朗读服务')),
+            subtitle: Text(
+              strings.text(switch (_ttsService) {
+                TtsService.system => '系统 TTS',
+                TtsService.openAi => 'OpenAI TTS',
+                TtsService.azure => 'Azure Speech',
+                TtsService.alibaba => '阿里云智能语音',
+              }),
+            ),
+            trailing: TextButton(
+              onPressed: _busy ? null : _configureTts,
+              child: Text(strings.text('配置')),
+            ),
           ),
-          trailing: TextButton(
-            onPressed: _busy ? null : _configureTts,
-            child: Text(strings.text('配置')),
-          ),
-        ),
         const Divider(),
         ListTile(
           leading: const Icon(Icons.archive_outlined),

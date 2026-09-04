@@ -44,7 +44,7 @@ Future<void> _initializeForegroundServices() => runStartupInitializers(
     StartupInitializer('network proxy', AppProxy.initialize),
     StartupInitializer('application log', AppLog.initialize),
     StartupInitializer('notifications', AppNotifications.initialize),
-    if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS)
+    if (Platform.isAndroid || Platform.isMacOS)
       StartupInitializer('media controls', TtsMediaControlBridge.initialize),
     StartupInitializer('background sync', BackgroundSyncScheduler.initialize),
   ],

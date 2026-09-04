@@ -973,11 +973,12 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
                       : null,
                   icon: const Icon(Icons.arrow_forward),
                 ),
-                IconButton(
-                  tooltip: strings.text('朗读'),
-                  onPressed: _pageCount < 1 ? null : _showTts,
-                  icon: const Icon(Icons.volume_up_outlined),
-                ),
+                if (!Platform.isIOS)
+                  IconButton(
+                    tooltip: strings.text('朗读'),
+                    onPressed: _pageCount < 1 ? null : _showTts,
+                    icon: const Icon(Icons.volume_up_outlined),
+                  ),
                 PopupMenuButton<String>(
                   tooltip: strings.text('AI 阅读助手'),
                   icon: const Icon(Icons.auto_awesome_outlined),
@@ -1219,11 +1220,12 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
                               ),
                             ],
                           ),
-                          IconButton(
-                            tooltip: strings.text('从选中内容朗读'),
-                            onPressed: _showTts,
-                            icon: const Icon(Icons.volume_up_outlined),
-                          ),
+                          if (!Platform.isIOS)
+                            IconButton(
+                              tooltip: strings.text('从选中内容朗读'),
+                              onPressed: _showTts,
+                              icon: const Icon(Icons.volume_up_outlined),
+                            ),
                           IconButton(
                             tooltip: strings.text('AI 上下文翻译'),
                             onPressed: _translateSelection,
