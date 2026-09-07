@@ -75,8 +75,10 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   final Map<String, TxtDisplayText> _displayTextCache = {};
   List<TxtPage>? _paginatedPages;
   String? _paginationSignature;
+  String? _requestedPaginationSignature;
   Size? _paginationBodySize;
   bool _paginationRefreshScheduled = false;
+  int _paginationGeneration = 0;
   int? _pendingPaginationOffset;
   bool _controlsVisible = true;
   DateTime? _lastWheelTurn;
@@ -124,6 +126,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
 
   @override
   void dispose() {
+    _paginationGeneration++;
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     _progressTimer?.cancel();
     _clockTimer?.cancel();
@@ -220,10 +223,11 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       final preferences = await ReaderPreferences.load();
       await _loadImportedFont(preferences);
       await _applyReadingState(preferences);
-      final document = TxtReaderDocument.decode(
+      final document = await decodeTxtDocumentInBackground(
         await File(path).readAsBytes(),
         chapterPattern: preferences.txtChapterPattern,
       );
+      if (!mounted) return;
       final repository = await ref.read(libraryRepositoryProvider.future);
       _repository = repository;
       final progress = await repository.getReadingProgress(widget.book.id);
@@ -1294,26 +1298,27 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     await result.save();
     await _loadImportedFont(result);
     await _applyReadingState(result);
-    if (mounted) {
-      final document = _document;
-      final offset = document == null
-          ? 0
-          : _pagesFor(document)[_pageIndex].start;
-      setState(() {
-        _preferences = result;
-        _convertedPageCache.clear();
-        _displayTextCache.clear();
-        if (document != null && patternChanged) {
-          _document = TxtReaderDocument.fromText(
+    if (!mounted) return;
+    final document = _document;
+    final offset = document == null ? 0 : _pagesFor(document)[_pageIndex].start;
+    final rebuiltDocument = document != null && patternChanged
+        ? await parseTxtDocumentInBackground(
             document.text,
             chapterPattern: result.txtChapterPattern,
-          );
-          _pendingPaginationOffset = offset;
-          _pageIndex = _document!.pageIndexForOffset(offset);
-          _history.reset(_pageIndex);
-        }
-      });
-    }
+          )
+        : null;
+    if (!mounted) return;
+    setState(() {
+      _preferences = result;
+      _convertedPageCache.clear();
+      _displayTextCache.clear();
+      if (rebuiltDocument != null) {
+        _document = rebuiltDocument;
+        _pendingPaginationOffset = offset;
+        _pageIndex = rebuiltDocument.pageIndexForOffset(offset);
+        _history.reset(_pageIndex);
+      }
+    });
   }
 
   Future<void> _applyReadingState(ReaderPreferences preferences) async {
@@ -1346,11 +1351,20 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
         return _buildDisplayText(_pageText(page));
       });
 
-  TxtDisplayText _buildDisplayText(String source) {
+  TxtDisplayText _buildDisplayText(String source) =>
+      _buildDisplayTextWithSettings(
+        source,
+        indent: _preferences.textIndent.round(),
+        extraBreaks: _preferences.paragraphSpacing.round(),
+      );
+
+  static TxtDisplayText _buildDisplayTextWithSettings(
+    String source, {
+    required int indent,
+    required int extraBreaks,
+  }) {
     final output = StringBuffer();
     final offsets = <int>[0];
-    final indent = _preferences.textIndent.round();
-    final extraBreaks = _preferences.paragraphSpacing.round();
     var sourceOffset = 0;
     for (final line in source.split('\n')) {
       if (line.trim().isNotEmpty) {
@@ -1611,29 +1625,98 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       return;
     }
 
+    if (_requestedPaginationSignature == signature) return;
+    _requestedPaginationSignature = signature;
+    final generation = ++_paginationGeneration;
     final oldPages = _paginatedPages ?? document.pages;
     final oldIndex = _pageIndex.clamp(0, oldPages.length - 1);
     final currentOffset = _pendingPaginationOffset ?? oldPages[oldIndex].start;
-    final pages = paginateTxtForLayout(
-      text: document.text,
-      maxWidth: contentSize.width,
-      maxHeight: contentSize.height,
-      style: _pageTextStyle,
-      textDirection: Directionality.of(context),
-      textScaler: MediaQuery.textScalerOf(context),
-      textAlign: _pageTextAlign,
-      buildDisplayText: (source) => _buildDisplayText(
-        _chineseConverter.convert(source, _preferences.chineseConversion),
-      ),
-    );
-    _paginatedPages = pages;
-    _paginationSignature = signature;
-    _paginationBodySize = bodySize;
-    _displayTextCache.clear();
-    _convertedPageCache.clear();
-    _pageIndex = _pageIndexForOffset(pages, currentOffset);
-    _pendingPaginationOffset = null;
-    _history.reset(_pageIndex);
+    final style = _pageTextStyle;
+    final textDirection = Directionality.of(context);
+    final textScaler = MediaQuery.textScalerOf(context);
+    final textAlign = _pageTextAlign;
+    final conversion = _preferences.chineseConversion;
+    final indent = _preferences.textIndent.round();
+    final extraBreaks = _preferences.paragraphSpacing.round();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || generation != _paginationGeneration) return;
+      unawaited(
+        _paginateForLayout(
+          document: document,
+          signature: signature,
+          generation: generation,
+          bodySize: bodySize,
+          contentSize: contentSize,
+          currentOffset: currentOffset,
+          style: style,
+          textDirection: textDirection,
+          textScaler: textScaler,
+          textAlign: textAlign,
+          conversion: conversion,
+          indent: indent,
+          extraBreaks: extraBreaks,
+        ),
+      );
+    });
+  }
+
+  Future<void> _paginateForLayout({
+    required TxtReaderDocument document,
+    required String signature,
+    required int generation,
+    required Size bodySize,
+    required Size contentSize,
+    required int currentOffset,
+    required TextStyle style,
+    required TextDirection textDirection,
+    required TextScaler textScaler,
+    required TextAlign textAlign,
+    required String conversion,
+    required int indent,
+    required int extraBreaks,
+  }) async {
+    List<TxtPage>? pages;
+    try {
+      pages = await paginateTxtForLayoutCooperatively(
+        text: document.text,
+        maxWidth: contentSize.width,
+        maxHeight: contentSize.height,
+        style: style,
+        textDirection: textDirection,
+        textScaler: textScaler,
+        textAlign: textAlign,
+        isCancelled: () => !mounted || generation != _paginationGeneration,
+        buildDisplayText: (source) => _buildDisplayTextWithSettings(
+          _chineseConverter.convert(source, conversion),
+          indent: indent,
+          extraBreaks: extraBreaks,
+        ),
+      );
+    } on Object {
+      if (mounted && generation == _paginationGeneration) {
+        setState(() {
+          _paginationSignature = signature;
+          _requestedPaginationSignature = null;
+          _paginationBodySize = bodySize;
+        });
+      }
+      return;
+    }
+    if (!mounted || generation != _paginationGeneration || pages == null) {
+      return;
+    }
+    final completedPages = pages;
+    setState(() {
+      _paginatedPages = completedPages;
+      _paginationSignature = signature;
+      _requestedPaginationSignature = null;
+      _paginationBodySize = bodySize;
+      _displayTextCache.clear();
+      _convertedPageCache.clear();
+      _pageIndex = _pageIndexForOffset(completedPages, currentOffset);
+      _pendingPaginationOffset = null;
+      _history.reset(_pageIndex);
+    });
     _schedulePaginationSizeCheck();
   }
 

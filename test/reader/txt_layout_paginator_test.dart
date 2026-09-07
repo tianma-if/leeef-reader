@@ -3,6 +3,27 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:leeef_reader/src/features/reader/txt_layout_paginator.dart';
 
 void main() {
+  test('cooperative pagination yields to UI work between batches', () async {
+    final source = '长篇小说正文，用于检查分页期间界面仍然响应。' * 5000;
+    var uiWorkRan = false;
+    final pagesFuture = paginateTxtForLayoutCooperatively(
+      text: source,
+      maxWidth: 640,
+      maxHeight: 420,
+      style: const TextStyle(fontSize: 18, height: 1.65),
+      textDirection: TextDirection.ltr,
+      pagesPerBatch: 1,
+      buildDisplayText: _identityDisplay,
+    );
+    Future<void>.delayed(Duration.zero, () => uiWorkRan = true);
+
+    final pages = await pagesFuture;
+
+    expect(uiWorkRan, isTrue);
+    expect(pages, isNotNull);
+    expect(pages!.map((page) => page.text).join(), source);
+  });
+
   test('long novels are measured in bounded page-sized slices', () {
     final source = '长篇小说正文，用于检查分页性能。' * 62500;
     var largestSlice = 0;

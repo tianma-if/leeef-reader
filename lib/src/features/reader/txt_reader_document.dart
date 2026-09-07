@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:charset/charset.dart' as charset;
@@ -173,6 +174,30 @@ class TxtReaderDocument {
     }
   }
 }
+
+Future<TxtReaderDocument> decodeTxtDocumentInBackground(
+  Uint8List bytes, {
+  int pageLength = 1800,
+  String chapterPattern = '',
+}) => Isolate.run(
+  () => TxtReaderDocument.decode(
+    bytes,
+    pageLength: pageLength,
+    chapterPattern: chapterPattern,
+  ),
+);
+
+Future<TxtReaderDocument> parseTxtDocumentInBackground(
+  String text, {
+  int pageLength = 1800,
+  String chapterPattern = '',
+}) => Isolate.run(
+  () => TxtReaderDocument.fromText(
+    text,
+    pageLength: pageLength,
+    chapterPattern: chapterPattern,
+  ),
+);
 
 int parseTxtLocator(String? locator) {
   if (locator == null || !locator.startsWith('txt:')) return 0;

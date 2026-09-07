@@ -6,6 +6,35 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
 
 void main() {
+  test('large TXT decoding can run outside the UI isolate', () async {
+    final source = '第一章 开始\n${'正文内容。' * 20000}';
+
+    final document = await decodeTxtDocumentInBackground(
+      Uint8List.fromList(utf8.encode(source)),
+    );
+
+    expect(document.text, source);
+    expect(document.chapters.single.title, '第一章 开始');
+    expect(document.pages.map((page) => page.text).join(), source);
+  });
+
+  test(
+    'chapter-rule changes can rebuild a TXT outside the UI isolate',
+    () async {
+      const source = 'Part 1\nOpening\nPart 2\nEnding';
+
+      final document = await parseTxtDocumentInBackground(
+        source,
+        chapterPattern: r'^Part \d+$',
+      );
+
+      expect(document.chapters.map((chapter) => chapter.title), [
+        'Part 1',
+        'Part 2',
+      ]);
+    },
+  );
+
   test('custom chapter regex augments built-in heading detection', () {
     final document = TxtReaderDocument.fromText(
       'Part 1\nOpening\nPart 2\nEnding',
