@@ -36,6 +36,7 @@ async function check({ source = validSource, steps = requiredSteps, runId = '123
 
 test('allows the exact official signed and checked artifact', async () => {
   await check();
+  await check({ source: { ...validSource, event: 'release' } });
 });
 
 test('rejects wrong provenance and incomplete artifact gates', async () => {
@@ -55,9 +56,18 @@ test('rejects wrong provenance and incomplete artifact gates', async () => {
 
 test('review retention is opt-in and reused AABs skip signing/building', () => {
   assert.match(workflow, /changes_not_sent_for_review:[\s\S]*?default: false/);
-  assert.match(workflow, /changesNotSentForReview: \$\{\{ inputs.changes_not_sent_for_review \}\}/);
+  assert.match(workflow, /changesNotSentForReview: \$\{\{ env.CHANGES_NOT_SENT_FOR_REVIEW \}\}/);
   for (const name of ['Restore upload keystore', ...requiredSteps]) {
-    assert(workflow.includes(`- name: ${name}\n        if: inputs.artifact_run_id == ''`));
+    assert(workflow.includes(`- name: ${name}\n        if: env.REUSE_ARTIFACT_RUN_ID == ''`));
   }
-  assert.match(workflow, /if: github.repository == 'tianma-if\/leeef-reader'/);
+  assert.match(workflow, /github.repository == 'tianma-if\/leeef-reader'/);
+});
+
+test('a stable published release automatically targets Play production', () => {
+  assert.match(workflow, /release:\n    types: \[published\]/);
+  assert.match(workflow, /PLAY_TRACK: \$\{\{ github.event_name == 'release' && 'production'/);
+  assert.match(workflow, /PLAY_RELEASE_STATUS: \$\{\{ github.event_name == 'release' && 'completed'/);
+  assert.match(workflow, /ref: \$\{\{ github.event_name == 'release' && github.event.release.tag_name/);
+  assert.match(workflow, /if: github.event_name == 'release'\n        run: \|/);
+  assert.match(workflow, /github.event.release.prerelease == false/);
 });

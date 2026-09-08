@@ -28,6 +28,8 @@ on:
         required: true
         default: false
         type: boolean
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -39,20 +41,38 @@ concurrency:
 
 jobs:
   publish:
-    if: github.repository == 'tianma-if/leeef-reader'
+    if: >-
+      github.repository == 'tianma-if/leeef-reader' &&
+      (github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: google-play
+    env:
+      PLAY_TRACK: ${{ github.event_name == 'release' && 'production' || inputs.track }}
+      PLAY_RELEASE_STATUS: ${{ github.event_name == 'release' && 'completed' || inputs.release_status }}
+      REUSE_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+      RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
+      CHANGES_NOT_SENT_FOR_REVIEW: ${{ github.event_name == 'workflow_dispatch' && inputs.changes_not_sent_for_review || false }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+      - name: Validate published release and app version
+        if: github.event_name == 'release'
+        run: |
+          if ! printf '%s' "$RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Published Google Play releases require a stable vX.Y.Z tag"
+            exit 1
+          fi
+          app_version="$(sed -nE 's/^version: ([0-9]+\.[0-9]+\.[0-9]+)\+[0-9]+$/\1/p' pubspec.yaml)"
+          test "v$app_version" = "$RELEASE_TAG"
       - name: Test Play artifact reuse guard
         run: node --test test/google_play_retry.test.mjs
       - name: Validate reusable signed AAB source
-        if: inputs.artifact_run_id != ''
+        if: env.REUSE_ARTIFACT_RUN_ID != ''
         uses: actions/github-script@v7
         env:
-          SOURCE_RUN_ID: ${{ inputs.artifact_run_id }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_RUN_ID: ${{ env.REUSE_ARTIFACT_RUN_ID }}
         with:
           script: |
             const runId = process.env.SOURCE_RUN_ID;
@@ -68,7 +88,7 @@ jobs:
             });
             if (source.head_repository.full_name !== `${context.repo.owner}/${context.repo.repo}` ||
                 source.path !== '.github/workflows/google-play.yml' ||
-                source.event !== 'workflow_dispatch' || source.status !== 'completed' ||
+                !['workflow_dispatch', 'release'].includes(source.event) || source.status !== 'completed' ||
                 source.head_sha !== commit.sha) {
               throw new Error('Artifact source must be a completed official Play run for the exact release tag.');
             }
@@ -83,22 +103,22 @@ jobs:
             }
             core.info(`Reusing signed AAB for ${tag}, source ${source.head_sha}, run ${runId}`);
       - name: Download verified signed AAB
-        if: inputs.artifact_run_id != ''
+        if: env.REUSE_ARTIFACT_RUN_ID != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_RUN_ID: ${{ inputs.artifact_run_id }}
+          SOURCE_RUN_ID: ${{ env.REUSE_ARTIFACT_RUN_ID }}
         run: |
           gh run download "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
             --name leeef-reader-android-aab --dir build/app/outputs/bundle/release
           test -s build/app/outputs/bundle/release/app-release.aab
       - uses: subosito/flutter-action@v2
-        if: inputs.artifact_run_id == ''
+        if: env.REUSE_ARTIFACT_RUN_ID == ''
         with:
           flutter-version: 3.47.1
           channel: stable
           cache: true
       - name: Restore upload keystore
-        if: inputs.artifact_run_id == ''
+        if: env.REUSE_ARTIFACT_RUN_ID == ''
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -115,16 +135,16 @@ jobs:
             echo "keyPassword=$ANDROID_KEY_PASSWORD"
           } > android/key.properties
       - run: flutter pub get
-        if: inputs.artifact_run_id == ''
+        if: env.REUSE_ARTIFACT_RUN_ID == ''
       - run: flutter analyze
-        if: inputs.artifact_run_id == ''
+        if: env.REUSE_ARTIFACT_RUN_ID == ''
       - run: flutter test
-        if: inputs.artifact_run_id == ''
+        if: env.REUSE_ARTIFACT_RUN_ID == ''
       - name: Build signed Android App Bundle
-        if: inputs.artifact_run_id == ''
+        if: env.REUSE_ARTIFACT_RUN_ID == ''
         run: flutter build appbundle --release
       - name: Verify Play build cannot self-install APKs
-        if: inputs.artifact_run_id == ''
+        if: env.REUSE_ARTIFACT_RUN_ID == ''
         run: |
           manifest="$(find build/app/intermediates/packaged_manifests/release -name AndroidManifest.xml -print -quit)"
           test -n "$manifest"
@@ -133,7 +153,7 @@ jobs:
             exit 1
           fi
       - name: Upload build artifact
-        if: inputs.artifact_run_id == ''
+        if: env.REUSE_ARTIFACT_RUN_ID == ''
         uses: actions/upload-artifact@v7
         with:
           name: leeef-reader-android-aab
@@ -145,9 +165,9 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: dev.leeef.leeef_reader
           releaseFiles: build/app/outputs/bundle/release/app-release.aab
-          tracks: ${{ inputs.track }}
-          status: ${{ inputs.release_status }}
-          changesNotSentForReview: ${{ inputs.changes_not_sent_for_review }}
+          tracks: ${{ env.PLAY_TRACK }}
+          status: ${{ env.PLAY_RELEASE_STATUS }}
+          changesNotSentForReview: ${{ env.CHANGES_NOT_SENT_FOR_REVIEW }}
       - name: Remove signing material
         if: always()
         run: rm -f android/key.properties "$RUNNER_TEMP/leeef-upload.jks"

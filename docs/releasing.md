@@ -1,6 +1,6 @@
 # 商店与 macOS 发布
 
-Leeef Reader 使用三个相互独立的手动 GitHub Actions 工作流。首次发布前，应先在 Apple Developer、App Store Connect 和 Google Play Console 创建应用；已登记的标识不可随意更换。仓库级发布约束见 [`AGENTS.md`](../AGENTS.md)，本页说明实际操作。
+Leeef Reader 使用三个 GitHub Actions 发布工作流。首次发布前，应先在 Apple Developer、App Store Connect 和 Google Play Console 创建应用；已登记的标识不可随意更换。仓库级发布约束见 [`AGENTS.md`](../AGENTS.md)，本页说明实际操作。
 
 ## 正式 Release 规则
 
@@ -63,7 +63,7 @@ Apple Team ID 当前为 `9KA3NM38B6`，App Group 为 `group.dev.leeef.leeefReade
 - `ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。
 - `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`：有对应应用发布权限的服务账号 JSON。
 
-首次 AAB 通常需在 Play Console 手工创建应用并上传；随后工作流才能通过 API 更新轨道。正式上架选择 `production` + `completed`；仅在需要测试或保留草稿时选择 `internal` + `draft`，不强制先走测试轨道。工作流默认值不代表用户要求正式上架时的交付目标。每个新构建必须递增 `pubspec.yaml` 中 `version` 的 build number（`+1` 部分）；重试或提升同一已上传构建不需要重新构建或递增版本。Play App Signing 与仓库外保存的 upload key 应同时启用。
+首次 AAB 通常需在 Play Console 手工创建应用并上传；随后工作流才能通过 API 更新轨道。官方仓库公开稳定 GitHub Release 时会自动从该 Release Tag 构建签名 AAB，并以 `production` + `completed` 提交 Google Play；Draft 和 Prerelease 不会触发正式上架。手动运行工作流时仍可选择其他轨道与状态，例如仅在需要测试或保留草稿时使用 `internal` + `draft`，不强制先走测试轨道。每个新构建必须递增 `pubspec.yaml` 中 `version` 的 build number（`+1` 部分）；重试或提升同一已上传构建不需要重新构建或递增版本。Play App Signing 与仓库外保存的 upload key 应同时启用。
 
 `changes_not_sent_for_review` 默认关闭；只有 Play 明确要求人工送审时才开启。若签名 AAB 已成功构建并保留为 Actions artifact，但商店提交失败，可在最新工作流上设置 `artifact_run_id` 和 `release_tag` 重试上传：工作流会校验原始运行来自官方仓库、对应同一 Tag 提交，且签名构建、权限检查和资产保存均成功，然后复用该 AAB，不重编译、不移动 Tag。复用来源仅接受原始构建工作流，不接受仅上传的重试运行。
 
@@ -133,6 +133,6 @@ gh secret set MACOS_SPARKLE_PRIVATE_KEY \
 2. 显式选择 SemVer 级别，更新 `pubspec.yaml` 的 `version: X.Y.Z+N`；`N` 必须严格递增。
 3. 等待当前源码提交的跨平台 CI 全部通过；该工作流统一执行 Flutter 分析与测试、MCP `go test ./...` 以及 Android、iOS、macOS、Windows 构建。发布规划器会直接复用这一结果，不重复执行同一套门禁。
 4. 创建 `vX.Y.Z` Draft Release，使用同一 Tag 手动运行 `Build macOS DMG`，确认 DMG、ZIP、`appcast.xml` 已上传且工作流成功。
-5. 按用户要求发布 Google Play 目标轨道或提交 App Store 审核，无需先经过测试渠道。建议检查真机导入、阅读、分享导入、后台音频、同步和 Android 更新流程；如未执行，如实记录，不阻塞正式上架或送审，也不得将其标记为通过。
+5. 如用户要求，提交 App Store 审核；Google Play production 将在公开稳定 Release 时自动触发，无需先经过测试渠道。建议检查真机导入、阅读、分享导入、后台音频、同步和 Android 更新流程；如未执行，如实记录，不阻塞正式上架或送审，也不得将其标记为通过。
 6. 在 Intel 与 Apple Silicon Mac 上验证 DMG 可挂载、拖入 Applications，并运行 `spctl --assess --type execute --verbose "Leeef Reader.app"`；从前一正式版本启动应用，确认新版 ZIP 静默下载后出现“重启以更新”，重启后版本号已更新。
-7. 公开 GitHub Release 并确认发布后资产审计通过。移动端商店交付独立执行，不以 GitHub Release 公开为前提；分别核验生产轨道、送审和正式上架状态，不将上传成功等同于上架成功。
+7. 公开 GitHub Release，并确认发布后 macOS 资产审计与自动触发的 Google Play production 工作流通过。iOS 商店交付仍独立执行；分别核验生产轨道、送审和正式上架状态，不将上传成功等同于上架成功。
