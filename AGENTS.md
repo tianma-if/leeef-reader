@@ -2,6 +2,10 @@
 
 本文件约束参与 Leeef Reader 开发与发布的 AI 代理和协作者。技术栈、产品范围与平台状态优先参考 `README.md`，具体凭据和操作步骤参考 `docs/releasing.md`。
 
+## Android 调测规则
+
+- Android 端的调试、测试和回归只允许使用通过 USB 连接的真机。禁止创建、启动或使用 Android 模拟器（包括 AVD）进行任何调测，也不得在未连接 USB 真机时回退到模拟器；此时应如实说明真机不可用并跳过相关调测。
+
 ## GitHub Actions 与 Release 规则
 
 1. **Fork 工作流边界**：仅官方仓库需要的签名、商店交付、GitHub Release 资产上传和发布审计 Job，必须使用 `github.repository == 'tianma-if/leeef-reader'` 的 Job 级门禁，避免下游 Fork 分配 Runner 或尝试访问官方 Environment。
