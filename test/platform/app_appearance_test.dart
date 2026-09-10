@@ -12,12 +12,18 @@ void main() {
     expect(english.text('阶段汇总'), 'Period summary');
     expect(english.text('自动同步'), 'Automatic sync');
     expect(english.text('配置 WebDAV'), 'Configure WebDAV');
+    expect(
+      english.text('在电脑上配置后会自动同步到此设备'),
+      'Configure on a computer; it will sync to this device',
+    );
+    expect(english.text('已从电脑同步'), 'Synced from a computer');
     expect(english.failure('读取书库', 'offline'), 'Load library failed: offline');
     expect(english.deleteExcerpts(3), 'Delete 3 excerpts?');
     expect(japanese.settings, '設定');
     expect(japanese.text('AI 阅读助手'), 'AI 読書アシスタント');
     expect(japanese.text('界面语言'), '表示言語');
     expect(japanese.text('同步方式'), '同期方法');
+    expect(japanese.text('已从电脑同步'), 'パソコンから同期済み');
     expect(japanese.backupCompleted(2, 4), '2 冊の本と 4 個のファイルをバックアップしました');
   });
 

@@ -512,6 +512,8 @@ class AppStrings {
     '未启用': 'Disabled',
     '配置': 'Configure',
     '尚未配置': 'Not configured',
+    '在电脑上配置后会自动同步到此设备': 'Configure on a computer; it will sync to this device',
+    '已从电脑同步': 'Synced from a computer',
     '对话查询书库、总结、回顾、分析和生成思维导图':
         'Chat with your library, summarize, recap, analyze, and create mind maps',
     'AI Provider、Prompt 与 Tools': 'AI provider, prompts, and tools',
@@ -1107,6 +1109,8 @@ class AppStrings {
     '未启用': '無効',
     '配置': '設定',
     '尚未配置': '未設定',
+    '在电脑上配置后会自动同步到此设备': 'パソコンで設定すると、このデバイスに自動同期されます',
+    '已从电脑同步': 'パソコンから同期済み',
     '对话查询书库、总结、回顾、分析和生成思维导图': 'ライブラリと対話し、要約・振り返り・分析・マインドマップ作成',
     'AI Provider、Prompt 与 Tools': 'AI プロバイダー、プロンプト、ツール',
     'Claude/Gemini 原生协议、推理强度、助手 Prompt 和上下文工具开关':

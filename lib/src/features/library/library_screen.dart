@@ -32,6 +32,7 @@ import 'package:leeef_reader/src/sync/trusted/trusted_sync_service.dart';
 import 'package:leeef_reader/src/sync/webdav_sync_backend.dart';
 import 'package:leeef_reader/src/tts/configured_tts_engine.dart';
 import 'package:leeef_reader/src/platform/app_appearance.dart';
+import 'package:leeef_reader/src/platform/external_service_configuration.dart';
 import 'package:leeef_reader/src/platform/android_auto_update_service.dart';
 import 'package:leeef_reader/src/platform/app_log.dart';
 import 'package:leeef_reader/src/platform/app_notifications.dart';
@@ -3974,6 +3975,17 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
     }
   }
 
+  String _aiTranslationStatus(AppStrings strings) {
+    if (allowsExternalServiceConfiguration()) {
+      return _aiBaseUrl == null
+          ? strings.text('尚未配置')
+          : '${_aiModel ?? ''}\n${_aiBaseUrl ?? ''}';
+    }
+    return _aiBaseUrl == null
+        ? strings.text('在电脑上配置后会自动同步到此设备')
+        : strings.text('已从电脑同步');
+  }
+
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
@@ -4245,16 +4257,15 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         ListTile(
           leading: const Icon(Icons.translate),
           title: Text(strings.text('AI 上下文翻译')),
-          subtitle: Text(
-            _aiBaseUrl == null
-                ? strings.text('尚未配置')
-                : '${_aiModel ?? ''}\n${_aiBaseUrl ?? ''}',
-          ),
-          isThreeLine: _aiBaseUrl != null,
-          trailing: TextButton(
-            onPressed: _busy ? null : _configureAi,
-            child: Text(strings.text('配置')),
-          ),
+          subtitle: Text(_aiTranslationStatus(strings)),
+          isThreeLine:
+              !allowsExternalServiceConfiguration() || _aiBaseUrl != null,
+          trailing: allowsExternalServiceConfiguration()
+              ? TextButton(
+                  onPressed: _busy ? null : _configureAi,
+                  child: Text(strings.text('配置')),
+                )
+              : null,
         ),
         ListTile(
           leading: const Icon(Icons.auto_awesome_outlined),
@@ -4266,15 +4277,16 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
             MaterialPageRoute<void>(builder: (_) => const AiAssistantScreen()),
           ),
         ),
-        ListTile(
-          leading: const Icon(Icons.tune),
-          title: Text(strings.text('AI Provider、Prompt 与 Tools')),
-          subtitle: Text(
-            strings.text('Claude/Gemini 原生协议、推理强度、助手 Prompt 和上下文工具开关'),
+        if (allowsExternalServiceConfiguration())
+          ListTile(
+            leading: const Icon(Icons.tune),
+            title: Text(strings.text('AI Provider、Prompt 与 Tools')),
+            subtitle: Text(
+              strings.text('Claude/Gemini 原生协议、推理强度、助手 Prompt 和上下文工具开关'),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _busy ? null : _configureAiAdvanced,
           ),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: _busy ? null : _configureAiAdvanced,
-        ),
         ListTile(
           leading: const Icon(Icons.edit_note),
           title: Text(strings.text('AI Prompt 管理')),
@@ -4287,16 +4299,16 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
             ),
           ),
         ),
-        ListTile(
-          leading: const Icon(Icons.fact_check_outlined),
-          title: Text(strings.text('检测 AI 模型')),
-          subtitle: Text(strings.text('发送最小翻译请求，验证 API、模型和密钥')),
-          trailing: TextButton(
-            onPressed: _busy || _aiBaseUrl == null ? null : _testAi,
-            child: Text(strings.text('检测')),
+        if (allowsExternalServiceConfiguration()) ...[
+          ListTile(
+            leading: const Icon(Icons.fact_check_outlined),
+            title: Text(strings.text('检测 AI 模型')),
+            subtitle: Text(strings.text('发送最小翻译请求，验证 API、模型和密钥')),
+            trailing: TextButton(
+              onPressed: _busy || _aiBaseUrl == null ? null : _testAi,
+              child: Text(strings.text('检测')),
+            ),
           ),
-        ),
-        if (!Platform.isIOS)
           ListTile(
             leading: const Icon(Icons.record_voice_over_outlined),
             title: Text(strings.text('TTS 朗读服务')),
@@ -4313,6 +4325,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
               child: Text(strings.text('配置')),
             ),
           ),
+        ],
         const Divider(),
         ListTile(
           leading: const Icon(Icons.archive_outlined),

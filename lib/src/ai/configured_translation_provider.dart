@@ -2,6 +2,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:leeef_reader/src/ai/llm_translation_provider.dart';
 import 'package:leeef_reader/src/ai/llm_assistant_provider.dart';
 import 'package:leeef_reader/src/ai/persistent_translation_cache.dart';
+import 'package:leeef_reader/src/platform/external_service_configuration.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const aiBaseUrlPreferenceKey = 'leeef.ai.base_url';
@@ -30,7 +31,7 @@ Future<LlmTranslationProvider> loadConfiguredTranslationProvider() async {
           .toList() ??
       const <String>[];
   if (baseUrl == null || model == null || apiKeys.isEmpty) {
-    throw StateError('请先在设置中配置 AI 翻译模型。');
+    throw StateError(missingAiServiceConfigurationMessage());
   }
   final uri = Uri.tryParse(baseUrl);
   if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
@@ -72,7 +73,7 @@ Future<LlmAssistantProvider> loadConfiguredAssistantProvider() async {
       uri.host.isEmpty ||
       model == null ||
       keys.isEmpty) {
-    throw StateError('请先在设置中配置 AI 模型和 API Key。');
+    throw StateError(missingAiServiceConfigurationMessage());
   }
   return LlmAssistantProvider(
     baseUri: uri,
