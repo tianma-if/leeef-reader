@@ -12,6 +12,8 @@ void main() {
     expect(english.text('阶段汇总'), 'Period summary');
     expect(english.text('自动同步'), 'Automatic sync');
     expect(english.text('配置 WebDAV'), 'Configure WebDAV');
+    expect(english.text('配置对象存储'), 'Configure object storage');
+    expect(english.text('阿里云 OSS'), 'Aliyun OSS');
     expect(
       english.text('在电脑上配置后会自动同步到此设备'),
       'Configure on a computer; it will sync to this device',

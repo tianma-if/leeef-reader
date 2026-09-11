@@ -30,7 +30,7 @@ Future<SyncBackend> loadConfiguredSyncBackend() async {
       final endpoint = preferences.getString('leeef.sync.s3.endpoint');
       final bucket = preferences.getString('leeef.sync.s3.bucket');
       if (endpoint == null || bucket == null) {
-        throw StateError('请先在设置中配置 S3-compatible。');
+        throw StateError('请先在设置中配置对象存储。');
       }
       return S3SyncBackend(
         endpoint: Uri.parse(endpoint),

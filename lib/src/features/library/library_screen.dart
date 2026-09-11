@@ -20,11 +20,13 @@ import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/features/ai/ai_assistant_screen.dart';
 import 'package:leeef_reader/src/features/ai/ai_prompt_manager_screen.dart';
 import 'package:leeef_reader/src/features/statistics/reading_statistics_screen.dart';
+import 'package:leeef_reader/src/features/settings/object_storage_config_dialog.dart';
 import 'package:leeef_reader/src/features/settings/trusted_devices_screen.dart';
 import 'package:leeef_reader/src/export/note_export_service.dart';
 import 'package:leeef_reader/src/sync/configured_sync_backend.dart';
 import 'package:leeef_reader/src/sync/background_sync_scheduler.dart';
 import 'package:leeef_reader/src/sync/directory_sync_backend.dart';
+import 'package:leeef_reader/src/sync/object_storage_provider.dart';
 import 'package:leeef_reader/src/sync/s3_sync_backend.dart';
 import 'package:leeef_reader/src/sync/sync_engine.dart';
 import 'package:leeef_reader/src/sync/sync_backend.dart';
@@ -2423,6 +2425,8 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
   static const _s3AccessKeyIdKey = 'leeef.sync.s3.access_key_id';
   static const _s3SecretAccessKeyKey = 'leeef.sync.s3.secret_access_key';
   static const _s3SessionTokenKey = 'leeef.sync.s3.session_token';
+  static const _s3ProviderKey = 'leeef.sync.s3.provider';
+  static const _s3AccountIdKey = 'leeef.sync.s3.account_id';
   static const _secureStorage = FlutterSecureStorage();
   String? _syncDirectory;
   String? _webDavUrl;
@@ -2432,6 +2436,8 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
   String _s3Region = 'us-east-1';
   String _s3Prefix = 'leeef';
   bool _s3PathStyle = true;
+  ObjectStorageProviderId _s3Provider = ObjectStorageProviderId.custom;
+  String _s3AccountId = '';
   _SyncBackendKind _syncBackend = _SyncBackendKind.s3;
   bool _busy = false;
   bool _autoSync = true;
@@ -2469,6 +2475,13 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
       _s3Region = preferences.getString(_s3RegionKey) ?? 'us-east-1';
       _s3Prefix = preferences.getString(_s3PrefixKey) ?? 'leeef';
       _s3PathStyle = preferences.getBool(_s3PathStyleKey) ?? true;
+      _s3AccountId = preferences.getString(_s3AccountIdKey) ?? '';
+      _s3Provider = preferences.getString(_s3ProviderKey) == null
+          ? inferObjectStorageProvider(endpoint: _s3Endpoint, region: _s3Region)
+          : parseObjectStorageProviderId(preferences.getString(_s3ProviderKey));
+      if (_s3AccountId.isEmpty) {
+        _s3AccountId = inferObjectStorageAccountId(_s3Endpoint);
+      }
       _autoSync = preferences.getBool(_autoSyncKey) ?? true;
       _wifiOnly = preferences.getBool(_wifiOnlyKey) ?? false;
       _syncNotifications =
@@ -3575,6 +3588,23 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
     setState(() => _syncDirectory = path);
   }
 
+  String _objectStorageSubtitle(AppStrings strings) {
+    if (_s3Endpoint == null) {
+      return strings.text('选择阿里云、腾讯云、七牛或任意 S3 兼容服务');
+    }
+    final provider = ObjectStorageProvider.byId(_s3Provider);
+    final regionLabel =
+        objectStorageRegionLabel(
+          providerId: _s3Provider,
+          regionId: _s3Region,
+        ) ??
+        _s3Region;
+    final location = regionLabel == _s3Region
+        ? _s3Region
+        : '${strings.text(regionLabel)} · $_s3Region';
+    return '${strings.text(provider.name)} · $location\n${_s3Bucket ?? ''} / $_s3Prefix';
+  }
+
   Future<void> _configureWebDav() async {
     final urlController = TextEditingController(text: _webDavUrl);
     final usernameController = TextEditingController(text: _webDavUsername);
@@ -3663,141 +3693,49 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
   }
 
   Future<void> _configureS3() async {
-    final endpointController = TextEditingController(text: _s3Endpoint);
-    final bucketController = TextEditingController(text: _s3Bucket);
-    final regionController = TextEditingController(text: _s3Region);
-    final prefixController = TextEditingController(text: _s3Prefix);
-    final accessKeyController = TextEditingController(
-      text: await _secureStorage.read(key: _s3AccessKeyIdKey) ?? '',
+    final current = ObjectStorageConfiguration(
+      providerId: _s3Provider,
+      endpoint: _s3Endpoint ?? '',
+      bucket: _s3Bucket ?? '',
+      region: _s3Region,
+      prefix: _s3Prefix,
+      pathStyle: _s3PathStyle,
+      accessKeyId: await _secureStorage.read(key: _s3AccessKeyIdKey) ?? '',
+      secretAccessKey:
+          await _secureStorage.read(key: _s3SecretAccessKeyKey) ?? '',
+      sessionToken: await _secureStorage.read(key: _s3SessionTokenKey) ?? '',
+      accountId: _s3AccountId,
     );
-    final secretKeyController = TextEditingController(
-      text: await _secureStorage.read(key: _s3SecretAccessKeyKey) ?? '',
-    );
-    final sessionTokenController = TextEditingController(
-      text: await _secureStorage.read(key: _s3SessionTokenKey) ?? '',
-    );
-    var pathStyle = _s3PathStyle;
     if (!mounted) return;
-    final configuration = await showDialog<_S3Configuration>(
+    final configuration = await showObjectStorageConfigDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(AppStrings.of(context).text('配置 S3-compatible')),
-          content: SizedBox(
-            width: 480,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: endpointController,
-                    keyboardType: TextInputType.url,
-                    decoration: const InputDecoration(
-                      labelText: 'Endpoint',
-                      hintText: 'https://s3.example.com',
-                    ),
-                  ),
-                  TextField(
-                    controller: bucketController,
-                    decoration: const InputDecoration(labelText: 'Bucket'),
-                  ),
-                  TextField(
-                    controller: regionController,
-                    decoration: const InputDecoration(labelText: 'Region'),
-                  ),
-                  TextField(
-                    controller: prefixController,
-                    decoration: InputDecoration(
-                      labelText: AppStrings.of(context).text('对象前缀'),
-                    ),
-                  ),
-                  TextField(
-                    controller: accessKeyController,
-                    decoration: const InputDecoration(
-                      labelText: 'Access Key ID',
-                    ),
-                  ),
-                  TextField(
-                    controller: secretKeyController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Secret Access Key',
-                    ),
-                  ),
-                  TextField(
-                    controller: sessionTokenController,
-                    obscureText: true,
-                    decoration: InputDecoration(
-                      labelText: AppStrings.of(
-                        context,
-                      ).text('Session Token（可选）'),
-                    ),
-                  ),
-                  SwitchListTile(
-                    value: pathStyle,
-                    title: Text(AppStrings.of(context).text('Path-style 请求')),
-                    subtitle: Text(
-                      AppStrings.of(context).text('MinIO、NAS 等兼容服务通常需要开启'),
-                    ),
-                    onChanged: (value) =>
-                        setDialogState(() => pathStyle = value),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(AppStrings.of(context).text('取消')),
-            ),
-            FilledButton(
-              onPressed: () {
-                final endpoint = Uri.tryParse(endpointController.text.trim());
-                if (endpoint == null ||
-                    (endpoint.scheme != 'http' && endpoint.scheme != 'https') ||
-                    endpoint.host.isEmpty ||
-                    bucketController.text.trim().isEmpty ||
-                    regionController.text.trim().isEmpty ||
-                    accessKeyController.text.trim().isEmpty ||
-                    secretKeyController.text.isEmpty) {
-                  return;
-                }
-                Navigator.pop(
-                  context,
-                  _S3Configuration(
-                    endpoint: endpoint.toString(),
-                    bucket: bucketController.text.trim(),
-                    region: regionController.text.trim(),
-                    prefix: prefixController.text.trim(),
-                    pathStyle: pathStyle,
-                    accessKeyId: accessKeyController.text.trim(),
-                    secretAccessKey: secretKeyController.text,
-                    sessionToken: sessionTokenController.text.trim(),
-                  ),
-                );
-              },
-              child: Text(AppStrings.of(context).text('保存')),
-            ),
-          ],
-        ),
-      ),
+      current: current.endpoint.isEmpty && current.bucket.isEmpty
+          ? null
+          : current,
+      onTest: (value) async {
+        final backend = S3SyncBackend(
+          endpoint: Uri.parse(value.endpoint),
+          bucket: value.bucket,
+          region: value.region,
+          prefix: value.prefix,
+          pathStyle: value.pathStyle,
+          accessKeyId: value.accessKeyId,
+          secretAccessKey: value.secretAccessKey,
+          sessionToken: value.sessionToken.isEmpty ? null : value.sessionToken,
+        );
+        await backend.verifyCapabilities();
+      },
     );
-    endpointController.dispose();
-    bucketController.dispose();
-    regionController.dispose();
-    prefixController.dispose();
-    accessKeyController.dispose();
-    secretKeyController.dispose();
-    sessionTokenController.dispose();
     if (configuration == null) return;
     final preferences = await SharedPreferences.getInstance();
     await Future.wait([
+      preferences.setString(_s3ProviderKey, configuration.providerId.name),
       preferences.setString(_s3EndpointKey, configuration.endpoint),
       preferences.setString(_s3BucketKey, configuration.bucket),
       preferences.setString(_s3RegionKey, configuration.region),
       preferences.setString(_s3PrefixKey, configuration.prefix),
       preferences.setBool(_s3PathStyleKey, configuration.pathStyle),
+      preferences.setString(_s3AccountIdKey, configuration.accountId),
       _secureStorage.write(
         key: _s3AccessKeyIdKey,
         value: configuration.accessKeyId,
@@ -3813,11 +3751,13 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
     ]);
     if (mounted) {
       setState(() {
+        _s3Provider = configuration.providerId;
         _s3Endpoint = configuration.endpoint;
         _s3Bucket = configuration.bucket;
         _s3Region = configuration.region;
         _s3Prefix = configuration.prefix;
         _s3PathStyle = configuration.pathStyle;
+        _s3AccountId = configuration.accountId;
       });
     }
   }
@@ -3828,7 +3768,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         final endpoint = _s3Endpoint;
         final bucket = _s3Bucket;
         if (endpoint == null || bucket == null) {
-          throw StateError('请先配置 S3-compatible。');
+          throw StateError('请先配置对象存储。');
         }
         final accessKeyId =
             await _secureStorage.read(key: _s3AccessKeyIdKey) ?? '';
@@ -4505,7 +4445,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
             items: [
               DropdownMenuItem(
                 value: _SyncBackendKind.s3,
-                child: Text('S3-compatible'),
+                child: Text(strings.text('对象存储')),
               ),
               DropdownMenuItem(
                 value: _SyncBackendKind.directory,
@@ -4521,12 +4461,8 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         if (_syncBackend == _SyncBackendKind.s3)
           ListTile(
             leading: const Icon(Icons.cloud_queue),
-            title: Text(strings.text('S3-compatible 对象存储')),
-            subtitle: Text(
-              _s3Endpoint == null
-                  ? strings.text('尚未配置')
-                  : '${_s3Endpoint!}\n${_s3Bucket ?? ''} / $_s3Prefix',
-            ),
+            title: Text(strings.text('对象存储')),
+            subtitle: Text(_objectStorageSubtitle(strings)),
             isThreeLine: _s3Endpoint != null,
             trailing: TextButton(
               onPressed: _busy ? null : _configureS3,
@@ -4536,7 +4472,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         if (_syncBackend == _SyncBackendKind.s3)
           ListTile(
             leading: const Icon(Icons.fact_check_outlined),
-            title: Text(strings.text('检测 S3 能力')),
+            title: Text(strings.text('检测对象存储')),
             subtitle: Text(strings.text('验证签名、条件写入、上传、下载、列举和删除')),
             trailing: TextButton(
               onPressed: _busy || _s3Endpoint == null
@@ -4648,28 +4584,6 @@ class _WebDavConfiguration {
   final String url;
   final String username;
   final String password;
-}
-
-class _S3Configuration {
-  const _S3Configuration({
-    required this.endpoint,
-    required this.bucket,
-    required this.region,
-    required this.prefix,
-    required this.pathStyle,
-    required this.accessKeyId,
-    required this.secretAccessKey,
-    required this.sessionToken,
-  });
-
-  final String endpoint;
-  final String bucket;
-  final String region;
-  final String prefix;
-  final bool pathStyle;
-  final String accessKeyId;
-  final String secretAccessKey;
-  final String sessionToken;
 }
 
 class _EmptyLibrary extends StatelessWidget {
