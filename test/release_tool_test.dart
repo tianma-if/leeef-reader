@@ -368,5 +368,6 @@ void main() {
     expect(verifier, contains('mach-lookup\\.global-name'));
     expect(verifier, contains('service_suffix in spks spki'));
     expect(verifier, contains('keychain-access-groups'));
+    expect(verifier, contains('Signature=adhoc'));
   });
 }

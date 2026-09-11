@@ -60,6 +60,10 @@ for service_suffix in spks spki; do
     json -o - "$signed_entitlements" | \
     /usr/bin/grep -Fq "\"${bundle_identifier}-${service_suffix}\""
 done
-/usr/bin/plutil -extract 'keychain-access-groups' json -o - \
-  "$signed_entitlements" | \
-  /usr/bin/grep -Fq '"9KA3NM38B6.dev.leeef.leeefReader"'
+# Debug/ad-hoc CI builds cannot carry the Developer ID keychain group.
+# Release/Developer ID bundles must include it so Keychain access is valid.
+if ! /usr/bin/codesign -dv "$app_path" 2>&1 | /usr/bin/grep -Eq 'Signature=adhoc|flags=0x2\(adhoc\)'; then
+  /usr/bin/plutil -extract 'keychain-access-groups' json -o - \
+    "$signed_entitlements" | \
+    /usr/bin/grep -Fq '"9KA3NM38B6.dev.leeef.leeefReader"'
+fi
