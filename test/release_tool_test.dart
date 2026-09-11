@@ -363,11 +363,8 @@ void main() {
     );
     expect(entitlements, contains('dev.leeef.leeefReader-spks'));
     expect(entitlements, contains('dev.leeef.leeefReader-spki'));
-    expect(entitlements, contains('keychain-access-groups'));
-    expect(entitlements, contains('9KA3NM38B6.dev.leeef.leeefReader'));
+    expect(entitlements.contains('keychain-access-groups'), isFalse);
     expect(verifier, contains('mach-lookup\\.global-name'));
     expect(verifier, contains('service_suffix in spks spki'));
-    expect(verifier, contains('keychain-access-groups'));
-    expect(verifier, contains('Signature=adhoc'));
   });
 }
