@@ -44,6 +44,8 @@ dependencies:
   pinyin: ^3.3.0
   workmanager: ^0.10.9
   package_info_plus: ^10.2.1
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^7.4.1
 
 dependency_overrides:
   # Keep the upstream Sparkle integration, with one small extension that lets

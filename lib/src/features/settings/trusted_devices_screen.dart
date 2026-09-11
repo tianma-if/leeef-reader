@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:leeef_reader/src/app_providers.dart';
+import 'package:leeef_reader/src/features/settings/pairing_qr_panel.dart';
+import 'package:leeef_reader/src/features/settings/pairing_qr_scan_screen.dart';
 import 'package:leeef_reader/src/platform/app_appearance.dart';
 import 'package:leeef_reader/src/sync/configured_sync_backend.dart';
 import 'package:leeef_reader/src/sync/sync_backend.dart';
@@ -16,8 +18,15 @@ import 'package:leeef_reader/src/sync/trusted/trusted_device.dart';
 import 'package:leeef_reader/src/sync/trusted/trusted_sync_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+enum TrustedDevicesInitialAction { none, host, scan }
+
 class TrustedDevicesScreen extends ConsumerStatefulWidget {
-  const TrustedDevicesScreen({super.key});
+  const TrustedDevicesScreen({
+    super.key,
+    this.initialAction = TrustedDevicesInitialAction.none,
+  });
+
+  final TrustedDevicesInitialAction initialAction;
 
   @override
   ConsumerState<TrustedDevicesScreen> createState() =>
@@ -34,7 +43,20 @@ class _TrustedDevicesScreenState extends ConsumerState<TrustedDevicesScreen> {
   @override
   void initState() {
     super.initState();
-    unawaited(_reload(refreshRemote: true));
+    unawaited(_start());
+  }
+
+  Future<void> _start() async {
+    await _reload(refreshRemote: true);
+    if (!mounted) return;
+    switch (widget.initialAction) {
+      case TrustedDevicesInitialAction.host:
+        await _hostPairing();
+      case TrustedDevicesInitialAction.scan:
+        await _scanAndJoin();
+      case TrustedDevicesInitialAction.none:
+        break;
+    }
   }
 
   Future<
@@ -125,36 +147,16 @@ class _TrustedDevicesScreenState extends ConsumerState<TrustedDevicesScreen> {
           dialogContext = context;
           final strings = AppStrings.of(context);
           return AlertDialog(
-            title: Text(strings.text('让其他设备加入')),
+            title: Text(strings.text('生成配对二维码')),
             content: SizedBox(
               width: 430,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(strings.text('在另一台设备输入下面的配对码。两台设备需要连接同一个局域网。')),
-                  const SizedBox(height: 20),
-                  SelectionArea(
-                    child: Text(
-                      session!.code,
-                      style: Theme.of(context).textTheme.headlineMedium
-                          ?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 2,
-                          ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(strings.text('配对码 5 分钟内有效且只能使用一次。')),
-                  const SizedBox(height: 20),
-                  const LinearProgressIndicator(),
-                ],
+              child: SingleChildScrollView(
+                child: PairingQrPanel.fromSession(session!),
               ),
             ),
             actions: [
               TextButton.icon(
-                onPressed: () async {
-                  await Clipboard.setData(ClipboardData(text: session!.code));
-                },
+                onPressed: () => copyPairingCode(session!),
                 icon: const Icon(Icons.copy),
                 label: Text(strings.text('复制配对码')),
               ),
@@ -188,26 +190,55 @@ class _TrustedDevicesScreenState extends ConsumerState<TrustedDevicesScreen> {
     }
   }
 
+  Future<void> _scanAndJoin() async {
+    if (!canScanPairingQr()) {
+      await _joinPairing();
+      return;
+    }
+    final invite = await Navigator.push<PairingInvite>(
+      context,
+      MaterialPageRoute(builder: (_) => const PairingQrScanScreen()),
+    );
+    if (invite == null || !mounted) return;
+    await _joinWithPayload(invite.toQrPayload());
+  }
+
   Future<void> _joinPairing() async {
     final controller = TextEditingController();
-    final code = await showDialog<String>(
+    final payload = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(AppStrings.of(context).text('从已有设备恢复')),
         content: SizedBox(
           width: 420,
-          child: TextField(
-            controller: controller,
-            autofocus: true,
-            textCapitalization: TextCapitalization.characters,
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp('[A-Za-z0-9-]')),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller,
+                autofocus: true,
+                textCapitalization: TextCapitalization.characters,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp('[A-Za-z0-9-]')),
+                ],
+                decoration: InputDecoration(
+                  labelText: AppStrings.of(context).text('配对码'),
+                  helperText: AppStrings.of(context).text('两台设备需要连接同一个局域网'),
+                ),
+                onSubmitted: (value) => Navigator.pop(context, value),
+              ),
+              if (canScanPairingQr()) ...[
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => Navigator.pop(context, 'scan'),
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: Text(AppStrings.of(context).text('扫描配对二维码')),
+                  ),
+                ),
+              ],
             ],
-            decoration: InputDecoration(
-              labelText: AppStrings.of(context).text('配对码'),
-              helperText: AppStrings.of(context).text('两台设备需要连接同一个局域网'),
-            ),
-            onSubmitted: (value) => Navigator.pop(context, value),
           ),
         ),
         actions: [
@@ -223,11 +254,19 @@ class _TrustedDevicesScreenState extends ConsumerState<TrustedDevicesScreen> {
       ),
     );
     controller.dispose();
-    if (code == null || code.trim().isEmpty) return;
+    if (payload == null || payload.trim().isEmpty) return;
+    if (payload == 'scan') {
+      await _scanAndJoin();
+      return;
+    }
+    await _joinWithPayload(payload);
+  }
+
+  Future<void> _joinWithPayload(String payload) async {
     setState(() => _busy = true);
     try {
       final services = await _services();
-      final result = await services.pairing.join(code);
+      final result = await services.pairing.join(payload);
       await AppAppearanceController.instance.load();
       try {
         await _syncEverything();
@@ -392,9 +431,15 @@ class _TrustedDevicesScreenState extends ConsumerState<TrustedDevicesScreen> {
                           children: [
                             FilledButton.icon(
                               onPressed: _busy ? null : _hostPairing,
-                              icon: const Icon(Icons.add_link),
-                              label: Text(strings.text('让其他设备加入')),
+                              icon: const Icon(Icons.qr_code_2),
+                              label: Text(strings.text('生成配对二维码')),
                             ),
+                            if (canScanPairingQr())
+                              FilledButton.tonalIcon(
+                                onPressed: _busy ? null : _scanAndJoin,
+                                icon: const Icon(Icons.qr_code_scanner),
+                                label: Text(strings.text('扫描配对二维码')),
+                              ),
                             OutlinedButton.icon(
                               onPressed: _busy ? null : _joinPairing,
                               icon: const Icon(Icons.settings_backup_restore),

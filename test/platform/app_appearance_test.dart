@@ -14,6 +14,8 @@ void main() {
     expect(english.text('配置 WebDAV'), 'Configure WebDAV');
     expect(english.text('配置对象存储'), 'Configure object storage');
     expect(english.text('阿里云 OSS'), 'Aliyun OSS');
+    expect(english.text('生成配对二维码'), 'Generate pairing QR code');
+    expect(english.text('扫描配对二维码'), 'Scan pairing QR code');
     expect(
       english.text('在电脑上配置后会自动同步到此设备'),
       'Configure on a computer; it will sync to this device',

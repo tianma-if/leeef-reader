@@ -73,6 +73,65 @@ void main() {
     );
   });
 
+  test('QR invite payload round-trips and can skip UDP discovery', () async {
+    final invite = PairingInvite(
+      code: 'ABCD-EFGH-IJKL',
+      sessionId: 'session-token',
+      port: 47832,
+      publicKey: List<int>.generate(32, (index) => index),
+      hosts: const ['192.168.1.20', '127.0.0.1'],
+    );
+    final parsed = PairingInvite.tryParse(invite.toQrPayload());
+    expect(parsed, isNotNull);
+    expect(parsed!.code, 'ABCD-EFGH-IJKL');
+    expect(parsed.sessionId, 'session-token');
+    expect(parsed.port, 47832);
+    expect(parsed.hosts, ['192.168.1.20', '127.0.0.1']);
+    expect(parsed.canDirectConnect, isTrue);
+    expect(PairingInvite.tryParse('ABCD-EFGH-IJKL')?.canDirectConnect, isFalse);
+
+    SharedPreferences.setMockInitialValues({
+      'leeef.device_id': 'desktop-qr',
+      'leeef.sync.backend': 's3',
+      'leeef.sync.s3.endpoint': 'https://s3.example.com',
+    });
+    final desktopPreferences = await SharedPreferences.getInstance();
+    final desktopSecrets = MemorySecretStore({
+      'leeef.sync.s3.secret_access_key': 'secret',
+    });
+    final host = await PairingService(
+      spaceStore: SyncSpaceStore(
+        preferences: desktopPreferences,
+        secrets: desktopSecrets,
+      ),
+      configuration: PortableConfiguration(
+        preferences: desktopPreferences,
+        secrets: desktopSecrets,
+      ),
+    ).startHost();
+    addTearDown(host.close);
+
+    SharedPreferences.setMockInitialValues({'leeef.device_id': 'phone-qr'});
+    final phonePreferences = await SharedPreferences.getInstance();
+    final phoneSecrets = MemorySecretStore();
+    final result = await PairingService(
+      spaceStore: SyncSpaceStore(
+        preferences: phonePreferences,
+        secrets: phoneSecrets,
+      ),
+      configuration: PortableConfiguration(
+        preferences: phonePreferences,
+        secrets: phoneSecrets,
+      ),
+    ).join(host.invite.toQrPayload(), timeout: const Duration(seconds: 5));
+
+    expect(result.space.id, isNotEmpty);
+    expect(
+      await phoneSecrets.read('leeef.sync.s3.secret_access_key'),
+      'secret',
+    );
+  });
+
   test('revoking a paired device rotates the group key', () async {
     final root = await Directory.systemTemp.createTemp('leeef-key-rotation-');
     addTearDown(() => root.delete(recursive: true));

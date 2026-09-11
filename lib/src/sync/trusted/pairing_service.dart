@@ -10,6 +10,121 @@ import 'package:leeef_reader/src/sync/trusted/portable_configuration.dart';
 import 'package:leeef_reader/src/sync/trusted/sync_space_store.dart';
 import 'package:leeef_reader/src/sync/trusted/trusted_device.dart';
 
+class PairingInvite {
+  const PairingInvite({
+    required this.code,
+    this.sessionId = '',
+    this.port = 0,
+    this.publicKey = const [],
+    this.hosts = const [],
+  });
+
+  final String code;
+  final String sessionId;
+  final int port;
+  final List<int> publicKey;
+  final List<String> hosts;
+
+  bool get canDirectConnect =>
+      sessionId.isNotEmpty &&
+      port > 0 &&
+      publicKey.isNotEmpty &&
+      hosts.isNotEmpty;
+
+  String toQrPayload() {
+    final parameters = <String, String>{
+      'v': '1',
+      'c': code,
+      if (sessionId.isNotEmpty) 's': sessionId,
+      if (port > 0) 'p': '$port',
+      if (publicKey.isNotEmpty) 'k': base64UrlEncode(publicKey),
+      if (hosts.isNotEmpty) 'h': hosts.join(','),
+    };
+    return Uri(
+      scheme: 'leeef',
+      host: 'pair',
+      queryParameters: parameters,
+    ).toString();
+  }
+
+  static PairingInvite? tryParse(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return null;
+    final uri = Uri.tryParse(trimmed);
+    if (uri != null && uri.scheme == 'leeef' && uri.host == 'pair') {
+      final code =
+          uri.queryParameters['c'] ?? uri.queryParameters['code'] ?? '';
+      if (PairingService._normalizeCode(code).length != 12) return null;
+      return PairingInvite(
+        code: code,
+        sessionId: uri.queryParameters['s'] ?? '',
+        port: int.tryParse(uri.queryParameters['p'] ?? '') ?? 0,
+        publicKey: _decodeKey(uri.queryParameters['k']),
+        hosts: (uri.queryParameters['h'] ?? '')
+            .split(',')
+            .map((item) => item.trim())
+            .where((item) => item.isNotEmpty)
+            .toList(growable: false),
+      );
+    }
+    try {
+      final decoded = jsonDecode(trimmed);
+      if (decoded is Map && decoded['type'] == 'leeef-pair-invite-v1') {
+        final code = '${decoded['code'] ?? ''}';
+        if (PairingService._normalizeCode(code).length != 12) return null;
+        final hosts = decoded['hosts'];
+        return PairingInvite(
+          code: code,
+          sessionId: '${decoded['sessionId'] ?? ''}',
+          port: decoded['port'] is int ? decoded['port']! as int : 0,
+          publicKey: _decodeKey('${decoded['publicKey'] ?? ''}'),
+          hosts: hosts is List
+              ? hosts.map((item) => '$item').toList(growable: false)
+              : const [],
+        );
+      }
+    } on Object {
+      // Fall through to a bare pairing code.
+    }
+    if (PairingService._normalizeCode(trimmed).length == 12) {
+      return PairingInvite(code: trimmed);
+    }
+    return null;
+  }
+
+  static List<int> _decodeKey(String? value) {
+    if (value == null || value.isEmpty) return const [];
+    try {
+      return base64Url.decode(value);
+    } on Object {
+      return const [];
+    }
+  }
+}
+
+Future<List<String>> listPairingHosts() async {
+  final hosts = <String>{};
+  try {
+    for (final interface in await NetworkInterface.list(
+      includeLoopback: false,
+      includeLinkLocal: false,
+      type: InternetAddressType.IPv4,
+    ).timeout(const Duration(seconds: 1))) {
+      for (final address in interface.addresses) {
+        if (!address.isLoopback && address.type == InternetAddressType.IPv4) {
+          hosts.add(address.address);
+        }
+      }
+    }
+  } on Object {
+    // Sandboxed or permission-limited environments can still pair via
+    // loopback in tests, or via UDP discovery on the LAN.
+  }
+  final ordered = hosts.toList()..sort();
+  ordered.add('127.0.0.1');
+  return ordered;
+}
+
 class PairingService {
   PairingService({
     required this.spaceStore,
@@ -45,7 +160,9 @@ class PairingService {
       InternetAddress.anyIPv4,
       discoveryPort,
       reuseAddress: true,
+      reusePort: !Platform.isWindows,
     );
+    final hosts = await listPairingHosts();
     final completion = Completer<TrustedDevice>();
     late PairingHostSession session;
 
@@ -156,6 +273,10 @@ class PairingService {
 
     session = PairingHostSession._(
       code: code,
+      sessionId: sessionId,
+      port: httpServer.port,
+      publicKey: hostPublicKey.bytes,
+      hosts: hosts,
       expiresAt: expiresAt,
       completion: completion.future,
       httpServer: httpServer,
@@ -171,10 +292,31 @@ class PairingService {
     String rawCode, {
     Duration timeout = const Duration(seconds: 12),
     List<InternetAddress>? discoveryTargets,
+    PairingInvite? invite,
   }) async {
-    final code = _normalizeCode(rawCode);
+    final parsed = invite ?? PairingInvite.tryParse(rawCode);
+    final code = _normalizeCode(parsed?.code ?? rawCode);
     if (code.length != 12) throw const FormatException('配对码格式不正确。');
     final identity = await spaceStore.loadOrCreateIdentity();
+    if (parsed != null && parsed.canDirectConnect) {
+      for (final host in parsed.hosts) {
+        try {
+          return await _completeJoin(
+            code: code,
+            identity: identity,
+            discovered: _DiscoveredHost(
+              address: InternetAddress(host),
+              port: parsed.port,
+              sessionId: parsed.sessionId,
+              publicKey: parsed.publicKey,
+            ),
+            timeout: const Duration(seconds: 3),
+          );
+        } on Object {
+          // Try the remaining advertised addresses, then UDP discovery.
+        }
+      }
+    }
     final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
     socket.broadcastEnabled = true;
     final host = Completer<_DiscoveredHost>();
@@ -236,6 +378,20 @@ class PairingService {
       socket.close();
     }
 
+    return _completeJoin(
+      code: code,
+      identity: identity,
+      discovered: discovered,
+      timeout: timeout,
+    );
+  }
+
+  Future<PairingJoinResult> _completeJoin({
+    required String code,
+    required DeviceIdentity identity,
+    required _DiscoveredHost discovered,
+    required Duration timeout,
+  }) async {
     final keyPair = await _keyExchange.newKeyPairFromSeed(identity.privateKey);
     final sharedSecret = await _keyExchange.sharedSecretKey(
       keyPair: keyPair,
@@ -350,6 +506,10 @@ class PairingService {
 class PairingHostSession {
   PairingHostSession._({
     required this.code,
+    required this.sessionId,
+    required this.port,
+    required this.publicKey,
+    required this.hosts,
     required this.expiresAt,
     required this.completion,
     required HttpServer httpServer,
@@ -362,8 +522,20 @@ class PairingHostSession {
        _udpSubscription = udpSubscription;
 
   final String code;
+  final String sessionId;
+  final int port;
+  final List<int> publicKey;
+  final List<String> hosts;
   final DateTime expiresAt;
   final Future<TrustedDevice> completion;
+
+  PairingInvite get invite => PairingInvite(
+    code: code,
+    sessionId: sessionId,
+    port: port,
+    publicKey: publicKey,
+    hosts: hosts,
+  );
   final HttpServer _httpServer;
   final RawDatagramSocket _udp;
   final StreamSubscription<HttpRequest> _httpSubscription;

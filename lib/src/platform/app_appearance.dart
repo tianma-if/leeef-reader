@@ -467,6 +467,18 @@ class AppStrings {
     '通过 Google Play 获取应用更新': 'Get app updates through Google Play',
     '已是最新版本': 'You are up to date',
     '我的同步设备': 'My synced devices',
+    '生成配对二维码': 'Generate pairing QR code',
+    '扫描配对二维码': 'Scan pairing QR code',
+    '用手机扫描这个二维码。两台设备需要连接同一个局域网。':
+        'Scan this QR code with your phone. Both devices must be on the same local network.',
+    '也可以手动输入配对码。配对码 5 分钟内有效且只能使用一次。':
+        'You can also type the pairing code. It expires in 5 minutes and can be used only once.',
+    '手机扫描后即可同步这台电脑上的存储、AI 和阅读配置':
+        'A phone on the same network can scan this and receive this computer’s storage, AI, and reading settings',
+    '扫描电脑上的二维码，同步已配置的存储、AI 和阅读设置':
+        'Scan the QR code on your computer to sync its storage, AI, and reading settings',
+    '对准电脑上的二维码。两台设备需要连接同一个局域网。':
+        'Point the camera at the computer’s QR code. Both devices must be on the same local network.',
     '配对新设备，自动迁移配置、凭据和书库数据':
         'Pair a device and automatically transfer settings, credentials, and library data',
     '让其他设备加入': 'Let another device join',
@@ -1131,6 +1143,17 @@ class AppStrings {
     '通过 Google Play 获取应用更新': 'Google Play からアプリを更新',
     '已是最新版本': '最新バージョンです',
     '我的同步设备': '同期デバイス',
+    '生成配对二维码': 'ペアリング用 QR を作成',
+    '扫描配对二维码': 'ペアリング QR をスキャン',
+    '用手机扫描这个二维码。两台设备需要连接同一个局域网。':
+        'この QR コードをスマホで読み取ってください。両方のデバイスを同じローカルネットワークに接続してください。',
+    '也可以手动输入配对码。配对码 5 分钟内有效且只能使用一次。':
+        'ペアリングコードを手入力することもできます。コードは5分間有効で、一度だけ使用できます。',
+    '手机扫描后即可同步这台电脑上的存储、AI 和阅读配置':
+        '同じネットワークのスマホで読み取ると、このパソコンのストレージ・AI・読書設定を受け取れます',
+    '扫描电脑上的二维码，同步已配置的存储、AI 和阅读设置': 'パソコンの QR コードを読み取り、ストレージ・AI・読書設定を同期します',
+    '对准电脑上的二维码。两台设备需要连接同一个局域网。':
+        'パソコンの QR コードにカメラを向けてください。両方のデバイスを同じローカルネットワークに接続してください。',
     '配对新设备，自动迁移配置、凭据和书库数据': '新しいデバイスをペアリングし、設定・認証情報・書庫データを自動移行',
     '让其他设备加入': '別のデバイスを追加',
     '从已有设备恢复': '既存のデバイスから復元',

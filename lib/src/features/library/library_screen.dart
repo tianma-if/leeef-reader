@@ -21,6 +21,7 @@ import 'package:leeef_reader/src/features/ai/ai_assistant_screen.dart';
 import 'package:leeef_reader/src/features/ai/ai_prompt_manager_screen.dart';
 import 'package:leeef_reader/src/features/statistics/reading_statistics_screen.dart';
 import 'package:leeef_reader/src/features/settings/object_storage_config_dialog.dart';
+import 'package:leeef_reader/src/features/settings/pairing_qr_panel.dart';
 import 'package:leeef_reader/src/features/settings/trusted_devices_screen.dart';
 import 'package:leeef_reader/src/export/note_export_service.dart';
 import 'package:leeef_reader/src/sync/configured_sync_backend.dart';
@@ -4417,6 +4418,31 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
           ),
         ),
         const Divider(),
+        ListTile(
+          leading: const Icon(Icons.qr_code_2),
+          title: Text(strings.text(canScanPairingQr() ? '扫描配对二维码' : '生成配对二维码')),
+          subtitle: Text(
+            strings.text(
+              canScanPairingQr()
+                  ? '扫描电脑上的二维码，同步已配置的存储、AI 和阅读设置'
+                  : '手机扫描后即可同步这台电脑上的存储、AI 和阅读配置',
+            ),
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => TrustedDevicesScreen(
+                  initialAction: canScanPairingQr()
+                      ? TrustedDevicesInitialAction.scan
+                      : TrustedDevicesInitialAction.host,
+                ),
+              ),
+            );
+            await _loadSettingsPreferences();
+          },
+        ),
         ListTile(
           leading: const Icon(Icons.devices_other),
           title: Text(strings.text('我的同步设备')),
