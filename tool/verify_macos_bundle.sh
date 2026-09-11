@@ -60,3 +60,6 @@ for service_suffix in spks spki; do
     json -o - "$signed_entitlements" | \
     /usr/bin/grep -Fq "\"${bundle_identifier}-${service_suffix}\""
 done
+/usr/bin/plutil -extract 'keychain-access-groups' json -o - \
+  "$signed_entitlements" | \
+  /usr/bin/grep -Fq '"9KA3NM38B6.dev.leeef.leeefReader"'

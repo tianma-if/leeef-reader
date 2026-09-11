@@ -4,10 +4,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:leeef_reader/src/app_providers.dart';
 import 'package:leeef_reader/src/opds/opds_service.dart';
 import 'package:leeef_reader/src/platform/app_appearance.dart';
+import 'package:leeef_reader/src/platform/app_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class OpdsScreen extends ConsumerStatefulWidget {
@@ -18,7 +18,7 @@ class OpdsScreen extends ConsumerStatefulWidget {
 
 class _OpdsScreenState extends ConsumerState<OpdsScreen> {
   static const _catalogsKey = 'leeef.opds.catalogs';
-  static const _storage = FlutterSecureStorage();
+  static const _storage = appSecureStorage;
   var _catalogs = <_Catalog>[];
 
   @override

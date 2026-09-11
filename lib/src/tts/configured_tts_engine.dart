@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:leeef_reader/src/platform/app_secure_storage.dart';
 import 'package:leeef_reader/src/tts/system_tts_controller.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -106,7 +106,7 @@ class ConfiguredTtsEngine implements TtsEngine {
   }
 
   Future<Uint8List> _synthesize(TtsService service, String text) async {
-    const storage = FlutterSecureStorage();
+    const storage = appSecureStorage;
     final preferences = await SharedPreferences.getInstance();
     final key = await storage.read(key: ttsApiKeySecureKey) ?? '';
     final voice =

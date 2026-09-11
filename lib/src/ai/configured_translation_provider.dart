@@ -1,7 +1,7 @@
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:leeef_reader/src/ai/llm_translation_provider.dart';
 import 'package:leeef_reader/src/ai/llm_assistant_provider.dart';
 import 'package:leeef_reader/src/ai/persistent_translation_cache.dart';
+import 'package:leeef_reader/src/platform/app_secure_storage.dart';
 import 'package:leeef_reader/src/platform/external_service_configuration.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -18,7 +18,7 @@ const aiWriteToolsPreferenceKey = 'leeef.ai.tools.write';
 const aiApiKeySecureKey = 'leeef.ai.api_key';
 
 Future<LlmTranslationProvider> loadConfiguredTranslationProvider() async {
-  const secureStorage = FlutterSecureStorage();
+  const secureStorage = appSecureStorage;
   final preferences = await SharedPreferences.getInstance();
   final baseUrl = preferences.getString(aiBaseUrlPreferenceKey);
   final model = preferences.getString(aiModelPreferenceKey);
@@ -55,7 +55,7 @@ Future<LlmTranslationProvider> loadConfiguredTranslationProvider() async {
 }
 
 Future<LlmAssistantProvider> loadConfiguredAssistantProvider() async {
-  const secureStorage = FlutterSecureStorage();
+  const secureStorage = appSecureStorage;
   final preferences = await SharedPreferences.getInstance();
   final baseUrl = preferences.getString(aiBaseUrlPreferenceKey);
   final model = preferences.getString(aiModelPreferenceKey);

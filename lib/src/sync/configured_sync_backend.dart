@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:leeef_reader/src/platform/app_secure_storage.dart';
 import 'package:leeef_reader/src/sync/directory_sync_backend.dart';
 import 'package:leeef_reader/src/sync/s3_sync_backend.dart';
 import 'package:leeef_reader/src/sync/sync_backend.dart';
@@ -10,7 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Reconstructs the backend selected in Settings for background and per-book
 /// actions without exposing credentials to the widget tree.
 Future<SyncBackend> loadConfiguredSyncBackend() async {
-  const secureStorage = FlutterSecureStorage();
+  const secureStorage = appSecureStorage;
   final preferences = await SharedPreferences.getInstance();
   final kind = preferences.getString('leeef.sync.backend') ?? 's3';
   switch (kind) {

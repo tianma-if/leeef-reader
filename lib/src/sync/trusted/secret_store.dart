@@ -1,4 +1,5 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:leeef_reader/src/platform/app_secure_storage.dart';
 
 abstract interface class SecretStore {
   Future<String?> read(String key);
@@ -11,7 +12,7 @@ abstract interface class SecretStore {
 }
 
 class FlutterSecretStore implements SecretStore {
-  const FlutterSecretStore([this.storage = const FlutterSecureStorage()]);
+  const FlutterSecretStore([this.storage = appSecureStorage]);
 
   final FlutterSecureStorage storage;
 
