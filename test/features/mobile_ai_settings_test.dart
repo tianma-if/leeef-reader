@@ -29,6 +29,9 @@ void main() {
             readingProgressesProvider.overrideWith(
               (ref) => Stream.value(const []),
             ),
+            bookshelfEntriesProvider.overrideWith(
+              (ref) => Stream.value(const []),
+            ),
           ],
           child: const LeeefApp(),
         ),

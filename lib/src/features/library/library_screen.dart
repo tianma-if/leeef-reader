@@ -13,6 +13,8 @@ import 'package:leeef_reader/src/ai/llm_assistant_provider.dart';
 import 'package:leeef_reader/src/data/database/app_database.dart';
 import 'package:leeef_reader/src/data/library_backup_service.dart';
 import 'package:leeef_reader/src/data/library_maintenance_service.dart';
+import 'package:leeef_reader/src/features/library/bookshelf_layout.dart';
+import 'package:leeef_reader/src/features/library/bookshelf_tiles.dart';
 import 'package:leeef_reader/src/features/reader/reader_screen.dart';
 import 'package:leeef_reader/src/features/opds/opds_screen.dart';
 import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
@@ -239,24 +241,14 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
             _AppSection.settings => strings.settings,
           };
           final content = switch (_selectedSection) {
-            _AppSection.library => const _LibraryContent(),
+            _AppSection.library => _LibraryContent(
+              onImport: _isImporting ? null : _importBook,
+            ),
             _AppSection.notes => const _ExcerptContent(),
             _AppSection.search => const _SearchContent(),
             _AppSection.statistics => const ReadingStatisticsScreen(),
             _AppSection.settings => const _SettingsContent(),
           };
-          final importButton = _selectedSection == _AppSection.library
-              ? FloatingActionButton.extended(
-                  onPressed: _isImporting ? null : _importBook,
-                  icon: _isImporting
-                      ? const SizedBox.square(
-                          dimension: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.add),
-                  label: Text(_isImporting ? '…' : strings.importBook),
-                )
-              : null;
 
           if (!useRail) {
             return _dropOverlay(
@@ -264,7 +256,6 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
               Scaffold(
                 appBar: AppBar(title: Text(title)),
                 body: content,
-                floatingActionButton: importButton,
                 bottomNavigationBar: NavigationBar(
                   selectedIndex: selectedIndex,
                   onDestinationSelected: (index) =>
@@ -292,7 +283,6 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                     child: Scaffold(
                       appBar: AppBar(title: Text(title)),
                       body: content,
-                      floatingActionButton: importButton,
                     ),
                   ),
                 ],
@@ -488,7 +478,9 @@ class _SearchContentState extends ConsumerState<_SearchContent> {
 }
 
 class _LibraryContent extends ConsumerStatefulWidget {
-  const _LibraryContent();
+  const _LibraryContent({this.onImport});
+
+  final VoidCallback? onImport;
 
   @override
   ConsumerState<_LibraryContent> createState() => _LibraryContentState();
@@ -736,244 +728,295 @@ class _LibraryContentState extends ConsumerState<_LibraryContent> {
     final shelves = ref.watch(bookshelvesProvider);
     final tags = ref.watch(tagsProvider);
     final progresses = ref.watch(readingProgressesProvider);
+    final entries = ref.watch(bookshelfEntriesProvider);
     final selectedId = _selectedBookshelfId;
-    final shelfBookIds = selectedId == null
-        ? const AsyncValue<List<String>>.data(<String>[])
-        : ref.watch(bookshelfBookIdsProvider(selectedId));
     final selectedTagId = _selectedTagId;
     final tagBookIds = selectedTagId == null
         ? const AsyncValue<List<String>>.data(<String>[])
         : ref.watch(tagBookIdsProvider(selectedTagId));
+    final loading =
+        books.isLoading ||
+        shelves.isLoading ||
+        tags.isLoading ||
+        progresses.isLoading ||
+        entries.isLoading ||
+        tagBookIds.isLoading;
+    if (loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final bookError =
+        books.error ??
+        shelves.error ??
+        tags.error ??
+        progresses.error ??
+        entries.error ??
+        tagBookIds.error;
+    if (bookError != null) {
+      return Center(
+        child: Text(AppStrings.of(context).failure('读取书库', bookError)),
+      );
+    }
+    final items = books.asData?.value ?? const <BookRecord>[];
+    final shelfItems = shelves.asData?.value ?? const <BookshelfRecord>[];
+    final tagItems = tags.asData?.value ?? const <TagRecord>[];
+    final progressItems =
+        progresses.asData?.value ?? const <ReadingProgressRecord>[];
+    final memberships = groupBookshelfMemberships(
+      entries.asData?.value ?? const <BookshelfEntry>[],
+    );
+    if (items.isEmpty && shelfItems.isEmpty) {
+      return _EmptyLibrary(onImport: widget.onImport);
+    }
+    final progressByBook = {
+      for (final progress in progressItems) progress.bookId: progress,
+    };
+    final currentFolderIds = selectedId == null
+        ? null
+        : (memberships[selectedId] ?? const <String>[]).toSet();
+    final filteredBooks = _filterAndSortBooks(
+      items,
+      shelfBookIds: null,
+      tagBookIds: selectedTagId == null
+          ? null
+          : tagBookIds.asData?.value.toSet(),
+      progressByBook: progressByBook,
+    );
+    final visibleBooks = currentFolderIds == null
+        ? filteredBooks
+        : filteredBooks
+              .where((book) => currentFolderIds.contains(book.id))
+              .toList();
+    final folders = childBookshelves(shelves: shelfItems, parentId: selectedId);
+    final booksById = {for (final book in filteredBooks) book.id: book};
+    final visibleFolders = folders.where((folder) {
+      if (selectedTagId == null && _readingFilter == _ReadingFilter.all) {
+        return true;
+      }
+      return mosaicBooks(
+        shelfId: folder.id,
+        shelves: shelfItems,
+        memberships: memberships,
+        booksById: booksById,
+      ).isNotEmpty;
+    }).toList();
+    final groupedIds = selectedId == null
+        ? booksInVisibleFolders(
+            folders: visibleFolders,
+            shelves: shelfItems,
+            memberships: memberships,
+          )
+        : <String>{};
+    final ungroupedBooks = selectedId == null
+        ? visibleBooks.where((book) => !groupedIds.contains(book.id)).toList()
+        : visibleBooks;
+    final coverFit = AppAppearanceController.instance.coverFit;
+    BookshelfRecord? selectedShelf;
+    if (selectedId != null) {
+      for (final shelf in shelfItems) {
+        if (shelf.id == selectedId) {
+          selectedShelf = shelf;
+          break;
+        }
+      }
+    }
     return Column(
       children: [
         SizedBox(
-          height: 64,
-          child: shelves.when(
-            loading: () => const LinearProgressIndicator(),
-            error: (error, _) => Center(
-              child: Text(AppStrings.of(context).failure('读取书架', error)),
-            ),
-            data: (items) => ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              children: [
-                ChoiceChip(
+          height: 52,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            children: [
+              if (selectedShelf != null) ...[
+                ActionChip(
+                  avatar: const Icon(Icons.arrow_back, size: 16),
                   label: Text(strings.text('全部')),
-                  selected: selectedId == null,
-                  onSelected: (_) =>
-                      setState(() => _selectedBookshelfId = null),
+                  onPressed: () => setState(() => _selectedBookshelfId = null),
                 ),
                 const SizedBox(width: 8),
-                for (final shelf in items) ...[
-                  InputChip(
-                    visualDensity:
-                        AppAppearanceController.instance.shelfStyle == 'compact'
-                        ? VisualDensity.compact
-                        : VisualDensity.standard,
-                    label: Text(_bookshelfLabel(shelf, items)),
-                    selected: selectedId == shelf.id,
-                    onSelected: (_) =>
-                        setState(() => _selectedBookshelfId = shelf.id),
-                    onPressed: () =>
-                        setState(() => _selectedBookshelfId = shelf.id),
-                    deleteIcon: const Icon(Icons.more_horiz, size: 18),
-                    onDeleted: () => _showBookshelfMenu(shelf),
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                ActionChip(
-                  avatar: const Icon(
-                    Icons.create_new_folder_outlined,
-                    size: 18,
-                  ),
-                  label: Text(strings.text('新建书架')),
-                  onPressed: _createBookshelf,
+                InputChip(
+                  avatar: const Icon(Icons.folder_outlined, size: 16),
+                  label: Text(selectedShelf.name),
+                  selected: true,
+                  onPressed: () {
+                    final shelf = selectedShelf;
+                    if (shelf != null) _showBookshelfMenu(shelf);
+                  },
+                  onDeleted: () {
+                    final shelf = selectedShelf;
+                    if (shelf != null) _showBookshelfMenu(shelf);
+                  },
+                  deleteIcon: const Icon(Icons.more_horiz, size: 18),
                 ),
+                const SizedBox(width: 8),
               ],
-            ),
-          ),
-        ),
-        SizedBox(
-          height: 58,
-          child: tags.when(
-            loading: () => const LinearProgressIndicator(),
-            error: (error, _) => Center(
-              child: Text(AppStrings.of(context).failure('读取标签', error)),
-            ),
-            data: (items) => ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              children: [
+              ActionChip(
+                avatar: const Icon(Icons.create_new_folder_outlined, size: 18),
+                label: Text(strings.text('新建书架')),
+                onPressed: _createBookshelf,
+              ),
+              const SizedBox(width: 8),
+              FilterChip(
+                label: Text(strings.text('所有标签')),
+                selected: selectedTagId == null,
+                onSelected: (_) => setState(() => _selectedTagId = null),
+              ),
+              const SizedBox(width: 8),
+              for (final tag in tagItems) ...[
                 FilterChip(
-                  label: Text(strings.text('所有标签')),
-                  selected: selectedTagId == null,
-                  onSelected: (_) => setState(() => _selectedTagId = null),
+                  avatar: CircleAvatar(backgroundColor: Color(tag.color)),
+                  label: Text(tag.name),
+                  selected: selectedTagId == tag.id,
+                  onSelected: (_) => setState(() => _selectedTagId = tag.id),
                 ),
                 const SizedBox(width: 8),
-                for (final tag in items) ...[
-                  FilterChip(
-                    avatar: CircleAvatar(backgroundColor: Color(tag.color)),
-                    label: Text(tag.name),
-                    selected: selectedTagId == tag.id,
-                    onSelected: (_) => setState(() => _selectedTagId = tag.id),
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                ActionChip(
-                  avatar: const Icon(Icons.label_outline, size: 18),
-                  label: Text(strings.text('管理标签')),
-                  onPressed: _manageTags,
-                ),
-                const SizedBox(width: 12),
-                DropdownButton<_ReadingFilter>(
-                  value: _readingFilter,
-                  underline: const SizedBox.shrink(),
-                  onChanged: (value) {
-                    if (value != null) setState(() => _readingFilter = value);
-                  },
-                  items: [
-                    DropdownMenuItem(
-                      value: _ReadingFilter.all,
-                      child: Text(strings.text('全部状态')),
-                    ),
-                    DropdownMenuItem(
-                      value: _ReadingFilter.notStarted,
-                      child: Text(strings.text('未开始')),
-                    ),
-                    DropdownMenuItem(
-                      value: _ReadingFilter.reading,
-                      child: Text(strings.text('阅读中')),
-                    ),
-                    DropdownMenuItem(
-                      value: _ReadingFilter.finished,
-                      child: Text(strings.text('已读完')),
-                    ),
-                  ],
-                ),
-                const SizedBox(width: 12),
-                DropdownButton<_BookSort>(
-                  value: _bookSort,
-                  underline: const SizedBox.shrink(),
-                  onChanged: (value) {
-                    if (value != null) setState(() => _bookSort = value);
-                  },
-                  items: [
-                    DropdownMenuItem(
-                      value: _BookSort.recent,
-                      child: Text(strings.text('最近更新')),
-                    ),
-                    DropdownMenuItem(
-                      value: _BookSort.title,
-                      child: Text(strings.text('标题')),
-                    ),
-                    DropdownMenuItem(
-                      value: _BookSort.author,
-                      child: Text(strings.text('作者')),
-                    ),
-                    DropdownMenuItem(
-                      value: _BookSort.progress,
-                      child: Text(strings.text('阅读进度')),
-                    ),
-                    DropdownMenuItem(
-                      value: _BookSort.imported,
-                      child: Text(strings.text('导入时间')),
-                    ),
-                    DropdownMenuItem(
-                      value: _BookSort.rating,
-                      child: Text(strings.text('评分')),
-                    ),
-                  ],
-                ),
-                IconButton(
-                  tooltip: strings.text(_ascending ? '升序' : '降序'),
-                  onPressed: () => setState(() => _ascending = !_ascending),
-                  icon: Icon(
-                    _ascending ? Icons.arrow_upward : Icons.arrow_downward,
-                  ),
-                ),
               ],
-            ),
+              ActionChip(
+                avatar: const Icon(Icons.label_outline, size: 18),
+                label: Text(strings.text('管理标签')),
+                onPressed: _manageTags,
+              ),
+              const SizedBox(width: 12),
+              DropdownButton<_ReadingFilter>(
+                value: _readingFilter,
+                underline: const SizedBox.shrink(),
+                onChanged: (value) {
+                  if (value != null) setState(() => _readingFilter = value);
+                },
+                items: [
+                  DropdownMenuItem(
+                    value: _ReadingFilter.all,
+                    child: Text(strings.text('全部状态')),
+                  ),
+                  DropdownMenuItem(
+                    value: _ReadingFilter.notStarted,
+                    child: Text(strings.text('未开始')),
+                  ),
+                  DropdownMenuItem(
+                    value: _ReadingFilter.reading,
+                    child: Text(strings.text('阅读中')),
+                  ),
+                  DropdownMenuItem(
+                    value: _ReadingFilter.finished,
+                    child: Text(strings.text('已读完')),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 12),
+              DropdownButton<_BookSort>(
+                value: _bookSort,
+                underline: const SizedBox.shrink(),
+                onChanged: (value) {
+                  if (value != null) setState(() => _bookSort = value);
+                },
+                items: [
+                  DropdownMenuItem(
+                    value: _BookSort.recent,
+                    child: Text(strings.text('最近更新')),
+                  ),
+                  DropdownMenuItem(
+                    value: _BookSort.title,
+                    child: Text(strings.text('标题')),
+                  ),
+                  DropdownMenuItem(
+                    value: _BookSort.author,
+                    child: Text(strings.text('作者')),
+                  ),
+                  DropdownMenuItem(
+                    value: _BookSort.progress,
+                    child: Text(strings.text('阅读进度')),
+                  ),
+                  DropdownMenuItem(
+                    value: _BookSort.imported,
+                    child: Text(strings.text('导入时间')),
+                  ),
+                  DropdownMenuItem(
+                    value: _BookSort.rating,
+                    child: Text(strings.text('评分')),
+                  ),
+                ],
+              ),
+              IconButton(
+                tooltip: strings.text(_ascending ? '升序' : '降序'),
+                onPressed: () => setState(() => _ascending = !_ascending),
+                icon: Icon(
+                  _ascending ? Icons.arrow_upward : Icons.arrow_downward,
+                ),
+              ),
+            ],
           ),
         ),
         const Divider(height: 1),
         Expanded(
-          child: books.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (error, _) => Center(
-              child: Text(AppStrings.of(context).failure('读取书库', error)),
-            ),
-            data: (items) {
-              if (items.isEmpty) return const _EmptyLibrary();
-              return shelfBookIds.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (error, _) => Center(
-                  child: Text(AppStrings.of(context).failure('读取书架内容', error)),
-                ),
-                data: (bookIds) => tagBookIds.when(
-                  loading: () =>
-                      const Center(child: CircularProgressIndicator()),
-                  error: (error, _) => Center(
-                    child: Text(
-                      AppStrings.of(context).failure('读取标签内容', error),
-                    ),
-                  ),
-                  data: (tagIds) => progresses.when(
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (error, _) => Center(
-                      child: Text(
-                        AppStrings.of(context).failure('读取进度', error),
+          child: ungroupedBooks.isEmpty && visibleFolders.isEmpty
+              ? Center(child: Text(strings.text('没有符合当前筛选条件的书籍。')))
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final compact =
+                        AppAppearanceController.instance.shelfStyle ==
+                        'compact';
+                    final columns = bookshelfColumnCount(
+                      constraints.maxWidth,
+                      compact: compact,
+                    );
+                    final horizontalPadding = 16.0;
+                    final spacing = constraints.maxWidth < 640 ? 16.0 : 8.0;
+                    final cellWidth =
+                        (constraints.maxWidth -
+                            horizontalPadding * 2 -
+                            spacing * (columns - 1)) /
+                        columns;
+                    final itemCount =
+                        visibleFolders.length +
+                        ungroupedBooks.length +
+                        (widget.onImport == null ? 0 : 1);
+                    return GridView.builder(
+                      padding: EdgeInsets.fromLTRB(
+                        horizontalPadding,
+                        12,
+                        horizontalPadding,
+                        24,
                       ),
-                    ),
-                    data: (progressItems) {
-                      final progressByBook = {
-                        for (final progress in progressItems)
-                          progress.bookId: progress,
-                      };
-                      final visible = _filterAndSortBooks(
-                        items,
-                        shelfBookIds: selectedId == null
-                            ? null
-                            : bookIds.toSet(),
-                        tagBookIds: selectedTagId == null
-                            ? null
-                            : tagIds.toSet(),
-                        progressByBook: progressByBook,
-                      );
-                      if (visible.isEmpty) {
-                        return Center(
-                          child: Text(strings.text('没有符合当前筛选条件的书籍。')),
-                        );
-                      }
-                      return GridView.builder(
-                        padding: const EdgeInsets.all(20),
-                        gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent:
-                              AppAppearanceController.instance.shelfStyle ==
-                                  'compact'
-                              ? 175
-                              : 220,
-                          mainAxisExtent:
-                              AppAppearanceController.instance.shelfStyle ==
-                                  'compact'
-                              ? 235
-                              : 270,
-                          crossAxisSpacing: 16,
-                          mainAxisSpacing: 16,
-                        ),
-                        itemCount: visible.length,
-                        itemBuilder: (context, index) => _BookCard(
-                          book: visible[index],
-                          progress: progressByBook[visible[index].id]?.progress,
-                          coverFit: AppAppearanceController.instance.coverFit,
-                        ),
-                      );
-                    },
-                  ),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: columns,
+                        crossAxisSpacing: spacing,
+                        mainAxisSpacing: 8,
+                        childAspectRatio: bookshelfChildAspectRatio(cellWidth),
+                      ),
+                      itemCount: itemCount,
+                      itemBuilder: (context, index) {
+                        if (index < visibleFolders.length) {
+                          final folder = visibleFolders[index];
+                          return BookshelfFolderTile(
+                            name: folder.name,
+                            covers: mosaicBooks(
+                              shelfId: folder.id,
+                              shelves: shelfItems,
+                              memberships: memberships,
+                              booksById: booksById,
+                            ),
+                            coverFit: coverFit,
+                            onTap: () => setState(
+                              () => _selectedBookshelfId = folder.id,
+                            ),
+                            onLongPress: () => _showBookshelfMenu(folder),
+                            onSecondaryTap: () => _showBookshelfMenu(folder),
+                          );
+                        }
+                        final bookIndex = index - visibleFolders.length;
+                        if (bookIndex < ungroupedBooks.length) {
+                          final book = ungroupedBooks[bookIndex];
+                          return _BookCard(
+                            book: book,
+                            progress: progressByBook[book.id]?.progress,
+                            coverFit: coverFit,
+                          );
+                        }
+                        return BookshelfImportTile(onTap: widget.onImport);
+                      },
+                    );
+                  },
                 ),
-              );
-            },
-          ),
         ),
       ],
     );
@@ -1514,6 +1557,105 @@ class _BookCard extends ConsumerWidget {
     return value?.trim().isEmpty ?? true ? null : value!.trim();
   }
 
+  void _openBook(BuildContext context) {
+    if (!book.isAvailableLocally) return;
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => ReaderScreen(book: book)));
+  }
+
+  Future<void> _showActions(BuildContext context, WidgetRef ref) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                book.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(
+                book.author ?? AppStrings.of(context).text('未知作者'),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: Text(AppStrings.of(context).text('编辑详情与评分')),
+              onTap: () => Navigator.pop(context, 'details'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_outlined),
+              title: Text(AppStrings.of(context).text('整理书架')),
+              onTap: () => Navigator.pop(context, 'shelves'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.label_outline),
+              title: Text(AppStrings.of(context).text('设置标签')),
+              onTap: () => Navigator.pop(context, 'tags'),
+            ),
+            if (book.isAvailableLocally)
+              ListTile(
+                leading: const Icon(Icons.share_outlined),
+                title: Text(AppStrings.of(context).text('分享文件')),
+                onTap: () => Navigator.pop(context, 'share'),
+              )
+            else
+              ListTile(
+                leading: const Icon(Icons.cloud_download_outlined),
+                title: Text(AppStrings.of(context).text('从云端重新下载')),
+                onTap: () => Navigator.pop(context, 'download'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.swap_horiz),
+              title: Text(AppStrings.of(context).text('替换文件')),
+              onTap: () => Navigator.pop(context, 'replace'),
+            ),
+            if (book.isAvailableLocally)
+              ListTile(
+                leading: const Icon(Icons.sd_storage_outlined),
+                title: Text(AppStrings.of(context).text('释放本地空间')),
+                onTap: () => Navigator.pop(context, 'release'),
+              ),
+            ListTile(
+              leading: Icon(
+                Icons.delete_outline,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              title: Text(AppStrings.of(context).text('删除书籍')),
+              onTap: () => Navigator.pop(context, 'delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == 'details' && context.mounted) {
+      await _editDetails(context, ref);
+    }
+    if (action == 'shelves' && context.mounted) {
+      await _editBookshelves(context, ref);
+    }
+    if (action == 'tags' && context.mounted) {
+      await _editTags(context, ref);
+    }
+    if (action == 'share' && context.mounted) await _share(context);
+    if (action == 'replace' && context.mounted) {
+      await _replace(context, ref);
+    }
+    if (action == 'release' && context.mounted) {
+      await _release(context, ref);
+    }
+    if (action == 'download' && context.mounted) {
+      await _download(context, ref);
+    }
+    if (action == 'delete' && context.mounted) {
+      await _deleteBook(context, ref);
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final strings = AppStrings.of(context);
@@ -1524,132 +1666,19 @@ class _BookCard extends ConsumerWidget {
         book.author,
         cloudOnly: !book.isAvailableLocally,
       ),
-      child: Card(
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: book.isAvailableLocally
-              ? () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => ReaderScreen(book: book),
-                  ),
-                )
-              : null,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Center(
-                    child: Hero(
-                      tag: 'book-cover-${book.id}',
-                      child:
-                          book.coverPath != null &&
-                              File(book.coverPath!).existsSync()
-                          ? ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: Image.file(
-                                File(book.coverPath!),
-                                fit: coverFit,
-                                width: double.infinity,
-                                errorBuilder: (_, _, _) => Icon(
-                                  Icons.menu_book_rounded,
-                                  size: 72,
-                                  color: Theme.of(context).colorScheme.primary,
-                                ),
-                              ),
-                            )
-                          : Icon(
-                              book.isAvailableLocally
-                                  ? Icons.menu_book_rounded
-                                  : Icons.cloud_download_outlined,
-                              size: 72,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                    ),
-                  ),
-                ),
-                Text(
-                  book.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  book.author ?? strings.text('未知作者'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                if (progress != null) ...[
-                  const SizedBox(height: 6),
-                  LinearProgressIndicator(value: progress!.clamp(0, 1)),
-                ],
-                Row(
-                  children: [
-                    if (book.rating != null) ...[
-                      const Icon(Icons.star, size: 16, color: Colors.amber),
-                      Text(book.rating!.toStringAsFixed(1)),
-                    ],
-                    const Spacer(),
-                    PopupMenuButton<String>(
-                      tooltip: AppStrings.of(context).text('书籍操作'),
-                      onSelected: (action) {
-                        if (action == 'details') _editDetails(context, ref);
-                        if (action == 'shelves') _editBookshelves(context, ref);
-                        if (action == 'tags') _editTags(context, ref);
-                        if (action == 'share') _share(context);
-                        if (action == 'replace') _replace(context, ref);
-                        if (action == 'release') _release(context, ref);
-                        if (action == 'download') _download(context, ref);
-                        if (action == 'delete') _deleteBook(context, ref);
-                      },
-                      itemBuilder: (context) => [
-                        PopupMenuItem(
-                          value: 'details',
-                          child: Text(AppStrings.of(context).text('编辑详情与评分')),
-                        ),
-                        PopupMenuItem(
-                          value: 'shelves',
-                          child: Text(AppStrings.of(context).text('整理书架')),
-                        ),
-                        PopupMenuItem(
-                          value: 'tags',
-                          child: Text(AppStrings.of(context).text('设置标签')),
-                        ),
-                        if (book.isAvailableLocally)
-                          PopupMenuItem(
-                            value: 'share',
-                            child: Text(AppStrings.of(context).text('分享文件')),
-                          ),
-                        if (!book.isAvailableLocally)
-                          PopupMenuItem(
-                            value: 'download',
-                            child: Text(AppStrings.of(context).text('从云端重新下载')),
-                          ),
-                        PopupMenuItem(
-                          value: 'replace',
-                          child: Text(AppStrings.of(context).text('替换文件')),
-                        ),
-                        if (book.isAvailableLocally)
-                          PopupMenuItem(
-                            value: 'release',
-                            child: Text(AppStrings.of(context).text('释放本地空间')),
-                          ),
-                        const PopupMenuDivider(),
-                        PopupMenuItem(
-                          value: 'delete',
-                          child: Text(AppStrings.of(context).text('删除书籍')),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
+      child: BookshelfBookTile(
+        book: book,
+        coverFit: coverFit,
+        progress: progress,
+        onTap: () {
+          if (book.isAvailableLocally) {
+            _openBook(context);
+          } else {
+            _showActions(context, ref);
+          }
+        },
+        onLongPress: () => _showActions(context, ref),
+        onSecondaryTap: () => _showActions(context, ref),
       ),
     );
   }
@@ -4613,7 +4642,9 @@ class _WebDavConfiguration {
 }
 
 class _EmptyLibrary extends StatelessWidget {
-  const _EmptyLibrary();
+  const _EmptyLibrary({this.onImport});
+
+  final VoidCallback? onImport;
 
   @override
   Widget build(BuildContext context) {
@@ -4648,6 +4679,14 @@ class _EmptyLibrary extends StatelessWidget {
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyLarge,
                     ),
+                    if (onImport != null) ...[
+                      const SizedBox(height: 24),
+                      FilledButton.icon(
+                        onPressed: onImport,
+                        icon: const Icon(Icons.add),
+                        label: Text(strings.importBook),
+                      ),
+                    ],
                   ],
                 ),
               ),

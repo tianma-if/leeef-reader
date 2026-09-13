@@ -112,6 +112,13 @@ final bookshelfBookIdsProvider = StreamProvider.family<List<String>, String>((
   yield* repository.watchBookshelfBookIds(bookshelfId);
 });
 
+final bookshelfEntriesProvider = StreamProvider<List<BookshelfEntry>>((
+  ref,
+) async* {
+  final repository = await ref.watch(libraryRepositoryProvider.future);
+  yield* repository.watchAllBookshelfEntries();
+});
+
 final libraryDirectoryProvider = FutureProvider<Directory>((ref) async {
   final preferences = await SharedPreferences.getInstance();
   final custom = preferences.getString('leeef.storage.custom_directory');

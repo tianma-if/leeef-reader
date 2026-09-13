@@ -137,6 +137,15 @@ class LibraryRepository {
     );
   }
 
+  Stream<List<BookshelfEntry>> watchAllBookshelfEntries() {
+    final query = _database.select(_database.bookshelfEntries)
+      ..orderBy([
+        (entry) => OrderingTerm.asc(entry.bookshelfId),
+        (entry) => OrderingTerm.asc(entry.sortOrder),
+      ]);
+    return query.watch();
+  }
+
   Future<Set<String>> listBookBookshelfIds(String bookId) async {
     final query =
         _database.select(_database.bookshelfEntries).join([

@@ -212,6 +212,30 @@ void main() {
     expect(operations[4].kind, 'delete');
   });
 
+  test('watchAllBookshelfEntries emits membership rows', () async {
+    final repository = LibraryRepository(
+      database: database,
+      deviceId: 'device-a',
+      idGenerator: _Ids([
+        'book-1',
+        'op-book',
+        'shelf-1',
+        'op-shelf',
+        'op-add',
+      ]).next,
+    );
+    await repository.createBookMetadata(
+      sha256: '1' * 64,
+      title: 'Organized Book',
+      mediaType: 'application/epub+zip',
+    );
+    final shelfId = await repository.createBookshelf(name: 'Fiction');
+    await repository.addBookToBookshelf(bookshelfId: shelfId, bookId: 'book-1');
+    final entries = await repository.watchAllBookshelfEntries().first;
+    expect(entries.single.bookshelfId, shelfId);
+    expect(entries.single.bookId, 'book-1');
+  });
+
   test('bookshelf hierarchy rejects cycles', () async {
     final repository = LibraryRepository(
       database: database,

@@ -30,6 +30,9 @@ void main() {
             readingProgressesProvider.overrideWith(
               (ref) => Stream.value(const []),
             ),
+            bookshelfEntriesProvider.overrideWith(
+              (ref) => Stream.value(const []),
+            ),
           ],
           child: const LeeefApp(),
         ),
@@ -69,6 +72,9 @@ void main() {
             bookshelvesProvider.overrideWith((ref) => Stream.value(const [])),
             tagsProvider.overrideWith((ref) => Stream.value(const [])),
             readingProgressesProvider.overrideWith(
+              (ref) => Stream.value(const []),
+            ),
+            bookshelfEntriesProvider.overrideWith(
               (ref) => Stream.value(const []),
             ),
           ],
