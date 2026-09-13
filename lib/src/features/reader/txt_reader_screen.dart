@@ -22,8 +22,10 @@ import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
 import 'package:leeef_reader/src/features/reader/txt_page_snapshot_renderer.dart';
 import 'package:leeef_reader/src/features/reader/page_slide_switcher.dart';
+import 'package:leeef_reader/src/features/reader/reader_chrome_footer.dart';
 import 'package:leeef_reader/src/features/reader/reader_page_turn_policy.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_gesture.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
 import 'package:leeef_reader/src/platform/app_appearance.dart';
 import 'package:leeef_reader/src/reader/chinese_text_converter.dart';
@@ -440,13 +442,12 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       return;
     }
     final size = renderObject.size;
-    final x = position.dx;
-    var direction = x >= size.width * (1 - _preferences.tapZoneRatio)
-        ? 1.0
-        : x <= size.width * _preferences.tapZoneRatio
-        ? -1.0
-        : 0.0;
-    if (_preferences.swapTapZones) direction = -direction;
+    final direction = pageCurlDirectionForX(
+      x: position.dx,
+      width: size.width,
+      tapZoneRatio: _preferences.tapZoneRatio,
+      swapTapZones: _preferences.swapTapZones,
+    );
     final target = _pageIndex + direction.toInt();
     if (direction == 0 || target < 0 || target >= _pagesFor(document).length) {
       return;
@@ -1321,6 +1322,17 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     });
   }
 
+  Future<void> _commitTxtPreferences(ReaderPreferences preferences) async {
+    await preferences.save();
+    await _applyReadingState(preferences);
+    if (!mounted) return;
+    setState(() {
+      _preferences = preferences;
+      _convertedPageCache.clear();
+      _displayTextCache.clear();
+    });
+  }
+
   Future<void> _applyReadingState(ReaderPreferences preferences) async {
     await WakelockPlus.toggle(enable: preferences.keepAwake);
     await SystemChrome.setEnabledSystemUIMode(
@@ -1926,42 +1938,33 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
               if (document != null &&
                   _controlsVisible &&
                   _preferences.showFooter)
-                Align(
-                  alignment: Alignment.bottomCenter,
-                  child: SafeArea(
-                    minimum: const EdgeInsets.all(12),
-                    child: Material(
-                      elevation: 4,
-                      borderRadius: BorderRadius.circular(28),
-                      color: Theme.of(context).colorScheme.surfaceContainer,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            tooltip: strings.text('上一页'),
-                            onPressed: _pageIndex == 0 || _preparingTurn
-                                ? null
-                                : () => _prepareTurn(_pageIndex - 1),
-                            icon: const Icon(Icons.chevron_left),
-                          ),
-                          SizedBox(
-                            width: 100,
-                            child: Text(
-                              footerText,
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: strings.text('下一页'),
-                            onPressed:
-                                _pageIndex == pages.length - 1 || _preparingTurn
-                                ? null
-                                : () => _prepareTurn(_pageIndex + 1),
-                            icon: const Icon(Icons.chevron_right),
-                          ),
-                        ],
-                      ),
-                    ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: ReaderChromeFooter(
+                    progress: progress,
+                    progressLabel: footerText,
+                    preferences: _preferences,
+                    onPreferencesChanged: (value) =>
+                        unawaited(_commitTxtPreferences(value)),
+                    onPrevious: _pageIndex == 0 || _preparingTurn
+                        ? null
+                        : () => unawaited(_prepareTurn(_pageIndex - 1)),
+                    onNext: _pageIndex == pages.length - 1 || _preparingTurn
+                        ? null
+                        : () => unawaited(_prepareTurn(_pageIndex + 1)),
+                    onToc: document.chapters.isEmpty
+                        ? null
+                        : () => unawaited(_showTableOfContents()),
+                    onSeekProgress: (value) {
+                      if (pages.isEmpty) return;
+                      _goToPage(
+                        (value.clamp(0.0, 1.0) * (pages.length - 1)).round(),
+                      );
+                    },
+                    onOpenFullSettings: () =>
+                        unawaited(_showReadingSettings()),
                   ),
                 ),
               if (_selection case final selection?)
@@ -2048,7 +2051,9 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     bottom: 0,
     left: alignment == Alignment.centerLeft ? 0 : null,
     right: alignment == Alignment.centerRight ? 0 : null,
-    width: MediaQuery.sizeOf(context).width * _preferences.tapZoneRatio,
+    width:
+        MediaQuery.sizeOf(context).width *
+        pageCurlSwipeZoneRatio(_preferences.tapZoneRatio),
     child: Semantics(
       button: true,
       label: AppStrings.of(context).text(

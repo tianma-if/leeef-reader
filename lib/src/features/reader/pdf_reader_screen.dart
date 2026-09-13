@@ -15,9 +15,11 @@ import 'package:leeef_reader/src/data/repositories/library_repository.dart';
 import 'package:leeef_reader/src/domain/reading_location.dart';
 import 'package:leeef_reader/src/features/reader/pdf_page_snapshot_renderer.dart';
 import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
+import 'package:leeef_reader/src/features/reader/reader_chrome_footer.dart';
 import 'package:leeef_reader/src/features/reader/reader_page_turn_policy.dart';
 import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_gesture.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
 import 'package:leeef_reader/src/page_curl/page_texture_cache.dart';
 import 'package:leeef_reader/src/platform/app_appearance.dart';
@@ -190,6 +192,12 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     } on Object catch (error) {
       if (mounted) setState(() => _error = error);
     }
+  }
+
+  Future<void> _commitPdfPreferences(ReaderPreferences preferences) async {
+    await preferences.save();
+    await _applyReadingState(preferences);
+    if (mounted) setState(() => _preferences = preferences);
   }
 
   Future<void> _applyReadingState(ReaderPreferences preferences) async {
@@ -846,13 +854,12 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
       return;
     }
     final size = renderObject.size;
-    final x = position.dx;
-    var direction = x >= size.width * (1 - _preferences.tapZoneRatio)
-        ? 1.0
-        : x <= size.width * _preferences.tapZoneRatio
-        ? -1.0
-        : 0.0;
-    if (_preferences.swapTapZones) direction = -direction;
+    final direction = pageCurlDirectionForX(
+      x: position.dx,
+      width: size.width,
+      tapZoneRatio: _preferences.tapZoneRatio,
+      swapTapZones: _preferences.swapTapZones,
+    );
     final target = _page + direction.toInt();
     if (direction == 0 || target < 1 || target > _pageCount) return;
     final controller = PageCurlController()
@@ -1090,41 +1097,36 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
                 ],
               ],
               if (_pageCount > 0 && _controlsVisible && _preferences.showFooter)
-                Align(
-                  alignment: Alignment.bottomCenter,
-                  child: SafeArea(
-                    minimum: const EdgeInsets.all(12),
-                    child: Material(
-                      elevation: 4,
-                      borderRadius: BorderRadius.circular(28),
-                      color: Theme.of(context).colorScheme.surfaceContainer,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            tooltip: strings.text('上一页'),
-                            onPressed: _page <= 1 || _preparingTurn
-                                ? null
-                                : () => _turnPage(_page - 1),
-                            icon: const Icon(Icons.chevron_left),
-                          ),
-                          SizedBox(
-                            width: 100,
-                            child: Text(
-                              footerText,
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: strings.text('下一页'),
-                            onPressed: _page >= _pageCount || _preparingTurn
-                                ? null
-                                : () => _turnPage(_page + 1),
-                            icon: const Icon(Icons.chevron_right),
-                          ),
-                        ],
-                      ),
-                    ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: ReaderChromeFooter(
+                    progress: progress,
+                    progressLabel: footerText,
+                    preferences: _preferences,
+                    onPreferencesChanged: (value) =>
+                        unawaited(_commitPdfPreferences(value)),
+                    onPrevious: _page <= 1 || _preparingTurn
+                        ? null
+                        : () => _turnPage(_page - 1),
+                    onNext: _page >= _pageCount || _preparingTurn
+                        ? null
+                        : () => _turnPage(_page + 1),
+                    onToc: _toc.isEmpty
+                        ? null
+                        : () => unawaited(_showTableOfContents()),
+                    onSeekProgress: (value) {
+                      if (_pageCount < 1) return;
+                      unawaited(
+                        _goToPage(
+                          (value.clamp(0.0, 1.0) * (_pageCount - 1)).round() +
+                              1,
+                        ),
+                      );
+                    },
+                    onOpenFullSettings: () =>
+                        unawaited(_showReadingSettings()),
                   ),
                 ),
               if (_searchActive)
@@ -1290,7 +1292,9 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     bottom: 0,
     left: alignment == Alignment.centerLeft ? 0 : null,
     right: alignment == Alignment.centerRight ? 0 : null,
-    width: MediaQuery.sizeOf(context).width * _preferences.tapZoneRatio,
+    width:
+        MediaQuery.sizeOf(context).width *
+        pageCurlSwipeZoneRatio(_preferences.tapZoneRatio),
     child: Semantics(
       button: true,
       label: AppStrings.of(context).text(

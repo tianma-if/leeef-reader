@@ -133,6 +133,7 @@ globalThis.leeefReader = {
         canGoForward: view.history.canGoForward,
     }),
     goTo: locator => view.goTo(locator),
+    goToFraction: fraction => view.goToFraction(fraction),
     close: async () => {
         await view.close()
         currentBookURL = null

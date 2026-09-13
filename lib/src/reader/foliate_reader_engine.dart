@@ -80,6 +80,11 @@ class FoliateReaderEngine implements ReaderEngine {
     {'locator': locator},
   );
 
+  Future<void> goToFraction(double fraction) => _invokeVoid(
+    'return await globalThis.leeefReader.goToFraction(fraction);',
+    {'fraction': fraction.clamp(0.0, 1.0)},
+  );
+
   @override
   Future<void> next() =>
       _invokeVoid('return await globalThis.leeefReader.next();', const {});

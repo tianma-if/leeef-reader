@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_gesture.dart';
 
 void main() {
   test('pressing the edge immediately lifts the page corner', () {
@@ -35,8 +36,8 @@ void main() {
     addTearDown(forward.dispose);
     addTearDown(backward.dispose);
 
-    expect(forward.progress, closeTo(0.43, 0.001));
-    expect(backward.progress, closeTo(0.43, 0.001));
+    expect(forward.progress, closeTo(backward.progress, 0.001));
+    expect(forward.progress, greaterThan(0.7));
     expect(forward.touchY, closeTo(0.375, 0.001));
   });
 
@@ -57,6 +58,7 @@ void main() {
 
     expect(received, isNotNull);
     expect(received!.normalizedVelocity, -1200);
+    expect(received!.alongPixels, greaterThan(pageCurlMinCommitTravel));
   });
 
   test('tap can force completion without fake drag velocity', () async {

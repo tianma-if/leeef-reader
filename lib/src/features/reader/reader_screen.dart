@@ -15,12 +15,14 @@ import 'package:leeef_reader/src/data/repositories/library_repository.dart';
 import 'package:leeef_reader/src/domain/reading_location.dart';
 import 'package:leeef_reader/src/features/reader/pdf_reader_screen.dart';
 import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
+import 'package:leeef_reader/src/features/reader/reader_chrome_footer.dart';
 import 'package:leeef_reader/src/features/reader/reader_page_turn_policy.dart';
 import 'package:leeef_reader/src/features/ai/ai_assistant_screen.dart';
 import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_screen.dart';
 import 'package:leeef_reader/src/page_curl/foliate_page_snapshot_view.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_gesture.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
 import 'package:leeef_reader/src/page_curl/page_snapshot_cache.dart';
 import 'package:leeef_reader/src/platform/app_appearance.dart';
@@ -1576,12 +1578,12 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
       return;
     }
     final size = renderObject.size;
-    var direction = position.dx >= size.width * (1 - _preferences.tapZoneRatio)
-        ? 1.0
-        : position.dx <= size.width * _preferences.tapZoneRatio
-        ? -1.0
-        : 0.0;
-    if (_preferences.swapTapZones) direction = -direction;
+    final direction = pageCurlDirectionForX(
+      x: position.dx,
+      width: size.width,
+      tapZoneRatio: _preferences.tapZoneRatio,
+      swapTapZones: _preferences.swapTapZones,
+    );
     if (direction == 0) return;
     final controller = PageCurlController()
       ..begin(position: position, size: size, direction: direction);
@@ -1854,44 +1856,28 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
                   ),
                 ),
               if (_controlsVisible && _preferences.showFooter)
-                Align(
-                  alignment: Alignment.bottomCenter,
-                  child: SafeArea(
-                    minimum: const EdgeInsets.all(12),
-                    child: Material(
-                      elevation: 4,
-                      borderRadius: BorderRadius.circular(28),
-                      color: Theme.of(context).colorScheme.surfaceContainer,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              tooltip: strings.text('上一页'),
-                              onPressed: _bookInfo == null || _preparingTurn
-                                  ? null
-                                  : () => _prepareTurn(false),
-                              icon: const Icon(Icons.chevron_left),
-                            ),
-                            SizedBox(
-                              width: 88,
-                              child: Text(
-                                footerText,
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: strings.text('下一页'),
-                              onPressed: _bookInfo == null || _preparingTurn
-                                  ? null
-                                  : () => _prepareTurn(true),
-                              icon: const Icon(Icons.chevron_right),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: ReaderChromeFooter(
+                    progress: progress,
+                    progressLabel: footerText,
+                    preferences: _preferences,
+                    onPreferencesChanged: (value) =>
+                        unawaited(_applyPreferences(value)),
+                    onPrevious: _bookInfo == null || _preparingTurn
+                        ? null
+                        : () => unawaited(_prepareTurn(false)),
+                    onNext: _bookInfo == null || _preparingTurn
+                        ? null
+                        : () => unawaited(_prepareTurn(true)),
+                    onToc: _bookInfo == null ? null : () => unawaited(_showTableOfContents()),
+                    onSeekProgress: (value) =>
+                        unawaited(_engine.goToFraction(value)),
+                    onOpenFullSettings: _bookInfo == null
+                        ? null
+                        : () => unawaited(_showReadingSettings()),
                   ),
                 ),
               if (_selection != null)
@@ -1983,7 +1969,9 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     bottom: 0,
     left: alignment == Alignment.centerLeft ? 0 : null,
     right: alignment == Alignment.centerRight ? 0 : null,
-    width: MediaQuery.sizeOf(context).width * _preferences.tapZoneRatio,
+    width:
+        MediaQuery.sizeOf(context).width *
+        pageCurlSwipeZoneRatio(_preferences.tapZoneRatio),
     child: Semantics(
       button: true,
       label: AppStrings.of(context).text(

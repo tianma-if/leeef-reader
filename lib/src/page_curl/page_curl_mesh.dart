@@ -3,13 +3,14 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_geometry.dart';
 
 /// Builds a textured sheet of paper from a regularly tessellated 3D mesh.
 ///
-/// The sheet bends around a cylinder whose axis is derived from the original
-/// page corner and the moving touch point. Vertices past half of the cylinder
-/// continue as the back of the sheet. The resulting 3D points are projected
-/// back into canvas space and depth-sorted before drawing.
+/// The sheet bends around a cylinder whose axis is derived from the grab
+/// point on the right edge and the moving touch point. Vertices past half of
+/// the cylinder continue as the back of the sheet. The resulting 3D points
+/// are projected back into canvas space and depth-sorted before drawing.
 class PageCurlMesh {
   const PageCurlMesh({
     required this.page,
@@ -36,28 +37,16 @@ class PageCurlMesh {
   }) {
     final width = size.width;
     final height = size.height;
-    // Values above one are used by the release animation to carry the loose
-    // page corner beyond the opposite edge. This keeps the fallback painter
-    // continuous with the fragment-shader implementation.
-    final clampedProgress = progress.clamp(0.0, 2.0);
-    final cornerY = touchY < 0.42 ? 0.0 : height;
-    final corner = Offset(width, cornerY);
-    final touchX = width * (1 - clampedProgress);
-    final horizontalPull = math.max(width - touchX, 1.0);
-    final requestedVerticalPull =
-        _lerpDouble(cornerY, height * touchY, 0.84) - cornerY;
-    final verticalPull = requestedVerticalPull.clamp(
-      -horizontalPull * 0.72,
-      horizontalPull * 0.72,
+    final geometry = PageCurlGeometry.compute(
+      size: size,
+      travel: progress,
+      touchY: touchY,
     );
-    final touch = Offset(touchX, cornerY + verticalPull);
-    final pull = corner - touch;
-    final pullLength = math.max(pull.distance, 0.001);
-    final normal = pull / pullLength;
-    final tangent = Offset(-normal.dy, normal.dx);
-    final baseRadius = (pullLength * 0.145).clamp(12.0, width * 0.15);
-    final sourceCornerDistance = (pullLength + math.pi * baseRadius) / 2;
-    final foldCenter = corner - normal * sourceCornerDistance;
+    final grab = geometry.grab;
+    final normal = geometry.normal;
+    final tangent = geometry.tangent;
+    final foldCenter = geometry.foldCenter;
+    final baseRadius = geometry.radius;
     final cameraDistance = width * 2.8;
     final points = <_MeshPoint>[];
 
@@ -113,7 +102,7 @@ class PageCurlMesh {
           direction > 0
               ? deformed.dx + z * 0.34
               : width - deformed.dx - z * 0.34,
-          deformed.dy + (cornerY == height ? -z * 0.12 : z * 0.12),
+          deformed.dy + (grab.dy > height * 0.5 ? -z * 0.12 : z * 0.12),
         );
 
         points.add(
@@ -199,8 +188,8 @@ class PageCurlMesh {
         0.0,
         1.0,
       );
-      final opacity = (104 + backAmount * 58).round();
-      backsideColors[index] = Color.fromARGB(opacity, 255, 247, 224).toARGB32();
+      final opacity = (188 + backAmount * 40).round();
+      backsideColors[index] = Color.fromARGB(opacity, 255, 244, 228).toARGB32();
     }
     for (var index = 0; index < backsideTriangles.length; index++) {
       final triangle = backsideTriangles[index];
@@ -251,6 +240,7 @@ class PageCurlMesh {
       backside: ui.Vertices.raw(
         ui.VertexMode.triangles,
         pagePositions,
+        textureCoordinates: pageTextureCoordinates,
         colors: backsideColors,
         indices: backsideIndices,
       ),
@@ -333,8 +323,6 @@ class PageCurlMesh {
   static double _dot(Offset a, Offset b) => a.dx * b.dx + a.dy * b.dy;
 
   static double _cross(Offset a, Offset b) => a.dx * b.dy - a.dy * b.dx;
-
-  static double _lerpDouble(double a, double b, double t) => a + (b - a) * t;
 }
 
 class _MeshPoint {

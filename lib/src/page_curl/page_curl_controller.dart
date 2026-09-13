@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_gesture.dart';
 
 typedef PageCurlReleaseHandler = void Function(PageCurlRelease release);
 
@@ -9,10 +10,12 @@ class PageCurlRelease {
   const PageCurlRelease({
     required this.normalizedVelocity,
     this.forceComplete = false,
+    this.alongPixels = 0,
   });
 
   final double normalizedVelocity;
   final bool forceComplete;
+  final double alongPixels;
 }
 
 /// Carries one pointer sequence across the asynchronous page-snapshot gap.
@@ -22,6 +25,7 @@ class PageCurlRelease {
 /// and this controller lets the newly mounted surface catch up immediately.
 class PageCurlController extends ChangeNotifier {
   Offset? _origin;
+  Offset? _latest;
   Size _size = Size.zero;
   double _direction = 1;
   double _progress = 0;
@@ -38,6 +42,7 @@ class PageCurlController extends ChangeNotifier {
     required double direction,
   }) {
     _origin = position;
+    _latest = position;
     _size = size;
     _direction = direction.sign == 0 ? 1 : direction.sign;
     // Reveal a small lifted corner as soon as the snapshot is ready, even if
@@ -52,11 +57,13 @@ class PageCurlController extends ChangeNotifier {
   void update(Offset position) {
     final origin = _origin;
     if (origin == null || _size.width <= 0) return;
-    final travel = (origin.dx - position.dx) * _direction;
-    // Keep the loose corner under the pointer while it is being dragged.
-    // The extra distance needed to move the sheet fully off-screen belongs to
-    // the release animation, not the interactive gesture.
-    _progress = (travel / _size.width).clamp(0.0, 1.0);
+    _latest = position;
+    _progress = pageCurlProgressFromPointer(
+      origin: origin,
+      current: position,
+      width: _size.width,
+      direction: _direction,
+    );
     _touchY = _normalizeY(position.dy);
     notifyListeners();
   }
@@ -65,9 +72,19 @@ class PageCurlController extends ChangeNotifier {
     required double horizontalVelocity,
     bool forceComplete = false,
   }) {
+    final origin = _origin;
+    final latest = _latest ?? origin;
+    final along = origin == null || latest == null
+        ? 0.0
+        : pageCurlAlongPixels(
+            origin: origin,
+            current: latest,
+            direction: _direction,
+          );
     final release = PageCurlRelease(
       normalizedVelocity: horizontalVelocity * _direction,
       forceComplete: forceComplete,
+      alongPixels: along,
     );
     final handler = _releaseHandler;
     if (handler == null) {

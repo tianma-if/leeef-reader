@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
+import 'package:leeef_reader/src/page_curl/page_curl_geometry.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_gesture.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_mesh.dart';
 import 'package:leeef_reader/src/page_curl/page_curl_performance.dart';
@@ -151,8 +152,10 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
       ));
       if (!mounted) return;
       setState(() => _curlShader = program.fragmentShader());
-    } on Object {
-      // The tessellated painter below remains the portable fallback.
+      unawaited(AppLog.info('PageCurl shader ready'));
+    } on Object catch (error, stackTrace) {
+      debugPrint('PageCurl shader unavailable: $error');
+      unawaited(AppLog.error(error, stackTrace));
     }
   }
 
@@ -190,7 +193,13 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
             onHorizontalDragEnd: (details) {
               final velocity = details.primaryVelocity! * widget.direction;
               _settle(
-                _gesture.shouldComplete(velocity),
+                _gesture.shouldComplete(
+                  velocity,
+                  alongPixels:
+                      _gesture.progress *
+                      constraints.maxWidth *
+                      pageCurlInteractiveSpan,
+                ),
                 normalizedVelocity: velocity,
               );
             },
@@ -305,8 +314,11 @@ class _PageCurlSurfaceState extends State<PageCurlSurface>
   void _handleControllerRelease(PageCurlRelease release) {
     final complete =
         release.forceComplete ||
-        _progress >= _gesture.completionThreshold ||
-        release.normalizedVelocity <= -_gesture.flingVelocityThreshold;
+        pageCurlShouldComplete(
+          progress: _progress,
+          velocity: release.normalizedVelocity,
+          alongPixels: release.alongPixels,
+        );
     unawaited(
       _settle(complete, normalizedVelocity: release.normalizedVelocity),
     );
@@ -377,45 +389,25 @@ class _PageCurlPainter extends CustomPainter {
     if (progress >= 0.999) return;
 
     final shader = curlShader;
+    final geometry = PageCurlGeometry.compute(
+      size: size,
+      travel: travel,
+      touchY: touchY,
+    );
     if (shader != null) {
-      final cornerY = touchY < 0.42 ? 0.0 : size.height;
-      final corner = Offset(size.width, cornerY);
-      // Interactive travel stays one-to-one with the pointer. Once released,
-      // the surface continues from that exact position to two viewport widths
-      // so the outgoing sheet clears the screen without a last-frame swap.
-      final touchX = size.width * (1 - travel.clamp(0.0, 2.0));
-      final horizontalPull = math.max(size.width - touchX, 1.0);
-      final requestedVerticalPull = (size.height * touchY - cornerY) * 0.84;
-      // A page corner cannot follow a steep diagonal finger path literally:
-      // the free edge tightens and slides along the finger instead. Limiting
-      // the vertical component avoids the oversized flat triangular flap that
-      // a cylindrical approximation otherwise produces.
-      final verticalPull = requestedVerticalPull.clamp(
-        -horizontalPull * 0.72,
-        horizontalPull * 0.72,
-      );
-      final touch = Offset(touchX, cornerY + verticalPull);
-      final pull = corner - touch;
-      final pullLength = math.max(pull.distance, 0.001);
-      final normal = pull / pullLength;
-      final tangent = Offset(-normal.dy, normal.dx);
-      final radius = (pullLength * 0.145).clamp(12.0, size.width * 0.15);
-      // Preserve the sheet length across the half-cylinder. With d being the
-      // source corner's distance from the crease, the reflected tail lands on
-      // the finger when 2d - pi*r equals the requested pull distance.
-      final sourceCornerDistance = (pullLength + math.pi * radius) / 2;
-      final foldCenter = corner - normal * sourceCornerDistance;
       shader
         ..setFloat(0, size.width)
         ..setFloat(1, size.height)
-        ..setFloat(2, foldCenter.dx)
-        ..setFloat(3, foldCenter.dy)
-        ..setFloat(4, normal.dx)
-        ..setFloat(5, normal.dy)
-        ..setFloat(6, tangent.dx)
-        ..setFloat(7, tangent.dy)
-        ..setFloat(8, radius)
+        ..setFloat(2, geometry.foldCenter.dx)
+        ..setFloat(3, geometry.foldCenter.dy)
+        ..setFloat(4, geometry.normal.dx)
+        ..setFloat(5, geometry.normal.dy)
+        ..setFloat(6, geometry.tangent.dx)
+        ..setFloat(7, geometry.tangent.dy)
+        ..setFloat(8, geometry.radius)
         ..setFloat(9, direction)
+        ..setFloat(10, geometry.touch.dx)
+        ..setFloat(11, geometry.touch.dy)
         ..setImageSampler(0, currentPage, filterQuality: FilterQuality.low)
         ..setImageSampler(1, nextPage, filterQuality: FilterQuality.low);
       canvas.drawRect(bounds, Paint()..shader = shader);
@@ -453,8 +445,11 @@ class _PageCurlPainter extends CustomPainter {
     );
     canvas.drawVertices(
       mesh.backside,
-      BlendMode.srcOver,
-      Paint()..isAntiAlias = true,
+      BlendMode.modulate,
+      Paint()
+        ..shader = pageTexture
+        ..filterQuality = FilterQuality.medium
+        ..isAntiAlias = true,
     );
     canvas
       ..drawPath(
