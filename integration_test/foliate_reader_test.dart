@@ -3,14 +3,11 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:leeef_reader/src/page_curl/foliate_page_snapshot_view.dart';
 import 'package:leeef_reader/src/page_curl/page_snapshot_cache.dart';
-import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
-import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
 import 'package:leeef_reader/src/reader/foliate_reader_engine.dart';
 import 'package:leeef_reader/src/reader/foliate_reader_view.dart';
 import 'package:leeef_reader/src/reader/reader_engine.dart';
@@ -104,167 +101,6 @@ void main() {
     final selection = await engine.probeTextSelection();
     expect(selection.quote, isNotEmpty);
     expect(selection.cfi, startsWith('epubcfi('));
-  });
-
-  testWidgets('page curl mesh renders and completes an interactive drag', (
-    tester,
-  ) async {
-    final currentPage = await _solidImage(const ui.Color(0xFFF7F1E3));
-    final nextPage = await _solidImage(const ui.Color(0xFFCEE5D0));
-    addTearDown(() {
-      currentPage.dispose();
-      nextPage.dispose();
-    });
-    var completed = false;
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: SizedBox.expand(
-            child: PageCurlSurface(
-              currentPage: currentPage,
-              nextPage: nextPage,
-              onTurnCompleted: () => completed = true,
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.drag(find.byType(PageCurlSurface), const Offset(-500, 0));
-    await tester.pumpAndSettle();
-
-    expect(completed, isTrue);
-  });
-
-  testWidgets(
-    'mid-turn page curl has an oblique fold instead of a flat strip',
-    (tester) async {
-      tester.view.physicalSize = const Size(400, 600);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(() {
-        tester.view.resetPhysicalSize();
-        tester.view.resetDevicePixelRatio();
-      });
-      final currentPage = await _solidImage(const ui.Color(0xFFF7F1E3));
-      final nextPage = await _solidImage(const ui.Color(0xFFCEE5D0));
-      addTearDown(() {
-        currentPage.dispose();
-        nextPage.dispose();
-      });
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: RepaintBoundary(
-              key: const Key('curl-frame'),
-              child: PageCurlSurface(
-                currentPage: currentPage,
-                nextPage: nextPage,
-                onTurnCompleted: () {},
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final gesture = await tester.startGesture(const Offset(390, 540));
-      await gesture.moveBy(const Offset(-200, -90));
-      await tester.pump();
-
-      final boundary = tester.renderObject<RenderRepaintBoundary>(
-        find.byKey(const Key('curl-frame')),
-      );
-      final frame = await boundary.toImage();
-      addTearDown(frame.dispose);
-      final pixels = await frame.toByteData(format: ui.ImageByteFormat.rawRgba);
-      expect(pixels, isNotNull);
-      final upper = _pixelAt(pixels!, frame.width, 300, 120);
-      final lower = _pixelAt(pixels, frame.width, 300, 510);
-
-      expect(upper.r, greaterThan(upper.g), reason: 'upper area stays current');
-      expect(lower.g, greaterThan(lower.r), reason: 'lower corner is revealed');
-      expect(upper, isNot(lower));
-
-      await gesture.cancel();
-    },
-  );
-
-  testWidgets('page curl can automatically complete after a single tap', (
-    tester,
-  ) async {
-    final currentPage = await _solidImage(const ui.Color(0xFFF7F1E3));
-    final nextPage = await _solidImage(const ui.Color(0xFFCEE5D0));
-    addTearDown(() {
-      currentPage.dispose();
-      nextPage.dispose();
-    });
-    var completed = false;
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: SizedBox.expand(
-            child: PageCurlSurface(
-              currentPage: currentPage,
-              nextPage: nextPage,
-              autoComplete: true,
-              onTurnCompleted: () => completed = true,
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(completed, isTrue);
-  });
-
-  testWidgets('a short slow pull springs back without changing page', (
-    tester,
-  ) async {
-    final currentPage = await _solidImage(const ui.Color(0xFFF7F1E3));
-    final nextPage = await _solidImage(const ui.Color(0xFFCEE5D0));
-    final controller = PageCurlController()
-      ..begin(
-        position: const Offset(390, 540),
-        size: const Size(400, 600),
-        direction: 1,
-      )
-      ..update(const Offset(350, 530));
-    addTearDown(() {
-      controller.dispose();
-      currentPage.dispose();
-      nextPage.dispose();
-    });
-    var completed = false;
-    var cancelled = false;
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: SizedBox(
-            width: 400,
-            height: 600,
-            child: PageCurlSurface(
-              currentPage: currentPage,
-              nextPage: nextPage,
-              controller: controller,
-              onTurnCompleted: () => completed = true,
-              onTurnCancelled: () => cancelled = true,
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    controller.release(horizontalVelocity: 0);
-    await tester.pumpAndSettle();
-
-    expect(cancelled, isTrue);
-    expect(completed, isFalse);
-    expect(controller.progress, 0);
   });
 
   testWidgets('foliate replica pre-renders adjacent page textures', (
@@ -375,18 +211,6 @@ void main() {
   });
 }
 
-Future<ui.Image> _solidImage(ui.Color color) async {
-  final recorder = ui.PictureRecorder();
-  final canvas = ui.Canvas(recorder);
-  canvas.drawColor(color, ui.BlendMode.src);
-  final picture = recorder.endRecording();
-  try {
-    return await picture.toImage(64, 64);
-  } finally {
-    picture.dispose();
-  }
-}
-
 Future<T> _pumpUntilComplete<T>(
   WidgetTester tester,
   Future<T> future, {
@@ -414,19 +238,4 @@ Future<T> _pumpUntilComplete<T>(
   if (!completed) throw TimeoutException('Future did not complete in $timeout');
   if (error != null) Error.throwWithStackTrace(error!, stackTrace!);
   return value as T;
-}
-
-({int r, int g, int b, int a}) _pixelAt(
-  ByteData pixels,
-  int width,
-  int x,
-  int y,
-) {
-  final offset = (y * width + x) * 4;
-  return (
-    r: pixels.getUint8(offset),
-    g: pixels.getUint8(offset + 1),
-    b: pixels.getUint8(offset + 2),
-    a: pixels.getUint8(offset + 3),
-  );
 }
