@@ -165,6 +165,24 @@ class ReaderPreferences {
     customCss: customCss ?? this.customCss,
   );
 
+  /// Layout-affecting fields for TXT pagination. Paint (color/theme) is excluded
+  /// so switching day/night paper does not remeasure the whole book.
+  String get txtLayoutFingerprint => [
+    flow,
+    margin,
+    fontSize,
+    lineHeight,
+    fontFamily,
+    importedFontName,
+    importedFontData.hashCode,
+    fontWeight,
+    letterSpacing,
+    paragraphSpacing,
+    textIndent,
+    textAlign,
+    chineseConversion,
+  ].join('|');
+
   static Future<ReaderPreferences> load() async {
     final values = await SharedPreferences.getInstance();
     return ReaderPreferences(
@@ -227,54 +245,84 @@ class ReaderPreferences {
   Future<void> save() async {
     final values = await SharedPreferences.getInstance();
     await Future.wait([
-      values.setString('leeef.reader.flow', flow),
-      values.setString(
+      _setString(values, 'leeef.reader.flow', flow),
+      _setString(
+        values,
         'leeef.reader.page_turn_effect',
         _storedPageTurnEffect(pageTurnEffect),
       ),
-      values.setInt('leeef.reader.columns', columns),
-      values.setDouble('leeef.reader.margin', margin),
-      values.setDouble('leeef.reader.font_size', fontSize),
-      values.setDouble('leeef.reader.line_height', lineHeight),
-      values.setString('leeef.reader.font_family', fontFamily),
-      values.setInt('leeef.reader.font_weight', fontWeight),
-      values.setDouble('leeef.reader.heading_scale', headingScale),
-      values.setDouble('leeef.reader.letter_spacing', letterSpacing),
-      values.setDouble('leeef.reader.paragraph_spacing', paragraphSpacing),
-      values.setDouble('leeef.reader.text_indent', textIndent),
-      values.setString('leeef.reader.text_align', textAlign),
-      values.setString('leeef.reader.writing_mode', writingMode),
-      values.setString('leeef.reader.foreground', foreground),
-      values.setString('leeef.reader.background', background),
-      values.setBool('leeef.reader.preserve_book_styles', preserveBookStyles),
-      values.setBool('leeef.reader.eink_mode', eInkMode),
-      values.setBool('leeef.reader.code_highlight', codeHighlight),
-      values.setString('leeef.reader.background_image', backgroundImage),
-      values.setString(
+      _setInt(values, 'leeef.reader.columns', columns),
+      _setDouble(values, 'leeef.reader.margin', margin),
+      _setDouble(values, 'leeef.reader.font_size', fontSize),
+      _setDouble(values, 'leeef.reader.line_height', lineHeight),
+      _setString(values, 'leeef.reader.font_family', fontFamily),
+      _setInt(values, 'leeef.reader.font_weight', fontWeight),
+      _setDouble(values, 'leeef.reader.heading_scale', headingScale),
+      _setDouble(values, 'leeef.reader.letter_spacing', letterSpacing),
+      _setDouble(values, 'leeef.reader.paragraph_spacing', paragraphSpacing),
+      _setDouble(values, 'leeef.reader.text_indent', textIndent),
+      _setString(values, 'leeef.reader.text_align', textAlign),
+      _setString(values, 'leeef.reader.writing_mode', writingMode),
+      _setString(values, 'leeef.reader.foreground', foreground),
+      _setString(values, 'leeef.reader.background', background),
+      _setBool(values, 'leeef.reader.preserve_book_styles', preserveBookStyles),
+      _setBool(values, 'leeef.reader.eink_mode', eInkMode),
+      _setBool(values, 'leeef.reader.code_highlight', codeHighlight),
+      _setString(values, 'leeef.reader.background_image', backgroundImage),
+      _setString(
+        values,
         'leeef.reader.dark_background_image',
         darkBackgroundImage,
       ),
-      values.setDouble('leeef.reader.background_opacity', backgroundOpacity),
-      values.setDouble('leeef.reader.background_blur', backgroundBlur),
-      values.setString('leeef.reader.background_fit', backgroundFit),
-      values.setString('leeef.reader.imported_font_name', importedFontName),
-      values.setString('leeef.reader.imported_font_data', importedFontData),
-      values.setString('leeef.reader.txt_chapter_pattern', txtChapterPattern),
-      values.setString('leeef.reader.chinese_conversion', chineseConversion),
-      values.setDouble('leeef.reader.tap_zone_ratio', tapZoneRatio),
-      values.setBool('leeef.reader.swap_tap_zones', swapTapZones),
-      values.setBool('leeef.reader.volume_key_paging', volumeKeyPaging),
-      values.setBool('leeef.reader.mouse_wheel_paging', mouseWheelPaging),
-      values.setBool('leeef.reader.keep_awake', keepAwake),
-      values.setBool('leeef.reader.fullscreen', fullscreen),
-      values.setBool('leeef.reader.show_header', showHeader),
-      values.setBool('leeef.reader.show_footer', showFooter),
-      values.setString('leeef.reader.header_content', headerContent),
-      values.setString('leeef.reader.footer_content', footerContent),
-      values.setString('leeef.reader.custom_css', customCss),
+      _setDouble(values, 'leeef.reader.background_opacity', backgroundOpacity),
+      _setDouble(values, 'leeef.reader.background_blur', backgroundBlur),
+      _setString(values, 'leeef.reader.background_fit', backgroundFit),
+      _setString(values, 'leeef.reader.imported_font_name', importedFontName),
+      _setString(values, 'leeef.reader.imported_font_data', importedFontData),
+      _setString(values, 'leeef.reader.txt_chapter_pattern', txtChapterPattern),
+      _setString(values, 'leeef.reader.chinese_conversion', chineseConversion),
+      _setDouble(values, 'leeef.reader.tap_zone_ratio', tapZoneRatio),
+      _setBool(values, 'leeef.reader.swap_tap_zones', swapTapZones),
+      _setBool(values, 'leeef.reader.volume_key_paging', volumeKeyPaging),
+      _setBool(values, 'leeef.reader.mouse_wheel_paging', mouseWheelPaging),
+      _setBool(values, 'leeef.reader.keep_awake', keepAwake),
+      _setBool(values, 'leeef.reader.fullscreen', fullscreen),
+      _setBool(values, 'leeef.reader.show_header', showHeader),
+      _setBool(values, 'leeef.reader.show_footer', showFooter),
+      _setString(values, 'leeef.reader.header_content', headerContent),
+      _setString(values, 'leeef.reader.footer_content', footerContent),
+      _setString(values, 'leeef.reader.custom_css', customCss),
     ]);
   }
 
   static String _storedPageTurnEffect(String? value) =>
       value == null || value == 'curl' ? 'slide' : value;
+}
+
+Future<void> _setString(
+  SharedPreferences values,
+  String key,
+  String value,
+) async {
+  if (values.getString(key) == value) return;
+  await values.setString(key, value);
+}
+
+Future<void> _setInt(SharedPreferences values, String key, int value) async {
+  if (values.getInt(key) == value) return;
+  await values.setInt(key, value);
+}
+
+Future<void> _setDouble(
+  SharedPreferences values,
+  String key,
+  double value,
+) async {
+  if (values.getDouble(key) == value) return;
+  await values.setDouble(key, value);
+}
+
+Future<void> _setBool(SharedPreferences values, String key, bool value) async {
+  if (values.getBool(key) == value) return;
+  await values.setBool(key, value);
 }

@@ -81,10 +81,11 @@ class _SmoothPageSlideState extends State<SmoothPageSlide>
     if (widget.pageIndex != _activeIndex && !_settling) {
       _activeIndex = widget.pageIndex;
       _offset.value = 0;
-      _cachePages();
-    } else if (oldWidget.pageCount != widget.pageCount) {
-      _cachePages();
     }
+    // Recache on every rebuild so paint-only changes (night/day paper)
+    // replace the frozen page widgets. Skipping this leaves the old
+    // colors on screen until the user turns the page.
+    _cachePages();
   }
 
   @override

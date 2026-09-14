@@ -195,9 +195,15 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
   }
 
   Future<void> _commitPdfPreferences(ReaderPreferences preferences) async {
-    await preferences.save();
-    await _applyReadingState(preferences);
+    final previous = _preferences;
+    final readingStateChanged =
+        previous.keepAwake != preferences.keepAwake ||
+        previous.fullscreen != preferences.fullscreen;
     if (mounted) setState(() => _preferences = preferences);
+    if (readingStateChanged) {
+      unawaited(_applyReadingState(preferences));
+    }
+    unawaited(preferences.save());
   }
 
   Future<void> _applyReadingState(ReaderPreferences preferences) async {

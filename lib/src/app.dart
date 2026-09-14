@@ -16,11 +16,32 @@ class LeeefApp extends StatefulWidget {
 
 class _LeeefAppState extends State<LeeefApp> {
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
+  Color? _cachedSeed;
+  ThemeData? _lightTheme;
+  ThemeData? _darkTheme;
 
   @override
   void initState() {
     super.initState();
     AppAppearanceController.instance.load();
+  }
+
+  void _ensureThemes(Color seed) {
+    if (_cachedSeed == seed && _lightTheme != null && _darkTheme != null) {
+      return;
+    }
+    _cachedSeed = seed;
+    _lightTheme = ThemeData(
+      colorScheme: ColorScheme.fromSeed(seedColor: seed),
+      useMaterial3: true,
+    );
+    _darkTheme = ThemeData(
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: seed,
+        brightness: Brightness.dark,
+      ),
+      useMaterial3: true,
+    );
   }
 
   @override
@@ -29,6 +50,7 @@ class _LeeefAppState extends State<LeeefApp> {
       animation: AppAppearanceController.instance,
       builder: (context, _) {
         final appearance = AppAppearanceController.instance;
+        _ensureThemes(appearance.seedColor);
         return MaterialApp(
           debugShowCheckedModeBanner: false,
           scaffoldMessengerKey: _messengerKey,
@@ -41,17 +63,9 @@ class _LeeefAppState extends State<LeeefApp> {
             GlobalCupertinoLocalizations.delegate,
           ],
           themeMode: appearance.themeMode,
-          theme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(seedColor: appearance.seedColor),
-            useMaterial3: true,
-          ),
-          darkTheme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: appearance.seedColor,
-              brightness: Brightness.dark,
-            ),
-            useMaterial3: true,
-          ),
+          themeAnimationDuration: Duration.zero,
+          theme: _lightTheme!,
+          darkTheme: _darkTheme!,
           home: AndroidUpdateHost(
             child: DesktopUpdateHost(
               child: OnboardingHost(

@@ -4006,8 +4006,8 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
             ],
             onChanged: (value) async {
               if (value == null) return;
+              setState(() => _themeMode = value);
               await AppAppearanceController.instance.setThemeMode(value);
-              if (mounted) setState(() => _themeMode = value);
             },
           ),
         ),

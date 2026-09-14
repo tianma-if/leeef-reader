@@ -77,6 +77,8 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   bool _controlsVisible = readerChromeStartsVisible();
   DateTime? _lastWheelTurn;
   String? _loadedFontData;
+  String? _decodedBackgroundKey;
+  Uint8List? _decodedBackgroundBytes;
   final ReaderNavigationHistory _history = ReaderNavigationHistory();
   DateTime? _sessionStartedAt;
   late final SystemTtsController _ttsController = SystemTtsController(
@@ -1083,14 +1085,24 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   }
 
   Future<void> _commitTxtPreferences(ReaderPreferences preferences) async {
-    await preferences.save();
-    await _applyReadingState(preferences);
+    final previous = _preferences;
+    final layoutChanged =
+        previous.txtLayoutFingerprint != preferences.txtLayoutFingerprint;
+    final readingStateChanged =
+        previous.keepAwake != preferences.keepAwake ||
+        previous.fullscreen != preferences.fullscreen;
     if (!mounted) return;
     setState(() {
       _preferences = preferences;
-      _convertedPageCache.clear();
-      _displayTextCache.clear();
+      if (layoutChanged) {
+        _convertedPageCache.clear();
+        _displayTextCache.clear();
+      }
     });
+    if (readingStateChanged) {
+      unawaited(_applyReadingState(preferences));
+    }
+    unawaited(preferences.save());
   }
 
   Future<void> _applyReadingState(ReaderPreferences preferences) async {
@@ -1379,19 +1391,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       contentSize.height,
       MediaQuery.textScalerOf(context).scale(_preferences.fontSize),
       Directionality.of(context),
-      _pageTextStyle,
-      _preferences.fontSize,
-      _preferences.lineHeight,
-      _preferences.margin,
-      _preferences.fontFamily,
-      _preferences.importedFontName,
-      _preferences.importedFontData.hashCode,
-      _preferences.fontWeight,
-      _preferences.letterSpacing,
-      _preferences.paragraphSpacing,
-      _preferences.textIndent,
-      _preferences.textAlign,
-      _preferences.chineseConversion,
+      _preferences.txtLayoutFingerprint,
     ].join('|');
     if (_paginationSignature == signature && _paginatedPages != null) {
       _schedulePaginationSizeCheck();
@@ -1864,7 +1864,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
         : _preferences.backgroundImage;
     final backgroundBytes = _preferences.eInkMode
         ? null
-        : _decodeDataUri(selectedBackground);
+        : _cachedBackgroundBytes(selectedBackground);
     final index = pageIndex ?? _pageIndex;
     final pageKey = ValueKey('txt-page-$index');
     final span = _ttsTextSpan(
@@ -1969,6 +1969,14 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
 
   static Color _hexColor(String value) =>
       Color(0xFF000000 | int.parse(value.replaceFirst('#', ''), radix: 16));
+
+  Uint8List? _cachedBackgroundBytes(String value) {
+    if (value.isEmpty) return null;
+    if (value == _decodedBackgroundKey) return _decodedBackgroundBytes;
+    _decodedBackgroundKey = value;
+    _decodedBackgroundBytes = _decodeDataUri(value);
+    return _decodedBackgroundBytes;
+  }
 
   static Uint8List? _decodeDataUri(String value) {
     final comma = value.indexOf(',');

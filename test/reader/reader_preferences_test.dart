@@ -94,6 +94,32 @@ void main() {
     },
   );
 
+  test('day/night paper colors do not change TXT layout fingerprint', () {
+    const day = ReaderPreferences(foreground: '#292b29', background: '#fbf8f1');
+    final night = day.copyWith(foreground: '#d8d8d8', background: '#151515');
+    final oled = day.copyWith(foreground: '#eeeeee', background: '#000000');
+    expect(night.txtLayoutFingerprint, day.txtLayoutFingerprint);
+    expect(oled.txtLayoutFingerprint, day.txtLayoutFingerprint);
+    expect(
+      day.copyWith(fontSize: 22).txtLayoutFingerprint,
+      isNot(day.txtLayoutFingerprint),
+    );
+  });
+
+  test('save writes color changes without dropping large blobs', () async {
+    SharedPreferences.setMockInitialValues({
+      'leeef.reader.imported_font_data': 'data:font/ttf;base64,AAAA',
+      'leeef.reader.background_image': 'data:image/png;base64,BBBB',
+    });
+    final loaded = await ReaderPreferences.load();
+    await loaded.copyWith(foreground: '#d8d8d8', background: '#151515').save();
+    final restored = await ReaderPreferences.load();
+    expect(restored.foreground, '#d8d8d8');
+    expect(restored.background, '#151515');
+    expect(restored.importedFontData, 'data:font/ttf;base64,AAAA');
+    expect(restored.backgroundImage, 'data:image/png;base64,BBBB');
+  });
+
   test('stored curl page-turn effect migrates to slide', () async {
     SharedPreferences.setMockInitialValues({
       'leeef.reader.page_turn_effect': 'curl',

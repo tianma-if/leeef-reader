@@ -172,12 +172,20 @@ globalThis.leeefReader = {
         fontWeight, headingScale, letterSpacing, paragraphSpacing, textIndent,
         textAlign, writingMode, preserveBookStyles, eInkMode, codeHighlight,
         backgroundImage, backgroundOpacity, backgroundBlur, backgroundFit,
-        importedFontName, importedFontData, customCSS }) => {
-        const style = document.documentElement.style
-        if (foreground) style.setProperty('--reader-foreground', foreground)
-        if (background) style.setProperty('--reader-background', background)
-        if (fontSize) style.setProperty('--reader-font-size', `${fontSize}px`)
-        if (lineHeight) style.setProperty('--reader-line-height', String(lineHeight))
+        importedFontName, importedFontData, customCSS, paintOnly }) => {
+        const applyColors = style => {
+            if (foreground) style.setProperty('--reader-foreground', foreground)
+            if (background) style.setProperty('--reader-background', background)
+        }
+        applyColors(document.documentElement.style)
+        if (fontSize) document.documentElement.style.setProperty('--reader-font-size', `${fontSize}px`)
+        if (lineHeight) document.documentElement.style.setProperty('--reader-line-height', String(lineHeight))
+        if (paintOnly) {
+            for (const { doc } of view.renderer?.getContents?.() ?? []) {
+                if (doc?.documentElement) applyColors(doc.documentElement.style)
+            }
+            return
+        }
         const fontFace = importedFontData && importedFontName ? `
             @font-face {
                 font-family: 'LeeefImportedFont';
@@ -203,7 +211,7 @@ globalThis.leeefReader = {
             .comment, .hljs-comment { color: ${eInkMode ? '#666' : '#7f848e'} !important; font-style: italic; }
             .number, .hljs-number { color: ${eInkMode ? '#222' : '#d19a66'} !important; }` : ''
         const imageLayer = backgroundImage ? `
-            html { background: ${background || 'transparent'} !important; }
+            html { background: var(--reader-background, ${background || 'transparent'}) !important; }
             body { background: transparent !important; isolation: isolate; }
             body::before {
                 content: ''; position: fixed; inset: -${backgroundBlur || 0}px;
@@ -216,10 +224,12 @@ globalThis.leeefReader = {
                 background-size: ${backgroundFit || 'cover'};
             }` : ''
         const css = `${fontFace}
-            :root { color-scheme: light dark !important; }
+            :root { color-scheme: light dark !important;
+                --reader-foreground: ${foreground || 'inherit'};
+                --reader-background: ${background || 'transparent'}; }
             html, body {
-                color: ${foreground || 'inherit'} !important;
-                background: ${backgroundImage ? 'transparent' : (background || 'transparent')} !important;
+                color: var(--reader-foreground, ${foreground || 'inherit'}) !important;
+                background: ${backgroundImage ? 'transparent' : `var(--reader-background, ${background || 'transparent'})`} !important;
                 font-family: ${fontFamily || 'serif'} !important;
                 font-size: ${fontSize || 18}px !important;
                 font-weight: ${fontWeight || 400} !important;
@@ -239,6 +249,9 @@ globalThis.leeefReader = {
             ${codeTheme}
             ${customCSS || ''}`
         view.renderer.setStyles?.(css)
+        for (const { doc } of view.renderer?.getContents?.() ?? []) {
+            if (doc?.documentElement) applyColors(doc.documentElement.style)
+        }
     },
     async search(query) {
         const results = []

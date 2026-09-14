@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leeef_reader/src/platform/app_appearance.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   test('core interface text is localized to English and Japanese', () {
@@ -34,4 +35,25 @@ void main() {
   test('unknown text safely falls back to source language', () {
     expect(AppStrings(const Locale('en')).text('未登记文案'), '未登记文案');
   });
+
+  test(
+    'setThemeMode notifies listeners before persistence completes',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final appearance = AppAppearanceController.instance;
+      appearance.themeMode = ThemeMode.system;
+      var notifications = 0;
+      void listener() => notifications++;
+      appearance.addListener(listener);
+      addTearDown(() {
+        appearance.removeListener(listener);
+        appearance.themeMode = ThemeMode.system;
+      });
+
+      final future = appearance.setThemeMode(ThemeMode.dark);
+      expect(appearance.themeMode, ThemeMode.dark);
+      expect(notifications, 1);
+      await future;
+    },
+  );
 }

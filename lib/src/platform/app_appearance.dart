@@ -51,12 +51,13 @@ class AppAppearanceController extends ChangeNotifier {
   }
 
   Future<void> setThemeMode(ThemeMode value) async {
+    if (themeMode == value) return;
     themeMode = value;
+    notifyListeners();
     await (await SharedPreferences.getInstance()).setString(
       'leeef.appearance.theme_mode',
       value.name,
     );
-    notifyListeners();
   }
 
   Future<void> setSeedColor(Color value) async {

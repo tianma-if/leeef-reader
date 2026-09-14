@@ -258,24 +258,27 @@ class _ColorPanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          SegmentedButton<ThemeMode>(
-            segments: [
-              ButtonSegment(
-                value: ThemeMode.system,
-                label: Text(strings.text('跟随系统')),
-              ),
-              ButtonSegment(
-                value: ThemeMode.light,
-                label: Text(strings.text('浅色')),
-              ),
-              ButtonSegment(
-                value: ThemeMode.dark,
-                label: Text(strings.text('深色')),
-              ),
-            ],
-            selected: {appearance.themeMode},
-            onSelectionChanged: (value) =>
-                appearance.setThemeMode(value.single),
+          ListenableBuilder(
+            listenable: appearance,
+            builder: (context, _) => SegmentedButton<ThemeMode>(
+              segments: [
+                ButtonSegment(
+                  value: ThemeMode.system,
+                  label: Text(strings.text('跟随系统')),
+                ),
+                ButtonSegment(
+                  value: ThemeMode.light,
+                  label: Text(strings.text('浅色')),
+                ),
+                ButtonSegment(
+                  value: ThemeMode.dark,
+                  label: Text(strings.text('深色')),
+                ),
+              ],
+              selected: {appearance.themeMode},
+              onSelectionChanged: (value) =>
+                  appearance.setThemeMode(value.single),
+            ),
           ),
         ],
       ),

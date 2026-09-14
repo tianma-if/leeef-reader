@@ -96,6 +96,9 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
   ReaderPreferences _preferences = const ReaderPreferences();
   late final Future<ReaderPreferences> _preferencesFuture;
   int _themeRevision = 0;
+  bool _styleAppliedToEngine = false;
+  String? _lastResolvedBackgroundImage;
+  int _preferenceApplyGeneration = 0;
   bool _canGoBack = false;
   bool _canGoForward = false;
   final ChineseTextConverter _chineseConverter = const ChineseTextConverter();
@@ -109,6 +112,12 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
   );
 
   bool get _supportsInteractiveSlide => false;
+
+  Color get _paperColor {
+    if (_preferences.eInkMode) return Colors.white;
+    final hex = _preferences.background.replaceFirst('#', '');
+    return Color(0xFF000000 | int.parse(hex, radix: 16));
+  }
 
   ReaderBookSource? get _bookSource {
     final path = widget.book.filePath;
@@ -144,9 +153,14 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     final changed = _lastBrightness != null && _lastBrightness != brightness;
     _lastBrightness = brightness;
     if (changed && _bookInfo != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) unawaited(_applyPreferences(_preferences, persist: false));
-      });
+      final nextImage = _resolvedBackgroundImage(_preferences);
+      if (nextImage != _lastResolvedBackgroundImage) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            unawaited(_applyPreferences(_preferences, persist: false));
+          }
+        });
+      }
     }
   }
 
@@ -668,59 +682,130 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     );
   }
 
+  String _resolvedBackgroundImage(ReaderPreferences preferences) {
+    final brightness = Theme.of(context).brightness;
+    return brightness == Brightness.dark &&
+            preferences.darkBackgroundImage.isNotEmpty
+        ? preferences.darkBackgroundImage
+        : preferences.backgroundImage;
+  }
+
   Future<void> _applyPreferences(
     ReaderPreferences preferences, {
     bool persist = true,
   }) async {
-    final brightness = Theme.of(context).brightness;
-    await _engine.setLayout(
-      flow: preferences.flow,
-      maxColumnCount: preferences.columns,
-      margin: preferences.margin,
-      pageTurnEffect: enginePageTurnEffect(
-        flow: preferences.flow,
-        configuredEffect: preferences.pageTurnEffect,
-      ),
-    );
-    await _engine.setTheme(
-      foreground: preferences.foreground,
-      background: preferences.background,
-      fontSize: preferences.fontSize,
-      lineHeight: preferences.lineHeight,
-      fontFamily: preferences.fontFamily,
-      fontWeight: preferences.fontWeight,
-      headingScale: preferences.headingScale,
-      letterSpacing: preferences.letterSpacing,
-      paragraphSpacing: preferences.paragraphSpacing,
-      textIndent: preferences.textIndent,
-      textAlign: preferences.textAlign,
-      writingMode: preferences.writingMode,
-      preserveBookStyles: preferences.preserveBookStyles,
-      eInkMode: preferences.eInkMode,
-      codeHighlight: preferences.codeHighlight,
-      backgroundImage:
-          brightness == Brightness.dark &&
-              preferences.darkBackgroundImage.isNotEmpty
-          ? preferences.darkBackgroundImage
-          : preferences.backgroundImage,
-      backgroundOpacity: preferences.backgroundOpacity,
-      backgroundBlur: preferences.backgroundBlur,
-      backgroundFit: preferences.backgroundFit,
-      importedFontName: preferences.importedFontName,
-      importedFontData: preferences.importedFontData,
-      customCss: preferences.customCss,
-    );
-    await _applyReadingState(preferences);
-    await _applyChineseConversion(preferences.chineseConversion);
-    if (persist) await preferences.save();
-    _snapshotCache.clear();
+    final previous = _preferences;
+    final firstApply = !_styleAppliedToEngine;
+    final resolvedImage = _resolvedBackgroundImage(preferences);
+    final imageChanged = resolvedImage != _lastResolvedBackgroundImage;
+    final typographySame =
+        !firstApply &&
+        _sameEpubTypography(previous, preferences) &&
+        !imageChanged;
+    final colorsChanged =
+        previous.foreground != preferences.foreground ||
+        previous.background != preferences.background;
+    final layoutChanged =
+        firstApply ||
+        previous.flow != preferences.flow ||
+        previous.columns != preferences.columns ||
+        previous.margin != preferences.margin ||
+        previous.pageTurnEffect != preferences.pageTurnEffect;
+    final themeChanged = firstApply || !typographySame || colorsChanged;
+    final paintOnly = typographySame && colorsChanged;
+    final readingStateChanged =
+        firstApply ||
+        previous.keepAwake != preferences.keepAwake ||
+        previous.fullscreen != preferences.fullscreen;
+    final conversionChanged =
+        firstApply ||
+        previous.chineseConversion != preferences.chineseConversion;
+
     if (mounted) {
-      setState(() {
-        _preferences = preferences;
-        _themeRevision++;
-      });
+      setState(() => _preferences = preferences);
+    } else {
+      _preferences = preferences;
+    }
+    final generation = ++_preferenceApplyGeneration;
+    if (persist) unawaited(preferences.save());
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || generation != _preferenceApplyGeneration) return;
+
+    if (layoutChanged) {
+      await _engine.setLayout(
+        flow: preferences.flow,
+        maxColumnCount: preferences.columns,
+        margin: preferences.margin,
+        pageTurnEffect: enginePageTurnEffect(
+          flow: preferences.flow,
+          configuredEffect: preferences.pageTurnEffect,
+        ),
+      );
+    }
+    if (themeChanged) {
+      await _engine.setTheme(
+        foreground: preferences.foreground,
+        background: preferences.background,
+        fontSize: preferences.fontSize,
+        lineHeight: preferences.lineHeight,
+        fontFamily: preferences.fontFamily,
+        fontWeight: preferences.fontWeight,
+        headingScale: preferences.headingScale,
+        letterSpacing: preferences.letterSpacing,
+        paragraphSpacing: preferences.paragraphSpacing,
+        textIndent: preferences.textIndent,
+        textAlign: preferences.textAlign,
+        writingMode: preferences.writingMode,
+        preserveBookStyles: preferences.preserveBookStyles,
+        eInkMode: preferences.eInkMode,
+        codeHighlight: preferences.codeHighlight,
+        backgroundImage: resolvedImage,
+        backgroundOpacity: preferences.backgroundOpacity,
+        backgroundBlur: preferences.backgroundBlur,
+        backgroundFit: preferences.backgroundFit,
+        importedFontName: preferences.importedFontName,
+        importedFontData: preferences.importedFontData,
+        customCss: preferences.customCss,
+        paintOnly: paintOnly,
+      );
+      _lastResolvedBackgroundImage = resolvedImage;
+      _snapshotCache.clear();
+      if (mounted) setState(() => _themeRevision++);
+    }
+    _styleAppliedToEngine = true;
+    if (readingStateChanged) {
+      await _applyReadingState(preferences);
+    }
+    if (conversionChanged) {
+      await _applyChineseConversion(preferences.chineseConversion);
     }
   }
+
+  static bool _sameEpubTypography(
+    ReaderPreferences previous,
+    ReaderPreferences next,
+  ) =>
+      previous.fontSize == next.fontSize &&
+      previous.lineHeight == next.lineHeight &&
+      previous.fontFamily == next.fontFamily &&
+      previous.fontWeight == next.fontWeight &&
+      previous.headingScale == next.headingScale &&
+      previous.letterSpacing == next.letterSpacing &&
+      previous.paragraphSpacing == next.paragraphSpacing &&
+      previous.textIndent == next.textIndent &&
+      previous.textAlign == next.textAlign &&
+      previous.writingMode == next.writingMode &&
+      previous.preserveBookStyles == next.preserveBookStyles &&
+      previous.eInkMode == next.eInkMode &&
+      previous.codeHighlight == next.codeHighlight &&
+      previous.backgroundImage == next.backgroundImage &&
+      previous.darkBackgroundImage == next.darkBackgroundImage &&
+      previous.backgroundOpacity == next.backgroundOpacity &&
+      previous.backgroundBlur == next.backgroundBlur &&
+      previous.backgroundFit == next.backgroundFit &&
+      previous.importedFontName == next.importedFontName &&
+      previous.importedFontData == next.importedFontData &&
+      previous.customCss == next.customCss;
 
   Future<void> _applyReadingState(ReaderPreferences preferences) async {
     await WakelockPlus.toggle(enable: preferences.keepAwake);
@@ -1722,9 +1807,12 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
                   behavior: HitTestBehavior.translucent,
                   onTap: () =>
                       setState(() => _controlsVisible = !_controlsVisible),
-                  child: FoliateReaderView(
-                    engine: _engine,
-                    onWebViewCreated: (_) => unawaited(_openBook()),
+                  child: ColoredBox(
+                    color: _paperColor,
+                    child: FoliateReaderView(
+                      engine: _engine,
+                      onWebViewCreated: (_) => unawaited(_openBook()),
+                    ),
                   ),
                 ),
               ),

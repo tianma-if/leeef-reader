@@ -58,6 +58,41 @@ void main() {
     expect(find.text('page-0'), findsOneWidget);
   });
 
+  testWidgets('rebuild with a new pageBuilder repaints without turning', (
+    tester,
+  ) async {
+    var color = Colors.white;
+    Widget frame() => MaterialApp(
+      home: Center(
+        child: SizedBox(
+          width: 320,
+          height: 480,
+          child: SmoothPageSlide(
+            pageIndex: 0,
+            pageCount: 3,
+            onPageChanged: (_) {},
+            pageBuilder: (context, index) =>
+                ColoredBox(color: color, child: Text('page-$index')),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(frame());
+    expect(
+      tester.widget<ColoredBox>(find.byType(ColoredBox).last).color,
+      Colors.white,
+    );
+
+    color = Colors.black;
+    await tester.pumpWidget(frame());
+    await tester.pump();
+    expect(
+      tester.widget<ColoredBox>(find.byType(ColoredBox).last).color,
+      Colors.black,
+    );
+  });
+
   testWidgets('right-edge tap turns the page', (tester) async {
     var page = 0;
     await tester.pumpWidget(
