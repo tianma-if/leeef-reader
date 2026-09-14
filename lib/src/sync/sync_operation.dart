@@ -21,6 +21,17 @@ class SyncOperation {
 
   String get entityKey => '${entityType.name}:$entityId';
 
+  SyncOperation copyWith({String? entityId, Map<String, Object?>? payload}) =>
+      SyncOperation(
+        operationId: operationId,
+        deviceId: deviceId,
+        entityType: entityType,
+        entityId: entityId ?? this.entityId,
+        kind: kind,
+        occurredAt: occurredAt,
+        payload: payload ?? this.payload,
+      );
+
   Map<String, Object?> toJson() => {
     'operationId': operationId,
     'deviceId': deviceId,

@@ -91,6 +91,7 @@ void main() {
       expect(await database.select(database.tags).get(), isEmpty);
       expect(await database.select(database.bookTagEntries).get(), isEmpty);
       expect(await database.select(database.readingSessions).get(), isEmpty);
+      expect(await database.select(database.bookIdAliases).get(), isEmpty);
     } finally {
       await database.close();
       await directory.delete(recursive: true);

@@ -388,12 +388,18 @@ class LibraryRepository {
               .getSingleOrNull();
       if (duplicate != null) return false;
 
+      if (operation.entityType == EntityType.book &&
+          operation.kind == OperationKind.upsert) {
+        await _aliasRemoteBookIfDuplicateHash(operation);
+      }
+
+      final canonical = await _canonicalizeBookReferences(operation);
       final latest =
           await (_database.select(_database.syncOperations)
                 ..where(
                   (row) =>
-                      row.entityType.equals(operation.entityType.name) &
-                      row.entityId.equals(operation.entityId),
+                      row.entityType.equals(canonical.entityType.name) &
+                      row.entityId.equals(canonical.entityId),
                 )
                 ..orderBy([
                   (row) => OrderingTerm.desc(row.occurredAt),
@@ -403,10 +409,10 @@ class LibraryRepository {
               .getSingleOrNull();
       final wins =
           latest == null ||
-          latest.occurredAt.isBefore(operation.occurredAt) ||
-          (latest.occurredAt.isAtSameMomentAs(operation.occurredAt) &&
-              latest.operationId.compareTo(operation.operationId) < 0);
-      if (wins) await _applyEntityOperation(operation);
+          latest.occurredAt.isBefore(canonical.occurredAt) ||
+          (latest.occurredAt.isAtSameMomentAs(canonical.occurredAt) &&
+              latest.operationId.compareTo(canonical.operationId) < 0);
+      if (wins) await _applyEntityOperation(canonical);
 
       await _database
           .into(_database.syncOperations)
@@ -424,6 +430,72 @@ class LibraryRepository {
           );
       return true;
     });
+  }
+
+  Future<String> _canonicalBookId(String bookId) async {
+    final alias = await (_database.select(
+      _database.bookIdAliases,
+    )..where((row) => row.aliasId.equals(bookId))).getSingleOrNull();
+    return alias?.canonicalId ?? bookId;
+  }
+
+  Future<void> _rememberBookAlias({
+    required String aliasId,
+    required String canonicalId,
+  }) async {
+    if (aliasId == canonicalId) return;
+    await _database
+        .into(_database.bookIdAliases)
+        .insertOnConflictUpdate(
+          BookIdAliasesCompanion.insert(
+            aliasId: aliasId,
+            canonicalId: canonicalId,
+          ),
+        );
+  }
+
+  Future<void> _aliasRemoteBookIfDuplicateHash(SyncOperation operation) async {
+    final existing = await getBook(operation.entityId);
+    if (existing != null) return;
+    final hash = operation.payload['sha256'] as String?;
+    if (hash == null) return;
+    final duplicate =
+        await (_database.select(_database.books)
+              ..where((book) => book.sha256.equals(hash.toLowerCase())))
+            .getSingleOrNull();
+    if (duplicate == null) return;
+    await _rememberBookAlias(
+      aliasId: operation.entityId,
+      canonicalId: duplicate.id,
+    );
+  }
+
+  Future<SyncOperation> _canonicalizeBookReferences(
+    SyncOperation operation,
+  ) async {
+    switch (operation.entityType) {
+      case EntityType.book:
+      case EntityType.readingProgress:
+        final canonical = await _canonicalBookId(operation.entityId);
+        return canonical == operation.entityId
+            ? operation
+            : operation.copyWith(entityId: canonical);
+      case EntityType.excerpt:
+      case EntityType.bookmark:
+      case EntityType.readingSession:
+      case EntityType.bookshelfEntry:
+      case EntityType.bookTag:
+        final bookId = operation.payload['bookId'] as String?;
+        if (bookId == null) return operation;
+        final canonical = await _canonicalBookId(bookId);
+        if (canonical == bookId) return operation;
+        return operation.copyWith(
+          payload: {...operation.payload, 'bookId': canonical},
+        );
+      case EntityType.bookshelf:
+      case EntityType.tag:
+        return operation;
+    }
   }
 
   Future<String> createBookMetadata({

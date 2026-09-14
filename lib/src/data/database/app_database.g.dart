@@ -871,6 +871,233 @@ class BooksCompanion extends UpdateCompanion<BookRecord> {
   }
 }
 
+class $BookIdAliasesTable extends BookIdAliases
+    with TableInfo<$BookIdAliasesTable, BookIdAliasRecord> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $BookIdAliasesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _aliasIdMeta = const VerificationMeta(
+    'aliasId',
+  );
+  @override
+  late final GeneratedColumn<String> aliasId = GeneratedColumn<String>(
+    'alias_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _canonicalIdMeta = const VerificationMeta(
+    'canonicalId',
+  );
+  @override
+  late final GeneratedColumn<String> canonicalId = GeneratedColumn<String>(
+    'canonical_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES books (id) ON DELETE CASCADE',
+    ),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [aliasId, canonicalId];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'book_id_aliases';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<BookIdAliasRecord> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('alias_id')) {
+      context.handle(
+        _aliasIdMeta,
+        aliasId.isAcceptableOrUnknown(data['alias_id']!, _aliasIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_aliasIdMeta);
+    }
+    if (data.containsKey('canonical_id')) {
+      context.handle(
+        _canonicalIdMeta,
+        canonicalId.isAcceptableOrUnknown(
+          data['canonical_id']!,
+          _canonicalIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_canonicalIdMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {aliasId};
+  @override
+  BookIdAliasRecord map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return BookIdAliasRecord(
+      aliasId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}alias_id'],
+      )!,
+      canonicalId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}canonical_id'],
+      )!,
+    );
+  }
+
+  @override
+  $BookIdAliasesTable createAlias(String alias) {
+    return $BookIdAliasesTable(attachedDatabase, alias);
+  }
+}
+
+class BookIdAliasRecord extends DataClass
+    implements Insertable<BookIdAliasRecord> {
+  final String aliasId;
+  final String canonicalId;
+  const BookIdAliasRecord({required this.aliasId, required this.canonicalId});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['alias_id'] = Variable<String>(aliasId);
+    map['canonical_id'] = Variable<String>(canonicalId);
+    return map;
+  }
+
+  BookIdAliasesCompanion toCompanion(bool nullToAbsent) {
+    return BookIdAliasesCompanion(
+      aliasId: Value(aliasId),
+      canonicalId: Value(canonicalId),
+    );
+  }
+
+  factory BookIdAliasRecord.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return BookIdAliasRecord(
+      aliasId: serializer.fromJson<String>(json['aliasId']),
+      canonicalId: serializer.fromJson<String>(json['canonicalId']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'aliasId': serializer.toJson<String>(aliasId),
+      'canonicalId': serializer.toJson<String>(canonicalId),
+    };
+  }
+
+  BookIdAliasRecord copyWith({String? aliasId, String? canonicalId}) =>
+      BookIdAliasRecord(
+        aliasId: aliasId ?? this.aliasId,
+        canonicalId: canonicalId ?? this.canonicalId,
+      );
+  BookIdAliasRecord copyWithCompanion(BookIdAliasesCompanion data) {
+    return BookIdAliasRecord(
+      aliasId: data.aliasId.present ? data.aliasId.value : this.aliasId,
+      canonicalId: data.canonicalId.present
+          ? data.canonicalId.value
+          : this.canonicalId,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('BookIdAliasRecord(')
+          ..write('aliasId: $aliasId, ')
+          ..write('canonicalId: $canonicalId')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(aliasId, canonicalId);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is BookIdAliasRecord &&
+          other.aliasId == this.aliasId &&
+          other.canonicalId == this.canonicalId);
+}
+
+class BookIdAliasesCompanion extends UpdateCompanion<BookIdAliasRecord> {
+  final Value<String> aliasId;
+  final Value<String> canonicalId;
+  final Value<int> rowid;
+  const BookIdAliasesCompanion({
+    this.aliasId = const Value.absent(),
+    this.canonicalId = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  BookIdAliasesCompanion.insert({
+    required String aliasId,
+    required String canonicalId,
+    this.rowid = const Value.absent(),
+  }) : aliasId = Value(aliasId),
+       canonicalId = Value(canonicalId);
+  static Insertable<BookIdAliasRecord> custom({
+    Expression<String>? aliasId,
+    Expression<String>? canonicalId,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (aliasId != null) 'alias_id': aliasId,
+      if (canonicalId != null) 'canonical_id': canonicalId,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  BookIdAliasesCompanion copyWith({
+    Value<String>? aliasId,
+    Value<String>? canonicalId,
+    Value<int>? rowid,
+  }) {
+    return BookIdAliasesCompanion(
+      aliasId: aliasId ?? this.aliasId,
+      canonicalId: canonicalId ?? this.canonicalId,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (aliasId.present) {
+      map['alias_id'] = Variable<String>(aliasId.value);
+    }
+    if (canonicalId.present) {
+      map['canonical_id'] = Variable<String>(canonicalId.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('BookIdAliasesCompanion(')
+          ..write('aliasId: $aliasId, ')
+          ..write('canonicalId: $canonicalId, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $TagsTable extends Tags with TableInfo<$TagsTable, TagRecord> {
   @override
   final GeneratedDatabase attachedDatabase;
@@ -5876,6 +6103,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $BooksTable books = $BooksTable(this);
+  late final $BookIdAliasesTable bookIdAliases = $BookIdAliasesTable(this);
   late final $TagsTable tags = $TagsTable(this);
   late final $BookTagEntriesTable bookTagEntries = $BookTagEntriesTable(this);
   late final $BookshelvesTable bookshelves = $BookshelvesTable(this);
@@ -5899,6 +6127,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   @override
   List<DatabaseSchemaEntity> get allSchemaEntities => [
     books,
+    bookIdAliases,
     tags,
     bookTagEntries,
     bookshelves,
@@ -5913,6 +6142,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'books',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('book_id_aliases', kind: UpdateKind.delete)],
+    ),
     WritePropagation(
       on: TableUpdateQuery.onTableName(
         'tags',
@@ -6033,6 +6269,24 @@ typedef $$BooksTableUpdateCompanionBuilder =
 final class $$BooksTableReferences
     extends BaseReferences<_$AppDatabase, $BooksTable, BookRecord> {
   $$BooksTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static MultiTypedResultKey<$BookIdAliasesTable, List<BookIdAliasRecord>>
+  _bookIdAliasesRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.bookIdAliases,
+    aliasName: 'books__id__book_id_aliases__canonical_id',
+  );
+
+  $$BookIdAliasesTableProcessedTableManager get bookIdAliasesRefs {
+    final manager = $$BookIdAliasesTableTableManager(
+      $_db,
+      $_db.bookIdAliases,
+    ).filter((f) => f.canonicalId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_bookIdAliasesRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
 
   static MultiTypedResultKey<$BookTagEntriesTable, List<BookTagEntry>>
   _bookTagEntriesRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
@@ -6260,6 +6514,31 @@ class $$BooksTableFilterComposer extends Composer<_$AppDatabase, $BooksTable> {
     column: $table.updatedAt,
     builder: (column) => ColumnFilters(column),
   );
+
+  Expression<bool> bookIdAliasesRefs(
+    Expression<bool> Function($$BookIdAliasesTableFilterComposer f) f,
+  ) {
+    final $$BookIdAliasesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.bookIdAliases,
+      getReferencedColumn: (t) => t.canonicalId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$BookIdAliasesTableFilterComposer(
+            $db: $db,
+            $table: $db.bookIdAliases,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
 
   Expression<bool> bookTagEntriesRefs(
     Expression<bool> Function($$BookTagEntriesTableFilterComposer f) f,
@@ -6583,6 +6862,31 @@ class $$BooksTableAnnotationComposer
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 
+  Expression<T> bookIdAliasesRefs<T extends Object>(
+    Expression<T> Function($$BookIdAliasesTableAnnotationComposer a) f,
+  ) {
+    final $$BookIdAliasesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.bookIdAliases,
+      getReferencedColumn: (t) => t.canonicalId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$BookIdAliasesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.bookIdAliases,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
   Expression<T> bookTagEntriesRefs<T extends Object>(
     Expression<T> Function($$BookTagEntriesTableAnnotationComposer a) f,
   ) {
@@ -6775,6 +7079,7 @@ class $$BooksTableTableManager
           (BookRecord, $$BooksTableReferences),
           BookRecord,
           PrefetchHooks Function({
+            bool bookIdAliasesRefs,
             bool bookTagEntriesRefs,
             bool bookshelfEntriesRefs,
             bool excerptsRefs,
@@ -6875,6 +7180,7 @@ class $$BooksTableTableManager
               .toList(),
           prefetchHooksCallback:
               ({
+                bookIdAliasesRefs = false,
                 bookTagEntriesRefs = false,
                 bookshelfEntriesRefs = false,
                 excerptsRefs = false,
@@ -6886,6 +7192,7 @@ class $$BooksTableTableManager
                 return PrefetchHooks(
                   db: db,
                   explicitlyWatchedTables: [
+                    if (bookIdAliasesRefs) db.bookIdAliases,
                     if (bookTagEntriesRefs) db.bookTagEntries,
                     if (bookshelfEntriesRefs) db.bookshelfEntries,
                     if (excerptsRefs) db.excerpts,
@@ -6897,6 +7204,27 @@ class $$BooksTableTableManager
                   addJoins: null,
                   getPrefetchedDataCallback: (items) async {
                     return [
+                      if (bookIdAliasesRefs)
+                        await $_getPrefetchedData<
+                          BookRecord,
+                          $BooksTable,
+                          BookIdAliasRecord
+                        >(
+                          currentTable: table,
+                          referencedTable: $$BooksTableReferences
+                              ._bookIdAliasesRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$BooksTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).bookIdAliasesRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.canonicalId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
                       if (bookTagEntriesRefs)
                         await $_getPrefetchedData<
                           BookRecord,
@@ -7065,6 +7393,7 @@ typedef $$BooksTableProcessedTableManager =
       (BookRecord, $$BooksTableReferences),
       BookRecord,
       PrefetchHooks Function({
+        bool bookIdAliasesRefs,
         bool bookTagEntriesRefs,
         bool bookshelfEntriesRefs,
         bool excerptsRefs,
@@ -7073,6 +7402,271 @@ typedef $$BooksTableProcessedTableManager =
         bool readingProgressHistoryRefs,
         bool readingSessionsRefs,
       })
+    >;
+typedef $$BookIdAliasesTableCreateCompanionBuilder =
+    BookIdAliasesCompanion Function({
+      required String aliasId,
+      required String canonicalId,
+      Value<int> rowid,
+    });
+typedef $$BookIdAliasesTableUpdateCompanionBuilder =
+    BookIdAliasesCompanion Function({
+      Value<String> aliasId,
+      Value<String> canonicalId,
+      Value<int> rowid,
+    });
+
+final class $$BookIdAliasesTableReferences
+    extends
+        BaseReferences<_$AppDatabase, $BookIdAliasesTable, BookIdAliasRecord> {
+  $$BookIdAliasesTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $BooksTable _canonicalIdTable(_$AppDatabase db) =>
+      db.books.createAlias('book_id_aliases__canonical_id__books__id');
+
+  $$BooksTableProcessedTableManager get canonicalId {
+    final $_column = $_itemColumn<String>('canonical_id')!;
+
+    final manager = $$BooksTableTableManager(
+      $_db,
+      $_db.books,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_canonicalIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$BookIdAliasesTableFilterComposer
+    extends Composer<_$AppDatabase, $BookIdAliasesTable> {
+  $$BookIdAliasesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get aliasId => $composableBuilder(
+    column: $table.aliasId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$BooksTableFilterComposer get canonicalId {
+    final $$BooksTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.canonicalId,
+      referencedTable: $db.books,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$BooksTableFilterComposer(
+            $db: $db,
+            $table: $db.books,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$BookIdAliasesTableOrderingComposer
+    extends Composer<_$AppDatabase, $BookIdAliasesTable> {
+  $$BookIdAliasesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get aliasId => $composableBuilder(
+    column: $table.aliasId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$BooksTableOrderingComposer get canonicalId {
+    final $$BooksTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.canonicalId,
+      referencedTable: $db.books,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$BooksTableOrderingComposer(
+            $db: $db,
+            $table: $db.books,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$BookIdAliasesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $BookIdAliasesTable> {
+  $$BookIdAliasesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get aliasId =>
+      $composableBuilder(column: $table.aliasId, builder: (column) => column);
+
+  $$BooksTableAnnotationComposer get canonicalId {
+    final $$BooksTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.canonicalId,
+      referencedTable: $db.books,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$BooksTableAnnotationComposer(
+            $db: $db,
+            $table: $db.books,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$BookIdAliasesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $BookIdAliasesTable,
+          BookIdAliasRecord,
+          $$BookIdAliasesTableFilterComposer,
+          $$BookIdAliasesTableOrderingComposer,
+          $$BookIdAliasesTableAnnotationComposer,
+          $$BookIdAliasesTableCreateCompanionBuilder,
+          $$BookIdAliasesTableUpdateCompanionBuilder,
+          (BookIdAliasRecord, $$BookIdAliasesTableReferences),
+          BookIdAliasRecord,
+          PrefetchHooks Function({bool canonicalId})
+        > {
+  $$BookIdAliasesTableTableManager(_$AppDatabase db, $BookIdAliasesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$BookIdAliasesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$BookIdAliasesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$BookIdAliasesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> aliasId = const Value.absent(),
+                Value<String> canonicalId = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => BookIdAliasesCompanion(
+                aliasId: aliasId,
+                canonicalId: canonicalId,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String aliasId,
+                required String canonicalId,
+                Value<int> rowid = const Value.absent(),
+              }) => BookIdAliasesCompanion.insert(
+                aliasId: aliasId,
+                canonicalId: canonicalId,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$BookIdAliasesTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({canonicalId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (canonicalId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.canonicalId,
+                                referencedTable: $$BookIdAliasesTableReferences
+                                    ._canonicalIdTable(db),
+                                referencedColumn: $$BookIdAliasesTableReferences
+                                    ._canonicalIdTable(db)
+                                    .id,
+                              )
+                              as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$BookIdAliasesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $BookIdAliasesTable,
+      BookIdAliasRecord,
+      $$BookIdAliasesTableFilterComposer,
+      $$BookIdAliasesTableOrderingComposer,
+      $$BookIdAliasesTableAnnotationComposer,
+      $$BookIdAliasesTableCreateCompanionBuilder,
+      $$BookIdAliasesTableUpdateCompanionBuilder,
+      (BookIdAliasRecord, $$BookIdAliasesTableReferences),
+      BookIdAliasRecord,
+      PrefetchHooks Function({bool canonicalId})
     >;
 typedef $$TagsTableCreateCompanionBuilder =
     TagsCompanion Function({
@@ -11047,6 +11641,8 @@ class $AppDatabaseManager {
   $AppDatabaseManager(this._db);
   $$BooksTableTableManager get books =>
       $$BooksTableTableManager(_db, _db.books);
+  $$BookIdAliasesTableTableManager get bookIdAliases =>
+      $$BookIdAliasesTableTableManager(_db, _db.bookIdAliases);
   $$TagsTableTableManager get tags => $$TagsTableTableManager(_db, _db.tags);
   $$BookTagEntriesTableTableManager get bookTagEntries =>
       $$BookTagEntriesTableTableManager(_db, _db.bookTagEntries);

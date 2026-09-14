@@ -172,6 +172,7 @@ class _TrustedDevicesScreenState extends ConsumerState<TrustedDevicesScreen> {
         Object? syncError;
         try {
           await _syncEverything();
+          _scheduleLibraryCatchUp();
         } on Object catch (error) {
           syncError = error;
         }
@@ -270,6 +271,7 @@ class _TrustedDevicesScreenState extends ConsumerState<TrustedDevicesScreen> {
       await AppAppearanceController.instance.load();
       try {
         await _syncEverything();
+        _scheduleLibraryCatchUp();
       } on Object {
         // Pairing has already restored credentials. Offline data sync retries
         // through the normal automatic sync host.
@@ -297,6 +299,23 @@ class _TrustedDevicesScreenState extends ConsumerState<TrustedDevicesScreen> {
     ref.invalidate(libraryBooksProvider);
     ref.invalidate(allExcerptsProvider);
     ref.invalidate(allBookmarksProvider);
+  }
+
+  void _scheduleLibraryCatchUp() {
+    unawaited(() async {
+      for (final delay in [
+        const Duration(seconds: 3),
+        const Duration(seconds: 10),
+      ]) {
+        await Future<void>.delayed(delay);
+        if (!mounted) return;
+        try {
+          await _syncEverything();
+        } on Object {
+          // The other device may still be uploading. Automatic sync retries.
+        }
+      }
+    }());
   }
 
   Future<void> _renameCurrentDevice() async {

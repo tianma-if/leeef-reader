@@ -30,6 +30,17 @@ class Books extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+/// Maps a remote book ID onto the local row that already owns the same file.
+@DataClassName('BookIdAliasRecord')
+class BookIdAliases extends Table {
+  TextColumn get aliasId => text()();
+  TextColumn get canonicalId =>
+      text().references(Books, #id, onDelete: KeyAction.cascade)();
+
+  @override
+  Set<Column<Object>> get primaryKey => {aliasId};
+}
+
 @DataClassName('TagRecord')
 class Tags extends Table {
   TextColumn get id => text()();
@@ -195,6 +206,7 @@ class AuditEvents extends Table {
 @DriftDatabase(
   tables: [
     Books,
+    BookIdAliases,
     Tags,
     BookTagEntries,
     Bookshelves,
@@ -231,7 +243,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -246,6 +258,7 @@ class AppDatabase extends _$AppDatabase {
       if (from < 4) await migrator.addColumn(books, books.coverSha256);
       if (from < 5) await migrator.createTable(readingSessions);
       if (from < 6) await migrator.addColumn(books, books.md5);
+      if (from < 7) await migrator.createTable(bookIdAliases);
     },
     beforeOpen: (details) async {
       await customStatement('PRAGMA foreign_keys = ON');

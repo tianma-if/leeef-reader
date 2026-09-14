@@ -541,6 +541,190 @@ void main() {
     );
   }
 
+  test(
+    'books and excerpts added on either device converge in both directions',
+    () async {
+      final repositoryA = LibraryRepository(
+        database: databaseA,
+        deviceId: 'device-a',
+        idGenerator: _Ids([
+          'book-desktop',
+          'op-book-desktop',
+          'excerpt-desktop',
+          'op-excerpt-desktop',
+        ]).next,
+      );
+      final repositoryB = LibraryRepository(
+        database: databaseB,
+        deviceId: 'device-b',
+        idGenerator: _Ids([
+          'book-phone',
+          'op-book-phone',
+          'excerpt-phone',
+          'op-excerpt-phone',
+        ]).next,
+      );
+      final directoryA = Directory('${temporaryDirectory.path}/mixed-a');
+      final directoryB = Directory('${temporaryDirectory.path}/mixed-b');
+      final desktopBook = File('${temporaryDirectory.path}/desktop.epub');
+      final phoneBook = File('${temporaryDirectory.path}/phone.epub');
+      await desktopBook.writeAsString('added-on-desktop');
+      await phoneBook.writeAsString('added-on-phone');
+      await BookImportService(
+        repository: repositoryA,
+        libraryDirectory: directoryA,
+      ).importFile(desktopBook);
+      await repositoryA.createExcerpt(
+        bookId: 'book-desktop',
+        locator: 'epubcfi(/6/2)',
+        quote: 'Desktop excerpt',
+      );
+      await BookImportService(
+        repository: repositoryB,
+        libraryDirectory: directoryB,
+      ).importFile(phoneBook);
+      await repositoryB.createExcerpt(
+        bookId: 'book-phone',
+        locator: 'epubcfi(/6/4)',
+        quote: 'Phone excerpt',
+      );
+
+      final backend = DirectorySyncBackend(
+        Directory('${temporaryDirectory.path}/mixed-remote'),
+      );
+      final engineA = SyncEngine(
+        repository: repositoryA,
+        backend: backend,
+        libraryDirectory: directoryA,
+      );
+      final engineB = SyncEngine(
+        repository: repositoryB,
+        backend: backend,
+        libraryDirectory: directoryB,
+      );
+
+      await engineA.synchronize();
+      await engineB.synchronize();
+      await engineA.synchronize();
+
+      final booksA = await repositoryA.listBooks();
+      final booksB = await repositoryB.listBooks();
+      expect(
+        booksA.map((book) => book.id),
+        unorderedEquals(['book-desktop', 'book-phone']),
+      );
+      expect(
+        booksB.map((book) => book.id),
+        unorderedEquals(['book-desktop', 'book-phone']),
+      );
+      expect(
+        (await repositoryA.getBook('book-phone'))?.isAvailableLocally,
+        isTrue,
+      );
+      expect(
+        (await repositoryB.getBook('book-desktop'))?.isAvailableLocally,
+        isTrue,
+      );
+      expect(
+        (await repositoryA.listExcerpts()).map((item) => item.quote),
+        unorderedEquals(['Desktop excerpt', 'Phone excerpt']),
+      );
+      expect(
+        (await repositoryB.listExcerpts()).map((item) => item.quote),
+        unorderedEquals(['Desktop excerpt', 'Phone excerpt']),
+      );
+    },
+  );
+
+  test(
+    'independently imported copies of the same file merge with both excerpts',
+    () async {
+      final repositoryA = LibraryRepository(
+        database: databaseA,
+        deviceId: 'device-a',
+        idGenerator: _Ids([
+          'book-desktop',
+          'op-book-desktop',
+          'excerpt-desktop',
+          'op-excerpt-desktop',
+        ]).next,
+      );
+      final repositoryB = LibraryRepository(
+        database: databaseB,
+        deviceId: 'device-b',
+        idGenerator: _Ids([
+          'book-phone',
+          'op-book-phone',
+          'excerpt-phone',
+          'op-excerpt-phone',
+        ]).next,
+      );
+      final directoryA = Directory('${temporaryDirectory.path}/same-a');
+      final directoryB = Directory('${temporaryDirectory.path}/same-b');
+      final desktopSource = File(
+        '${temporaryDirectory.path}/same-desktop.epub',
+      );
+      final phoneSource = File('${temporaryDirectory.path}/same-phone.epub');
+      await desktopSource.writeAsString('shared-book-bytes');
+      await phoneSource.writeAsString('shared-book-bytes');
+      await BookImportService(
+        repository: repositoryA,
+        libraryDirectory: directoryA,
+      ).importFile(desktopSource);
+      await repositoryA.createExcerpt(
+        bookId: 'book-desktop',
+        locator: 'epubcfi(/6/2)',
+        quote: 'Noted on desktop',
+      );
+      await BookImportService(
+        repository: repositoryB,
+        libraryDirectory: directoryB,
+      ).importFile(phoneSource);
+      await repositoryB.createExcerpt(
+        bookId: 'book-phone',
+        locator: 'epubcfi(/6/4)',
+        quote: 'Noted on phone',
+      );
+
+      final backend = DirectorySyncBackend(
+        Directory('${temporaryDirectory.path}/same-remote'),
+      );
+      final engineA = SyncEngine(
+        repository: repositoryA,
+        backend: backend,
+        libraryDirectory: directoryA,
+      );
+      final engineB = SyncEngine(
+        repository: repositoryB,
+        backend: backend,
+        libraryDirectory: directoryB,
+      );
+
+      await engineA.synchronize();
+      await engineB.synchronize();
+      await engineA.synchronize();
+
+      expect(await repositoryA.listBooks(), hasLength(1));
+      expect(await repositoryB.listBooks(), hasLength(1));
+      expect(
+        (await repositoryA.listExcerpts()).map((item) => item.quote),
+        unorderedEquals(['Noted on desktop', 'Noted on phone']),
+      );
+      expect(
+        (await repositoryB.listExcerpts()).map((item) => item.quote),
+        unorderedEquals(['Noted on desktop', 'Noted on phone']),
+      );
+      expect(
+        (await repositoryA.listExcerpts()).map((item) => item.bookId).toSet(),
+        {'book-desktop'},
+      );
+      expect(
+        (await repositoryB.listExcerpts()).map((item) => item.bookId).toSet(),
+        {'book-phone'},
+      );
+    },
+  );
+
   test('corrupt blob is rejected and a later retry recovers', () async {
     final repositoryA = LibraryRepository(
       database: databaseA,
