@@ -2,11 +2,7 @@ import 'package:flutter/material.dart';
 
 /// Shared geometry for pagination, visible pages, and page-turn snapshots.
 class TxtPageLayout {
-  const TxtPageLayout({
-    this.margin = 24,
-    this.topInset = 0,
-    this.bottomInset = 0,
-  });
+  const TxtPageLayout({this.margin = 24, this.topInset = 0});
 
   // RenderEditable reserves its 2px cursor plus a 1px caret gap, even for
   // read-only SelectableText. Measure the same usable line width.
@@ -14,11 +10,12 @@ class TxtPageLayout {
 
   final double margin;
   final double topInset;
-  final double bottomInset;
 
-  // Chrome overlays the page; do not reserve footer height in the text box.
+  // Overlay chrome and the home indicator sit on top of the page. Keep the
+  // user margin on every side, plus the status-bar inset at the top so text
+  // does not run under the clock/notch.
   EdgeInsets get padding =>
-      EdgeInsets.fromLTRB(margin, 24 + topInset, margin, 24 + bottomInset);
+      EdgeInsets.fromLTRB(margin, margin + topInset, margin, margin);
 
   Size contentSize(Size viewport) => Size(
     (viewport.width - padding.horizontal - caretMargin).clamp(

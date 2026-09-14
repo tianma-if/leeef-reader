@@ -10,7 +10,7 @@ Future<ui.Image> renderTxtPageSnapshot({
   required Color backgroundColor,
   required TextStyle textStyle,
   required TextDirection textDirection,
-  EdgeInsets padding = const EdgeInsets.fromLTRB(24, 24, 24, 72),
+  EdgeInsets padding = const EdgeInsets.all(24),
   TextScaler textScaler = TextScaler.noScaling,
   TextAlign textAlign = TextAlign.start,
 }) async {

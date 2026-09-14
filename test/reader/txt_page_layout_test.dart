@@ -77,9 +77,9 @@ void main() {
     }
   }
 
-  test('safe-area reserve is shared with pagination', () {
-    const layout = TxtPageLayout(margin: 32, bottomInset: 34);
-    expect(layout.padding, const EdgeInsets.fromLTRB(32, 24, 32, 58));
-    expect(layout.contentSize(const Size(400, 800)), const Size(333, 718));
+  test('status bar inset is added above the user margin, not the bottom', () {
+    const layout = TxtPageLayout(margin: 32, topInset: 47);
+    expect(layout.padding, const EdgeInsets.fromLTRB(32, 79, 32, 32));
+    expect(layout.contentSize(const Size(400, 800)), const Size(333, 689));
   });
 }

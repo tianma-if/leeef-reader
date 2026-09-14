@@ -143,6 +143,9 @@ globalThis.leeefReader = {
         view.setAttribute('flow', flow)
         view.setAttribute('max-column-count', String(maxColumnCount))
         view.setAttribute('margin', `${margin}px`)
+        // Keep the content row greedy so unused header/footer slots do not
+        // expand into a finger-width empty band at the bottom of the page.
+        view.setAttribute('max-block-size', '10000px')
         if (pageTurnEffect === 'slide') view.setAttribute('animated', '')
         else view.removeAttribute('animated')
     },

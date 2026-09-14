@@ -1339,7 +1339,6 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   TxtPageLayout get _pageLayout => TxtPageLayout(
     margin: _preferences.margin,
     topInset: isDesktopReaderPlatform() ? 0 : MediaQuery.paddingOf(context).top,
-    bottomInset: MediaQuery.paddingOf(context).bottom,
   );
 
   TextAlign get _pageTextAlign => switch (_preferences.textAlign) {
