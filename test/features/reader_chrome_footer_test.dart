@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leeef_reader/src/features/reader/reader_chrome_footer.dart';
+import 'package:leeef_reader/src/features/reader/reader_chrome_header.dart';
 import 'package:leeef_reader/src/reader/reader_preferences.dart';
 
 void main() {
@@ -27,10 +28,10 @@ void main() {
         expect(find.text('42%'), findsNothing);
         expect(find.byIcon(Icons.list), findsOneWidget);
         expect(find.byIcon(Icons.wb_sunny_outlined), findsOneWidget);
-        expect(find.byIcon(Icons.tune), findsOneWidget);
-        expect(find.byIcon(Icons.text_fields), findsOneWidget);
+        expect(find.byIcon(Icons.linear_scale), findsOneWidget);
+        expect(find.byIcon(Icons.font_download_outlined), findsOneWidget);
 
-        await tester.tap(find.byIcon(Icons.tune));
+        await tester.tap(find.byIcon(Icons.linear_scale));
         await tester.pumpAndSettle();
         expect(find.text('42%'), findsOneWidget);
         expect(find.byType(Slider), findsOneWidget);
@@ -60,7 +61,7 @@ void main() {
 
       await tester.tap(find.byIcon(Icons.wb_sunny_outlined));
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(ChoiceChip).at(1));
+      await tester.tap(find.text('Night'));
       await tester.pump();
 
       expect(updated?.foreground, '#d8d8d8');
@@ -96,6 +97,28 @@ void main() {
       expect(find.byIcon(Icons.chevron_left), findsOneWidget);
       expect(find.byIcon(Icons.chevron_right), findsOneWidget);
       expect(find.byIcon(Icons.list), findsNothing);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('mobile header keeps bookmark and notes, not a book title', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: ReaderChromeHeader(heroTag: 'book-cover-1')),
+        ),
+      );
+
+      expect(find.byIcon(Icons.bookmark_add_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.edit_note_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.menu), findsOneWidget);
+      expect(find.byType(BackButton), findsOneWidget);
+      expect(find.byIcon(Icons.volume_up_outlined), findsNothing);
+      expect(find.byIcon(Icons.auto_awesome_outlined), findsNothing);
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }

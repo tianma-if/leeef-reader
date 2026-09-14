@@ -16,6 +16,7 @@ import 'package:leeef_reader/src/domain/reading_location.dart';
 import 'package:leeef_reader/src/features/reader/pdf_reader_screen.dart';
 import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
 import 'package:leeef_reader/src/features/reader/reader_chrome_footer.dart';
+import 'package:leeef_reader/src/features/reader/reader_chrome_header.dart';
 import 'package:leeef_reader/src/features/reader/reader_chrome_scaffold.dart';
 import 'package:leeef_reader/src/features/reader/reader_page_turn_policy.dart';
 import 'package:leeef_reader/src/features/reader/reader_sidebar.dart';
@@ -1691,128 +1692,152 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
       current: _location?.page,
       progress: progress,
     );
-    final appBar = AppBar(
-      primary: false,
-      leading: Hero(
-        tag: 'book-cover-${widget.book.id}',
-        child: const Material(color: Colors.transparent, child: BackButton()),
-      ),
-      title: Text(headerText),
-      actions: [
-        if (!compactToolbar) ...[
-          IconButton(
-            tooltip: strings.text('后退到上次跳转位置'),
-            onPressed: _canGoBack ? _engine.historyBack : null,
-            icon: const Icon(Icons.arrow_back),
-          ),
-          IconButton(
-            tooltip: strings.text('前进到下个跳转位置'),
-            onPressed: _canGoForward ? _engine.historyForward : null,
-            icon: const Icon(Icons.arrow_forward),
-          ),
-        ],
-        if (!Platform.isIOS)
-          IconButton(
-            tooltip: strings.text('朗读'),
-            onPressed: _bookInfo == null ? null : _showTts,
-            icon: const Icon(Icons.volume_up_outlined),
-          ),
-        PopupMenuButton<String>(
-          tooltip: strings.text('AI 阅读助手'),
-          icon: const Icon(Icons.auto_awesome_outlined),
-          onSelected: _openAi,
-          itemBuilder: (_) => [
-            PopupMenuItem(value: 'chat', child: Text(strings.text('基于当前章节对话'))),
-            PopupMenuItem(
-              value: 'full-summary',
-              child: Text(strings.text('基于全书对话与总结')),
+    final PreferredSizeWidget appBar = isDesktopReaderPlatform()
+        ? AppBar(
+            primary: false,
+            leading: Hero(
+              tag: 'book-cover-${widget.book.id}',
+              child: const Material(
+                color: Colors.transparent,
+                child: BackButton(),
+              ),
             ),
-            PopupMenuItem(
-              value: 'translate',
-              child: Text(strings.text('全文翻译')),
-            ),
-          ],
-        ),
-        if (!compactToolbar) ...[
-          IconButton(
-            tooltip: strings.text('书内搜索'),
-            onPressed: _bookInfo == null ? null : _showSearch,
-            icon: const Icon(Icons.search),
-          ),
-          IconButton(
-            tooltip: strings.text('阅读样式'),
-            onPressed: _bookInfo == null ? null : _showReadingSettings,
-            icon: const Icon(Icons.text_fields),
-          ),
-          IconButton(
-            tooltip: strings.text('添加书签'),
-            onPressed: _location == null ? null : _addBookmark,
-            icon: const Icon(Icons.bookmark_add_outlined),
-          ),
-          IconButton(
-            tooltip: strings.text('目录'),
-            onPressed: _bookInfo == null ? null : _showTableOfContents,
-            icon: const Icon(Icons.toc),
-          ),
-        ],
-        PopupMenuButton<String>(
-          tooltip: strings.text('更多阅读操作'),
-          onSelected: (value) {
-            final action = switch (value) {
-              'search' => _showSearch,
-              'style' => _showReadingSettings,
-              'bookmark' => _addBookmark,
-              'toc' => _showTableOfContents,
-              _ => _copyCurrentChapter,
-            };
-            unawaited(action());
-          },
-          itemBuilder: (_) => [
-            if (compactToolbar) ...[
-              PopupMenuItem(
-                value: 'search',
-                enabled: _bookInfo != null,
-                child: ListTile(
-                  leading: const Icon(Icons.search),
-                  title: Text(strings.text('书内搜索')),
+            title: Text(headerText),
+            actions: [
+              if (!compactToolbar) ...[
+                IconButton(
+                  tooltip: strings.text('后退到上次跳转位置'),
+                  onPressed: _canGoBack ? _engine.historyBack : null,
+                  icon: const Icon(Icons.arrow_back),
                 ),
+                IconButton(
+                  tooltip: strings.text('前进到下个跳转位置'),
+                  onPressed: _canGoForward ? _engine.historyForward : null,
+                  icon: const Icon(Icons.arrow_forward),
+                ),
+              ],
+              if (!Platform.isIOS)
+                IconButton(
+                  tooltip: strings.text('朗读'),
+                  onPressed: _bookInfo == null ? null : _showTts,
+                  icon: const Icon(Icons.volume_up_outlined),
+                ),
+              PopupMenuButton<String>(
+                tooltip: strings.text('AI 阅读助手'),
+                icon: const Icon(Icons.auto_awesome_outlined),
+                onSelected: _openAi,
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'chat',
+                    child: Text(strings.text('基于当前章节对话')),
+                  ),
+                  PopupMenuItem(
+                    value: 'full-summary',
+                    child: Text(strings.text('基于全书对话与总结')),
+                  ),
+                  PopupMenuItem(
+                    value: 'translate',
+                    child: Text(strings.text('全文翻译')),
+                  ),
+                ],
               ),
-              PopupMenuItem(
-                value: 'style',
-                enabled: _bookInfo != null,
-                child: ListTile(
-                  leading: const Icon(Icons.text_fields),
-                  title: Text(strings.text('阅读样式')),
+              if (!compactToolbar) ...[
+                IconButton(
+                  tooltip: strings.text('书内搜索'),
+                  onPressed: _bookInfo == null ? null : _showSearch,
+                  icon: const Icon(Icons.search),
                 ),
-              ),
-              PopupMenuItem(
-                value: 'bookmark',
-                enabled: _location != null,
-                child: ListTile(
-                  leading: const Icon(Icons.bookmark_add_outlined),
-                  title: Text(strings.text('添加书签')),
+                IconButton(
+                  tooltip: strings.text('阅读样式'),
+                  onPressed: _bookInfo == null ? null : _showReadingSettings,
+                  icon: const Icon(Icons.text_fields),
                 ),
-              ),
-              PopupMenuItem(
-                value: 'toc',
-                enabled: _bookInfo != null,
-                child: ListTile(
-                  leading: const Icon(Icons.toc),
-                  title: Text(strings.text('目录')),
+                IconButton(
+                  tooltip: strings.text('添加书签'),
+                  onPressed: _location == null ? null : _addBookmark,
+                  icon: const Icon(Icons.bookmark_add_outlined),
                 ),
+                IconButton(
+                  tooltip: strings.text('目录'),
+                  onPressed: _bookInfo == null ? null : _showTableOfContents,
+                  icon: const Icon(Icons.toc),
+                ),
+              ],
+              PopupMenuButton<String>(
+                tooltip: strings.text('更多阅读操作'),
+                onSelected: (value) {
+                  final action = switch (value) {
+                    'search' => _showSearch,
+                    'style' => _showReadingSettings,
+                    'bookmark' => _addBookmark,
+                    'toc' => _showTableOfContents,
+                    _ => _copyCurrentChapter,
+                  };
+                  unawaited(action());
+                },
+                itemBuilder: (_) => [
+                  if (compactToolbar) ...[
+                    PopupMenuItem(
+                      value: 'search',
+                      enabled: _bookInfo != null,
+                      child: ListTile(
+                        leading: const Icon(Icons.search),
+                        title: Text(strings.text('书内搜索')),
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'style',
+                      enabled: _bookInfo != null,
+                      child: ListTile(
+                        leading: const Icon(Icons.text_fields),
+                        title: Text(strings.text('阅读样式')),
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'bookmark',
+                      enabled: _location != null,
+                      child: ListTile(
+                        leading: const Icon(Icons.bookmark_add_outlined),
+                        title: Text(strings.text('添加书签')),
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'toc',
+                      enabled: _bookInfo != null,
+                      child: ListTile(
+                        leading: const Icon(Icons.toc),
+                        title: Text(strings.text('目录')),
+                      ),
+                    ),
+                  ],
+                  PopupMenuItem(
+                    value: 'copy-chapter',
+                    child: ListTile(
+                      leading: Icon(Icons.copy_all_outlined),
+                      title: Text(strings.text('复制当前章节正文')),
+                    ),
+                  ),
+                ],
               ),
             ],
-            PopupMenuItem(
-              value: 'copy-chapter',
-              child: ListTile(
-                leading: Icon(Icons.copy_all_outlined),
-                title: Text(strings.text('复制当前章节正文')),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
+          )
+        : ReaderChromeHeader(
+            heroTag: 'book-cover-${widget.book.id}',
+            onBookmark: _location == null
+                ? null
+                : () => unawaited(_addBookmark()),
+            onNotes: () => _openSidebar(ReaderSidebarTab.annotations),
+            onSearch: _bookInfo == null ? null : () => unawaited(_showSearch()),
+            onReadingSettings: _bookInfo == null
+                ? null
+                : () => unawaited(_showReadingSettings()),
+            onTts: Platform.isIOS || _bookInfo == null ? null : _showTts,
+            onAi: _bookInfo == null
+                ? null
+                : (action) => unawaited(_openAi(action)),
+            onCopyChapter: () => unawaited(_copyCurrentChapter()),
+            onToc: _bookInfo == null ? null : () => _openSidebar(),
+          );
     return ReaderChromeScaffold(
       paperColor: _paperColor,
       sidebarVisible: _sidebarVisible,

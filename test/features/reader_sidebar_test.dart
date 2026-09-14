@@ -150,4 +150,59 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     }
   });
+
+  testWidgets('mobile sidebar is a rounded sheet and chrome hides page info', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            bookExcerptsProvider.overrideWith(
+              (ref, bookId) => Stream<List<ExcerptRecord>>.value(const []),
+            ),
+            bookBookmarksProvider.overrideWith(
+              (ref, bookId) => Stream<List<BookmarkRecord>>.value(const []),
+            ),
+          ],
+          child: MaterialApp(
+            home: ReaderChromeScaffold(
+              sidebarVisible: true,
+              sidebarPinned: false,
+              chromeVisible: true,
+              chapterTitle: '第一讲 汉代',
+              pageLabel: '15 / 226',
+              header: AppBar(title: const Text('chrome')),
+              footer: const SizedBox.shrink(),
+              sidebar: ReaderSidebar(
+                bookId: 'book-1',
+                bookTitle: '钱穆：中国历代政治得失',
+                toc: const [
+                  ReaderSidebarTocItem(
+                    id: 'c1',
+                    label: '第一讲 汉代',
+                    pageLabel: '11',
+                  ),
+                ],
+                currentTocId: 'c1',
+                currentPageLabel: '15',
+                tab: ReaderSidebarTab.toc,
+                onTabChanged: (_) {},
+                onOpenToc: (_) {},
+                onOpenLocator: (_) {},
+              ),
+              body: const ColoredBox(color: Colors.white),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byKey(const Key('reader-sidebar')), findsOneWidget);
+      expect(find.byKey(const Key('reader-page-info')), findsNothing);
+      expect(find.text('chrome'), findsOneWidget);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 }

@@ -44,15 +44,20 @@ class ReaderChromeScaffold extends StatelessWidget {
     final hasSidebar = sidebar != null && sidebarVisible;
     final pinned = desktop && hasSidebar && sidebarPinned;
     final overlaySidebar = hasSidebar && !pinned;
+    final hidePageChrome = chromeVisible;
     final reading = Stack(
       fit: StackFit.expand,
       children: [
         body,
-        if (showChapterTitle &&
+        if (!hidePageChrome &&
+            showChapterTitle &&
             chapterTitle != null &&
             chapterTitle!.trim().isNotEmpty)
           _ChapterTitle(chapterTitle!.trim()),
-        if (showPageLabel && pageLabel != null && pageLabel!.trim().isNotEmpty)
+        if (!hidePageChrome &&
+            showPageLabel &&
+            pageLabel != null &&
+            pageLabel!.trim().isNotEmpty)
           _PageLabel(pageLabel!.trim()),
         if (chromeVisible)
           Positioned(
@@ -68,18 +73,26 @@ class ReaderChromeScaffold extends StatelessWidget {
             child: GestureDetector(
               onTap: onDismissSidebar,
               child: ColoredBox(
-                color: Colors.black.withValues(alpha: desktop ? 0.2 : 0.45),
+                color: Colors.black.withValues(alpha: desktop ? 0.2 : 0.5),
               ),
             ),
           ),
-          Positioned(
-            top: 0,
-            bottom: 0,
-            left: 0,
-            width: desktop ? readerSidebarWidth : null,
-            right: desktop ? null : 0,
-            child: sidebar!,
-          ),
+          if (desktop)
+            Positioned(
+              top: 0,
+              bottom: 0,
+              left: 0,
+              width: readerSidebarWidth,
+              child: sidebar!,
+            )
+          else
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              top: MediaQuery.paddingOf(context).top + 8,
+              child: sidebar!,
+            ),
         ],
       ],
     );
@@ -97,7 +110,9 @@ class ReaderChromeScaffold extends StatelessWidget {
               ],
             )
           : KeyedSubtree(
-              key: overlaySidebar ? const Key('reader-sidebar') : null,
+              key: overlaySidebar && !desktop
+                  ? const Key('reader-sidebar')
+                  : null,
               child: reading,
             ),
     );
@@ -112,13 +127,14 @@ class _ChapterTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final top = MediaQuery.paddingOf(context).top;
     return Positioned(
       top: 0,
       left: 0,
       right: 0,
       child: IgnorePointer(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(28, 10, 28, 0),
+          padding: EdgeInsets.fromLTRB(28, top + 8, 28, 0),
           child: Text(
             title,
             maxLines: 1,
@@ -143,9 +159,10 @@ class _PageLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final bottom = MediaQuery.paddingOf(context).bottom;
     return Positioned(
       right: 28,
-      bottom: 12,
+      bottom: bottom + 12,
       child: IgnorePointer(
         child: Text(
           key: const Key('reader-page-info'),

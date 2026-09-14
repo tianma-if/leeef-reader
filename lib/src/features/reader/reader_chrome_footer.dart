@@ -68,8 +68,7 @@ class _ReaderChromeFooterState extends State<ReaderChromeFooter> {
     final strings = AppStrings.of(context);
     final scheme = Theme.of(context).colorScheme;
     return Material(
-      color: scheme.surfaceContainer,
-      elevation: 8,
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.97),
       child: SafeArea(
         top: false,
         child: Column(
@@ -89,6 +88,10 @@ class _ReaderChromeFooterState extends State<ReaderChromeFooter> {
                   progress: widget.progress,
                   label: widget.progressLabel,
                   onSeek: widget.onSeekProgress,
+                  onPrevious: widget.onPrevious,
+                  onNext: widget.onNext,
+                  onHistoryBack: widget.onHistoryBack,
+                  onHistoryForward: widget.onHistoryForward,
                 ),
                 ReaderChromeTab.font => _FontPanel(
                   preferences: widget.preferences,
@@ -98,9 +101,9 @@ class _ReaderChromeFooterState extends State<ReaderChromeFooter> {
               },
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+              padding: const EdgeInsets.fromLTRB(24, 12, 24, 8),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   _FooterAction(
                     icon: Icons.list,
@@ -115,13 +118,13 @@ class _ReaderChromeFooterState extends State<ReaderChromeFooter> {
                     onPressed: () => _toggle(ReaderChromeTab.color),
                   ),
                   _FooterAction(
-                    icon: Icons.tune,
+                    icon: Icons.linear_scale,
                     label: strings.text('阅读进度'),
                     selected: _tab == ReaderChromeTab.progress,
                     onPressed: () => _toggle(ReaderChromeTab.progress),
                   ),
                   _FooterAction(
-                    icon: Icons.text_fields,
+                    icon: Icons.font_download_outlined,
                     label: strings.text('字体'),
                     selected: _tab == ReaderChromeTab.font,
                     onPressed: () => _toggle(ReaderChromeTab.font),
@@ -300,51 +303,104 @@ class _ColorPanel extends StatelessWidget {
     final strings = AppStrings.of(context);
     final appearance = AppAppearanceController.instance;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
       child: Column(
         children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: [
-              for (final theme in _paperThemes)
-                ChoiceChip(
-                  label: Text(strings.text(theme.$1)),
-                  selected: preferences.background == theme.$3,
-                  onSelected: (_) => onChanged(
-                    preferences.copyWith(
-                      foreground: theme.$2,
-                      background: theme.$3,
+          SizedBox(
+            height: 44,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final theme in _paperThemes) ...[
+                  _ThemeSwatch(
+                    label: strings.text(theme.$1),
+                    foreground: theme.$2,
+                    background: theme.$3,
+                    selected: preferences.background == theme.$3,
+                    onTap: () => onChanged(
+                      preferences.copyWith(
+                        foreground: theme.$2,
+                        background: theme.$3,
+                      ),
                     ),
                   ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ListenableBuilder(
-            listenable: appearance,
-            builder: (context, _) => SegmentedButton<ThemeMode>(
-              segments: [
-                ButtonSegment(
-                  value: ThemeMode.system,
-                  label: Text(strings.text('跟随系统')),
-                ),
-                ButtonSegment(
-                  value: ThemeMode.light,
-                  label: Text(strings.text('浅色')),
-                ),
-                ButtonSegment(
-                  value: ThemeMode.dark,
-                  label: Text(strings.text('深色')),
+                  const SizedBox(width: 10),
+                ],
+                ListenableBuilder(
+                  listenable: appearance,
+                  builder: (context, _) {
+                    final dark = appearance.themeMode == ThemeMode.dark;
+                    return _ThemeSwatch(
+                      label: dark ? strings.text('深色') : strings.text('浅色'),
+                      foreground: dark ? '#eeeeee' : '#292b29',
+                      background: dark ? '#000000' : '#ffffff',
+                      selected: false,
+                      icon: dark
+                          ? Icons.dark_mode_outlined
+                          : Icons.light_mode_outlined,
+                      onTap: () => appearance.setThemeMode(
+                        dark ? ThemeMode.light : ThemeMode.dark,
+                      ),
+                    );
+                  },
                 ),
               ],
-              selected: {appearance.themeMode},
-              onSelectionChanged: (value) =>
-                  appearance.setThemeMode(value.single),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ThemeSwatch extends StatelessWidget {
+  const _ThemeSwatch({
+    required this.label,
+    required this.foreground,
+    required this.background,
+    required this.selected,
+    required this.onTap,
+    this.icon,
+  });
+
+  final String label;
+  final String foreground;
+  final String background;
+  final bool selected;
+  final VoidCallback onTap;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = Color(
+      0xFF000000 | int.parse(background.substring(1), radix: 16),
+    );
+    final fg = Color(
+      0xFF000000 | int.parse(foreground.substring(1), radix: 16),
+    );
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 88,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: selected
+                ? Border.all(
+                    color: Theme.of(context).colorScheme.primary,
+                    width: 2,
+                  )
+                : null,
+          ),
+          child: icon != null
+              ? Icon(icon, color: fg, size: 20)
+              : Text(label, style: TextStyle(color: fg, fontSize: 12)),
+        ),
       ),
     );
   }
@@ -355,36 +411,75 @@ class _ProgressPanel extends StatelessWidget {
     required this.progress,
     required this.label,
     this.onSeek,
+    this.onPrevious,
+    this.onNext,
+    this.onHistoryBack,
+    this.onHistoryForward,
   });
 
   final double progress;
   final String label;
   final ValueChanged<double>? onSeek;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
+  final VoidCallback? onHistoryBack;
+  final VoidCallback? onHistoryForward;
 
   @override
   Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+      child: Column(
         children: [
-          SizedBox(
-            width: 44,
-            child: Text(
-              label,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.labelMedium,
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              child: Text(
+                label,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
             ),
           ),
-          Expanded(
-            child: SliderTheme(
-              data: theme.sliderTheme.copyWith(
-                trackHeight: 2,
-                overlayShape: SliderComponentShape.noOverlay,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-              ),
-              child: Slider(value: progress.clamp(0.0, 1.0), onChanged: onSeek),
+          SliderTheme(
+            data: theme.sliderTheme.copyWith(
+              trackHeight: 3,
+              overlayShape: SliderComponentShape.noOverlay,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
             ),
+            child: Slider(value: progress.clamp(0.0, 1.0), onChanged: onSeek),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              IconButton(
+                tooltip: strings.text('上一页'),
+                onPressed: onPrevious,
+                icon: const Icon(Icons.chevron_left),
+              ),
+              IconButton(
+                tooltip: strings.text('后退到上次跳转位置'),
+                onPressed: onHistoryBack,
+                icon: const Icon(Icons.arrow_back, size: 20),
+              ),
+              IconButton(
+                tooltip: strings.text('前进到下个跳转位置'),
+                onPressed: onHistoryForward,
+                icon: const Icon(Icons.arrow_forward, size: 20),
+              ),
+              IconButton(
+                tooltip: strings.text('下一页'),
+                onPressed: onNext,
+                icon: const Icon(Icons.chevron_right),
+              ),
+            ],
           ),
         ],
       ),
@@ -407,12 +502,12 @@ class _FontPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Column(
         children: [
           Row(
             children: [
-              Text(strings.text('字号')),
+              Text(strings.text('A'), style: const TextStyle(fontSize: 12)),
               Expanded(
                 child: Slider(
                   value: preferences.fontSize.clamp(12, 32),
@@ -422,7 +517,7 @@ class _FontPanel extends StatelessWidget {
                       onChanged(preferences.copyWith(fontSize: value)),
                 ),
               ),
-              Text(preferences.fontSize.round().toString()),
+              Text(strings.text('A'), style: const TextStyle(fontSize: 18)),
             ],
           ),
           Row(
@@ -439,10 +534,28 @@ class _FontPanel extends StatelessWidget {
               ),
             ],
           ),
+          Row(
+            children: [
+              Text(strings.text('边距')),
+              Expanded(
+                child: Slider(
+                  value: preferences.margin.clamp(8, 48),
+                  min: 8,
+                  max: 48,
+                  onChanged: (value) =>
+                      onChanged(preferences.copyWith(margin: value)),
+                ),
+              ),
+            ],
+          ),
           if (onOpenFullSettings != null)
-            TextButton(
-              onPressed: onOpenFullSettings,
-              child: Text(strings.text('阅读样式')),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: onOpenFullSettings,
+                icon: const Icon(Icons.settings_outlined, size: 16),
+                label: Text(strings.text('阅读样式')),
+              ),
             ),
         ],
       ),

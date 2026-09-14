@@ -21,6 +21,7 @@ import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
 import 'package:leeef_reader/src/features/reader/page_slide_switcher.dart';
 import 'package:leeef_reader/src/features/reader/reader_chrome_footer.dart';
+import 'package:leeef_reader/src/features/reader/reader_chrome_header.dart';
 import 'package:leeef_reader/src/features/reader/reader_chrome_scaffold.dart';
 import 'package:leeef_reader/src/features/reader/reader_page_turn_policy.dart';
 import 'package:leeef_reader/src/features/reader/reader_sidebar.dart';
@@ -1622,76 +1623,99 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       total: pages.isEmpty ? null : pages.length,
       progress: progress,
     );
-    final appBar = AppBar(
-      primary: false,
-      leading: Hero(
-        tag: 'book-cover-${widget.book.id}',
-        child: const Material(color: Colors.transparent, child: BackButton()),
-      ),
-      title: Text(headerText),
-      actions: [
-        IconButton(
-          tooltip: strings.text('后退到上次位置'),
-          onPressed: _history.canGoBack
-              ? () {
-                  final page = _history.back();
-                  if (page != null) _goToPage(page);
-                }
-              : null,
-          icon: const Icon(Icons.arrow_back),
-        ),
-        IconButton(
-          tooltip: strings.text('前进到下个位置'),
-          onPressed: _history.canGoForward
-              ? () {
-                  final page = _history.forward();
-                  if (page != null) _goToPage(page);
-                }
-              : null,
-          icon: const Icon(Icons.arrow_forward),
-        ),
-        if (!Platform.isIOS)
-          IconButton(
-            tooltip: strings.text('朗读'),
-            onPressed: document == null ? null : _showTts,
-            icon: const Icon(Icons.volume_up_outlined),
-          ),
-        PopupMenuButton<String>(
-          tooltip: strings.text('AI 阅读助手'),
-          icon: const Icon(Icons.auto_awesome_outlined),
-          onSelected: _openAi,
-          itemBuilder: (_) => [
-            PopupMenuItem(value: 'chat', child: Text(strings.text('基于全文对话'))),
-            PopupMenuItem(
-              value: 'translate',
-              child: Text(strings.text('全文翻译')),
+    final PreferredSizeWidget appBar = isDesktopReaderPlatform()
+        ? AppBar(
+            primary: false,
+            leading: Hero(
+              tag: 'book-cover-${widget.book.id}',
+              child: const Material(
+                color: Colors.transparent,
+                child: BackButton(),
+              ),
             ),
-          ],
-        ),
-        IconButton(
-          tooltip: strings.text('书内搜索'),
-          onPressed: document == null ? null : _showSearch,
-          icon: const Icon(Icons.search),
-        ),
-        IconButton(
-          tooltip: strings.text('阅读样式'),
-          onPressed: document == null ? null : _showReadingSettings,
-          icon: const Icon(Icons.text_fields),
-        ),
-        IconButton(
-          tooltip: strings.text('添加书签'),
-          onPressed: document == null ? null : _addBookmark,
-          icon: const Icon(Icons.bookmark_add_outlined),
-        ),
-        IconButton(
-          tooltip: strings.text('目录'),
-          onPressed: document == null || document.chapters.isEmpty
-              ? null
-              : _showTableOfContents,
-          icon: const Icon(Icons.toc),
-        ),
-      ],
-    );
+            title: Text(headerText),
+            actions: [
+              IconButton(
+                tooltip: strings.text('后退到上次位置'),
+                onPressed: _history.canGoBack
+                    ? () {
+                        final page = _history.back();
+                        if (page != null) _goToPage(page);
+                      }
+                    : null,
+                icon: const Icon(Icons.arrow_back),
+              ),
+              IconButton(
+                tooltip: strings.text('前进到下个位置'),
+                onPressed: _history.canGoForward
+                    ? () {
+                        final page = _history.forward();
+                        if (page != null) _goToPage(page);
+                      }
+                    : null,
+                icon: const Icon(Icons.arrow_forward),
+              ),
+              if (!Platform.isIOS)
+                IconButton(
+                  tooltip: strings.text('朗读'),
+                  onPressed: document == null ? null : _showTts,
+                  icon: const Icon(Icons.volume_up_outlined),
+                ),
+              PopupMenuButton<String>(
+                tooltip: strings.text('AI 阅读助手'),
+                icon: const Icon(Icons.auto_awesome_outlined),
+                onSelected: _openAi,
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'chat',
+                    child: Text(strings.text('基于全文对话')),
+                  ),
+                  PopupMenuItem(
+                    value: 'translate',
+                    child: Text(strings.text('全文翻译')),
+                  ),
+                ],
+              ),
+              IconButton(
+                tooltip: strings.text('书内搜索'),
+                onPressed: document == null ? null : _showSearch,
+                icon: const Icon(Icons.search),
+              ),
+              IconButton(
+                tooltip: strings.text('阅读样式'),
+                onPressed: document == null ? null : _showReadingSettings,
+                icon: const Icon(Icons.text_fields),
+              ),
+              IconButton(
+                tooltip: strings.text('添加书签'),
+                onPressed: document == null ? null : _addBookmark,
+                icon: const Icon(Icons.bookmark_add_outlined),
+              ),
+              IconButton(
+                tooltip: strings.text('目录'),
+                onPressed: document == null || document.chapters.isEmpty
+                    ? null
+                    : _showTableOfContents,
+                icon: const Icon(Icons.toc),
+              ),
+            ],
+          )
+        : ReaderChromeHeader(
+            heroTag: 'book-cover-${widget.book.id}',
+            onBookmark: document == null
+                ? null
+                : () => unawaited(_addBookmark()),
+            onNotes: () => _openSidebar(ReaderSidebarTab.annotations),
+            onSearch: document == null ? null : () => unawaited(_showSearch()),
+            onReadingSettings: document == null
+                ? null
+                : () => unawaited(_showReadingSettings()),
+            onTts: Platform.isIOS || document == null ? null : _showTts,
+            onAi: document == null
+                ? null
+                : (action) => unawaited(_openAi(action)),
+            onToc: document == null ? null : () => _openSidebar(),
+          );
     return ReaderChromeScaffold(
       sidebarVisible: _sidebarVisible,
       sidebarPinned: _sidebarPinned,

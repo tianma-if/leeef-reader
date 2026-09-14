@@ -143,11 +143,19 @@ class ReaderSidebar extends ConsumerWidget {
     final desktop = isDesktopReaderPlatform();
     return Material(
       color: scheme.surfaceContainerLow,
+      clipBehavior: Clip.antiAlias,
+      shape: desktop
+          ? null
+          : const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            ),
       child: SafeArea(
-        right: false,
+        top: desktop,
+        right: desktop,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (!desktop) _SidebarDragHandle(onClose: onClose),
             _SidebarHeader(
               pinned: pinned,
               desktop: desktop,
@@ -210,6 +218,36 @@ class ReaderSidebar extends ConsumerWidget {
   Future<void> _deleteBookmark(WidgetRef ref, String id) async {
     final repository = await ref.read(libraryRepositoryProvider.future);
     await repository.deleteBookmark(id);
+  }
+}
+
+class _SidebarDragHandle extends StatelessWidget {
+  const _SidebarDragHandle({this.onClose});
+
+  final VoidCallback? onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragEnd: (details) {
+        if ((details.primaryVelocity ?? 0) > 240) onClose?.call();
+      },
+      child: SizedBox(
+        height: 28,
+        child: Center(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurface.withValues(alpha: 0.28),
+              borderRadius: BorderRadius.circular(2),
+            ),
+            child: const SizedBox(width: 40, height: 4),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -425,10 +463,17 @@ class _TocRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final mobile = !isDesktopReaderPlatform();
+    final vertical = mobile ? 16.0 : 10.0;
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: EdgeInsets.fromLTRB(12 + item.depth * 12, 10, 16, 10),
+        padding: EdgeInsets.fromLTRB(
+          12 + item.depth * 12,
+          vertical,
+          16,
+          vertical,
+        ),
         child: Row(
           children: [
             Expanded(
