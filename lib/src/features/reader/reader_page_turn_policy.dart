@@ -17,8 +17,10 @@ String normalizePageTurnEffect(String effect) =>
 bool usesDesktopClickSlide({required String flow, TargetPlatform? platform}) =>
     flow == 'paginated' && isDesktopReaderPlatform(platform);
 
-/// Mobile chrome is hidden until the user taps; desktop keeps it visible.
-bool readerChromeStartsVisible([TargetPlatform? platform]) =>
+/// Header/footer chrome starts hidden. Desktop keeps a pinned sidebar instead.
+bool readerChromeStartsVisible([TargetPlatform? platform]) => false;
+
+bool readerSidebarStartsVisible([TargetPlatform? platform]) =>
     isDesktopReaderPlatform(platform);
 
 bool usesMobileInteractiveSlide({

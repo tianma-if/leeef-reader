@@ -68,6 +68,11 @@ void main() {
     final folders = childBookshelves(shelves: shelves, parentId: null);
     expect(folders.map((item) => item.id), ['fiction']);
     expect(
+      shelvesInTreeOrder(shelves).map((item) => '${item.$2}:${item.$1.id}'),
+      ['0:fiction', '1:sf'],
+    );
+    expect(bookshelfPathLabel(shelves[1], shelves), 'Fiction / SF');
+    expect(
       booksInVisibleFolders(
         folders: folders,
         shelves: shelves,

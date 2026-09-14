@@ -183,6 +183,14 @@ class AppStrings {
     '未命名书签': 'Untitled bookmark',
     '请先下载这本书': 'Download this book first',
     '新建书架': 'New shelf',
+    '新建目录': 'New folder',
+    '新建子目录': 'New subfolder',
+    '重命名目录': 'Rename folder',
+    '解散目录': 'Dissolve folder',
+    '整理目录': 'Organize folders',
+    '请先新建一个目录。': 'Create a folder first.',
+    '书籍不会被删除，只会移出这个目录。':
+        'Books will not be deleted; they will only be removed from this folder.',
     '所有标签': 'All tags',
     '管理标签': 'Manage tags',
     '全部状态': 'All statuses',
@@ -802,6 +810,16 @@ class AppStrings {
     '同步后端检测': 'Test sync backend',
     '备份': 'Backup',
     '批量下载': 'Bulk download',
+    '当前位置': 'Current position',
+    '固定侧栏': 'Pin sidebar',
+    '取消固定侧栏': 'Unpin sidebar',
+    '打开侧栏': 'Open sidebar',
+    '关闭侧栏': 'Close sidebar',
+    '书籍菜单': 'Book menu',
+    '书籍信息': 'Book info',
+    '批注': 'Annotate',
+    '没有书摘': 'No excerpts',
+    '没有书签': 'No bookmarks',
   };
   static const _japaneseText = <String, String>{
     '跳过': 'スキップ',
@@ -877,6 +895,14 @@ class AppStrings {
     '未命名书签': '名称なしのしおり',
     '请先下载这本书': '先にこの本をダウンロードしてください',
     '新建书架': '本棚を作成',
+    '新建目录': 'フォルダを作成',
+    '新建子目录': 'サブフォルダを作成',
+    '重命名目录': 'フォルダ名を変更',
+    '解散目录': 'フォルダを解散',
+    '整理目录': 'フォルダを整理',
+    '请先新建一个目录。': '先にフォルダを作成してください。',
+    '书籍不会被删除，只会移出这个目录。':
+        '本は削除されず、このフォルダから外されるだけです。',
     '所有标签': 'すべてのタグ',
     '管理标签': 'タグを管理',
     '全部状态': 'すべての状態',
@@ -1455,6 +1481,16 @@ class AppStrings {
     '同步后端检测': '同期バックエンドをテスト',
     '备份': 'バックアップ',
     '批量下载': '一括ダウンロード',
+    '当前位置': '現在位置',
+    '固定侧栏': 'サイドバーを固定',
+    '取消固定侧栏': 'サイドバーの固定を解除',
+    '打开侧栏': 'サイドバーを開く',
+    '关闭侧栏': 'サイドバーを閉じる',
+    '书籍菜单': 'ブックメニュー',
+    '书籍信息': '書籍情報',
+    '批注': '注釈',
+    '没有书摘': '抜粋はありません',
+    '没有书签': 'しおりはありません',
   };
 
   String text(String chinese) => _english
@@ -1587,7 +1623,7 @@ class AppStrings {
       ? 'Add “$title” to shelves'
       : _japanese
       ? '『$title』を本棚に追加'
-      : '将《$title》加入书架';
+      : '将《$title》加入目录';
 
   String setBookTags(String title) => _english
       ? 'Set tags for “$title”'

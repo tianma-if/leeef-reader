@@ -21,7 +21,9 @@ import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
 import 'package:leeef_reader/src/features/reader/page_slide_switcher.dart';
 import 'package:leeef_reader/src/features/reader/reader_chrome_footer.dart';
+import 'package:leeef_reader/src/features/reader/reader_chrome_scaffold.dart';
 import 'package:leeef_reader/src/features/reader/reader_page_turn_policy.dart';
+import 'package:leeef_reader/src/features/reader/reader_sidebar.dart';
 import 'package:leeef_reader/src/page_slide/smooth_page_slide.dart';
 import 'package:leeef_reader/src/platform/app_appearance.dart';
 import 'package:leeef_reader/src/reader/chinese_text_converter.dart';
@@ -75,6 +77,9 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   int _paginationGeneration = 0;
   int? _pendingPaginationOffset;
   bool _controlsVisible = readerChromeStartsVisible();
+  bool _sidebarVisible = readerSidebarStartsVisible();
+  bool _sidebarPinned = true;
+  ReaderSidebarTab _sidebarTab = ReaderSidebarTab.toc;
   DateTime? _lastWheelTurn;
   String? _loadedFontData;
   String? _decodedBackgroundKey;
@@ -106,6 +111,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+    unawaited(_loadSidebarPin());
     _textScrollController.addListener(_handleTextScroll);
     unawaited(_ttsController.initialize());
     _ttsController.addListener(_followTts);
@@ -406,29 +412,88 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     }
   }
 
-  Future<void> _showTableOfContents() async {
-    final document = _document;
-    if (document == null || document.chapters.isEmpty) return;
-    final strings = AppStrings.of(context);
-    final offset = await showModalBottomSheet<int>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: ListView(
-          children: [
-            ListTile(title: Text(strings.text('目录'))),
-            for (final chapter in document.chapters)
-              ListTile(
-                title: Text(chapter.title),
-                onTap: () => Navigator.pop(context, chapter.offset),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (offset != null) {
-      _goToPage(_pageIndexForOffset(_pagesFor(document), offset));
+  Future<void> _loadSidebarPin() async {
+    final pinned = await ReaderSidebarPin.load();
+    if (!mounted) return;
+    setState(() {
+      _sidebarPinned = pinned;
+      _sidebarVisible = isDesktopReaderPlatform() ? pinned : false;
+    });
+  }
+
+  void _toggleSidebarPin() {
+    setState(() {
+      _sidebarPinned = !_sidebarPinned;
+      if (_sidebarPinned) _sidebarVisible = true;
+    });
+    unawaited(ReaderSidebarPin.save(_sidebarPinned));
+  }
+
+  void _openSidebar([ReaderSidebarTab tab = ReaderSidebarTab.toc]) {
+    setState(() {
+      _sidebarTab = tab;
+      _sidebarVisible = true;
+      if (!isDesktopReaderPlatform()) _controlsVisible = false;
+    });
+  }
+
+  void _closeSidebar() {
+    setState(() => _sidebarVisible = false);
+  }
+
+  void _handleHover(PointerHoverEvent event) {
+    if (!isDesktopReaderPlatform()) return;
+    final height = _bodyKey.currentContext?.size?.height ?? 0;
+    if (height <= 0) return;
+    final box = _bodyKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+    final position = box.globalToLocal(event.position);
+    final shouldShow = position.dy < 52 || position.dy > height - 52;
+    if (shouldShow != _controlsVisible) {
+      setState(() => _controlsVisible = shouldShow);
     }
+  }
+
+  Future<void> _showTableOfContents() async {
+    _openSidebar();
+  }
+
+  void _openTocItem(ReaderSidebarTocItem item) {
+    final document = _document;
+    if (document == null) return;
+    final offset = int.tryParse(item.id) ?? 0;
+    _goToPage(_pageIndexForOffset(_pagesFor(document), offset));
+    if (!_sidebarPinned || !isDesktopReaderPlatform()) _closeSidebar();
+  }
+
+  void _openSidebarLocator(String locator) {
+    final document = _document;
+    if (document == null) return;
+    _goToPage(
+      _pageIndexForOffset(_pagesFor(document), parseTxtLocator(locator)),
+    );
+    if (!_sidebarPinned || !isDesktopReaderPlatform()) _closeSidebar();
+  }
+
+  Future<void> _showBookInfo() {
+    return showReaderBookInfoDialog(
+      context: context,
+      title: widget.book.title,
+      author: widget.book.author,
+      description: widget.book.description,
+    );
+  }
+
+  List<ReaderSidebarTocItem> _txtTocItems(TxtReaderDocument document) {
+    final pages = _pagesFor(document);
+    return [
+      for (final chapter in document.chapters)
+        ReaderSidebarTocItem(
+          id: '${chapter.offset}',
+          label: chapter.title,
+          pageLabel: '${_pageIndexForOffset(pages, chapter.offset) + 1}',
+        ),
+    ];
   }
 
   Future<void> _showSearch() async {
@@ -1549,10 +1614,16 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       'time' => _txtReaderClock(),
       _ => document == null ? '—' : '${_pageIndex + 1} / ${pages.length}',
     };
-    final overlayChrome = !isDesktopReaderPlatform();
-    final showHeader = _controlsVisible && _preferences.showHeader;
+    final toc = document == null
+        ? const <ReaderSidebarTocItem>[]
+        : _txtTocItems(document);
+    final pageLabel = readerPageFractionLabel(
+      current: document == null ? null : _pageIndex + 1,
+      total: pages.isEmpty ? null : pages.length,
+      progress: progress,
+    );
     final appBar = AppBar(
-      primary: !overlayChrome,
+      primary: false,
       leading: Hero(
         tag: 'book-cover-${widget.book.id}',
         child: const Material(color: Colors.transparent, child: BackButton()),
@@ -1621,16 +1692,75 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
         ),
       ],
     );
-    return Scaffold(
-      appBar: overlayChrome || !showHeader ? null : appBar,
-      body: MouseRegion(
-        onHover: overlayChrome
+    return ReaderChromeScaffold(
+      sidebarVisible: _sidebarVisible,
+      sidebarPinned: _sidebarPinned,
+      chromeVisible: _controlsVisible,
+      chapterTitle: chapter,
+      pageLabel: pageLabel,
+      showChapterTitle: _preferences.showHeader,
+      showPageLabel: _preferences.showFooter,
+      onDismissSidebar: _closeSidebar,
+      header: appBar,
+      footer: ReaderChromeFooter(
+        progress: progress,
+        progressLabel: footerText,
+        preferences: _preferences,
+        onPreferencesChanged: (value) =>
+            unawaited(_commitTxtPreferences(value)),
+        onPrevious: _pageIndex == 0
             ? null
-            : (_) {
-                if (!_controlsVisible) {
-                  setState(() => _controlsVisible = true);
-                }
-              },
+            : () => unawaited(_prepareTurn(_pageIndex - 1)),
+        onNext: document == null || _pageIndex == pages.length - 1
+            ? null
+            : () => unawaited(_prepareTurn(_pageIndex + 1)),
+        onToc: document == null ? null : () => _openSidebar(),
+        onSeekProgress: (value) {
+          if (pages.isEmpty) return;
+          _goToPage((value.clamp(0.0, 1.0) * (pages.length - 1)).round());
+        },
+        onOpenFullSettings: () => unawaited(_showReadingSettings()),
+        onTts: Platform.isIOS || document == null ? null : _showTts,
+        onHistoryBack: _history.canGoBack
+            ? () {
+                final page = _history.back();
+                if (page != null) _goToPage(page);
+              }
+            : null,
+        onHistoryForward: _history.canGoForward
+            ? () {
+                final page = _history.forward();
+                if (page != null) _goToPage(page);
+              }
+            : null,
+      ),
+      sidebar: ReaderSidebar(
+        bookId: widget.book.id,
+        bookTitle: widget.book.title,
+        bookAuthor: widget.book.author,
+        coverPath: widget.book.coverPath,
+        toc: toc,
+        currentTocId: matchingTocId(toc, chapter),
+        currentPageLabel: pageLabel,
+        tab: _sidebarTab,
+        onTabChanged: (tab) => setState(() => _sidebarTab = tab),
+        onOpenToc: _openTocItem,
+        onOpenLocator: _openSidebarLocator,
+        pinned: _sidebarPinned,
+        onTogglePin: _toggleSidebarPin,
+        onClose: _closeSidebar,
+        onSearch: document == null ? null : () => unawaited(_showSearch()),
+        onShowBookInfo: () => unawaited(_showBookInfo()),
+        onReadingSettings: document == null
+            ? null
+            : () => unawaited(_showReadingSettings()),
+        onTts: Platform.isIOS || document == null ? null : _showTts,
+        onAddBookmark: document == null
+            ? null
+            : () => unawaited(_addBookmark()),
+      ),
+      body: MouseRegion(
+        onHover: _handleHover,
         child: Listener(
           onPointerSignal: _handlePointerSignal,
           onPointerDown: (event) {
@@ -1705,44 +1835,6 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                 _buildTapGestureZone(Alignment.centerLeft),
                 _buildTapGestureZone(Alignment.centerRight),
               ],
-              if (document != null &&
-                  _controlsVisible &&
-                  _preferences.showFooter)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: ReaderChromeFooter(
-                    progress: progress,
-                    progressLabel: footerText,
-                    preferences: _preferences,
-                    onPreferencesChanged: (value) =>
-                        unawaited(_commitTxtPreferences(value)),
-                    onPrevious: _pageIndex == 0
-                        ? null
-                        : () => unawaited(_prepareTurn(_pageIndex - 1)),
-                    onNext: _pageIndex == pages.length - 1
-                        ? null
-                        : () => unawaited(_prepareTurn(_pageIndex + 1)),
-                    onToc: document.chapters.isEmpty
-                        ? null
-                        : () => unawaited(_showTableOfContents()),
-                    onSeekProgress: (value) {
-                      if (pages.isEmpty) return;
-                      _goToPage(
-                        (value.clamp(0.0, 1.0) * (pages.length - 1)).round(),
-                      );
-                    },
-                    onOpenFullSettings: () => unawaited(_showReadingSettings()),
-                  ),
-                ),
-              if (overlayChrome && showHeader)
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: ReaderChromeOverlayBar(child: appBar),
-                ),
               if (_selection case final selection?)
                 Positioned(
                   left: 16,
@@ -1813,7 +1905,10 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     bottom: 0,
     left: alignment == Alignment.centerLeft ? 0 : null,
     right: alignment == Alignment.centerRight ? 0 : null,
-    width: MediaQuery.sizeOf(context).width * _preferences.tapZoneRatio,
+    width:
+        (_bodyKey.currentContext?.size?.width ??
+            MediaQuery.sizeOf(context).width) *
+        _preferences.tapZoneRatio,
     child: Semantics(
       button: true,
       label: AppStrings.of(context).text(

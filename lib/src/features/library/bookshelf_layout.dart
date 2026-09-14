@@ -20,6 +20,41 @@ double bookshelfChildAspectRatio(double cellWidth) {
   return cellWidth / (coverHeight + kBookshelfTileMetaHeight);
 }
 
+String bookshelfPathLabel(
+  BookshelfRecord shelf,
+  List<BookshelfRecord> shelves,
+) {
+  final byId = {for (final item in shelves) item.id: item};
+  final parts = <String>[shelf.name];
+  final visited = <String>{shelf.id};
+  var parentId = shelf.parentId;
+  while (parentId != null && visited.add(parentId)) {
+    final parent = byId[parentId];
+    if (parent == null) break;
+    parts.add(parent.name);
+    parentId = parent.parentId;
+  }
+  return parts.reversed.join(' / ');
+}
+
+List<(BookshelfRecord shelf, int depth)> shelvesInTreeOrder(
+  List<BookshelfRecord> shelves,
+) {
+  final result = <(BookshelfRecord, int)>[];
+  void walk(String? parentId, int depth) {
+    for (final child in childBookshelves(
+      shelves: shelves,
+      parentId: parentId,
+    )) {
+      result.add((child, depth));
+      walk(child.id, depth + 1);
+    }
+  }
+
+  walk(null, 0);
+  return result;
+}
+
 List<BookshelfRecord> childBookshelves({
   required List<BookshelfRecord> shelves,
   required String? parentId,

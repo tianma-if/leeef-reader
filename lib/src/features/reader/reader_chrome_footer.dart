@@ -12,8 +12,8 @@ const _paperThemes = <(String, String, String)>[
   ('OLED', '#eeeeee', '#000000'),
 ];
 
-/// Mobile chrome matches Readest: tap shows four actions, not a live
-/// progress pill. Desktop keeps previous/next plus a compact label.
+/// Mobile chrome matches Readest: tap shows TOC/color/progress/font.
+/// Desktop hover chrome is a progress bar with previous/next, not a pill.
 class ReaderChromeFooter extends StatefulWidget {
   const ReaderChromeFooter({
     required this.progress,
@@ -26,6 +26,9 @@ class ReaderChromeFooter extends StatefulWidget {
     this.onToc,
     this.onSeekProgress,
     this.onOpenFullSettings,
+    this.onTts,
+    this.onHistoryBack,
+    this.onHistoryForward,
   });
 
   final double progress;
@@ -37,6 +40,9 @@ class ReaderChromeFooter extends StatefulWidget {
   final VoidCallback? onToc;
   final ValueChanged<double>? onSeekProgress;
   final VoidCallback? onOpenFullSettings;
+  final VoidCallback? onTts;
+  final VoidCallback? onHistoryBack;
+  final VoidCallback? onHistoryForward;
 
   @override
   State<ReaderChromeFooter> createState() => _ReaderChromeFooterState();
@@ -48,13 +54,15 @@ class _ReaderChromeFooterState extends State<ReaderChromeFooter> {
   @override
   Widget build(BuildContext context) {
     if (isDesktopReaderPlatform()) {
-      return Align(
-        alignment: Alignment.bottomCenter,
-        child: _DesktopProgressPill(
-          label: widget.progressLabel,
-          onPrevious: widget.onPrevious,
-          onNext: widget.onNext,
-        ),
+      return _DesktopFooterBar(
+        progress: widget.progress,
+        label: widget.progressLabel,
+        onPrevious: widget.onPrevious,
+        onNext: widget.onNext,
+        onSeekProgress: widget.onSeekProgress,
+        onTts: widget.onTts,
+        onHistoryBack: widget.onHistoryBack,
+        onHistoryForward: widget.onHistoryForward,
       );
     }
     final strings = AppStrings.of(context);
@@ -118,6 +126,13 @@ class _ReaderChromeFooterState extends State<ReaderChromeFooter> {
                     selected: _tab == ReaderChromeTab.font,
                     onPressed: () => _toggle(ReaderChromeTab.font),
                   ),
+                  if (widget.onTts != null)
+                    _FooterAction(
+                      icon: Icons.headphones_outlined,
+                      label: strings.text('朗读'),
+                      selected: false,
+                      onPressed: widget.onTts,
+                    ),
                 ],
               ),
             ),
@@ -152,46 +167,95 @@ class ReaderChromeOverlayBar extends StatelessWidget {
   }
 }
 
-class _DesktopProgressPill extends StatelessWidget {
-  const _DesktopProgressPill({
+class _DesktopFooterBar extends StatelessWidget {
+  const _DesktopFooterBar({
+    required this.progress,
     required this.label,
     this.onPrevious,
     this.onNext,
+    this.onSeekProgress,
+    this.onTts,
+    this.onHistoryBack,
+    this.onHistoryForward,
   });
 
+  final double progress;
   final String label;
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
+  final ValueChanged<double>? onSeekProgress;
+  final VoidCallback? onTts;
+  final VoidCallback? onHistoryBack;
+  final VoidCallback? onHistoryForward;
 
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
-    return SafeArea(
-      minimum: const EdgeInsets.all(12),
-      child: Material(
-        elevation: 4,
-        borderRadius: BorderRadius.circular(28),
-        color: Theme.of(context).colorScheme.surfaceContainer,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                tooltip: strings.text('上一页'),
-                onPressed: onPrevious,
-                icon: const Icon(Icons.chevron_left),
-              ),
-              SizedBox(
-                width: 100,
-                child: Text(label, textAlign: TextAlign.center),
-              ),
-              IconButton(
-                tooltip: strings.text('下一页'),
-                onPressed: onNext,
-                icon: const Icon(Icons.chevron_right),
-              ),
-            ],
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surface,
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 52,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                IconButton(
+                  tooltip: strings.text('上一页'),
+                  onPressed: onPrevious,
+                  icon: const Icon(Icons.chevron_left),
+                ),
+                if (onHistoryBack != null)
+                  IconButton(
+                    tooltip: strings.text('后退到上次跳转位置'),
+                    onPressed: onHistoryBack,
+                    icon: const Icon(Icons.arrow_back, size: 18),
+                  ),
+                if (onHistoryForward != null)
+                  IconButton(
+                    tooltip: strings.text('前进到下个跳转位置'),
+                    onPressed: onHistoryForward,
+                    icon: const Icon(Icons.arrow_forward, size: 18),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    label,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: SliderTheme(
+                    data: theme.sliderTheme.copyWith(
+                      trackHeight: 2,
+                      overlayShape: SliderComponentShape.noOverlay,
+                      thumbShape: const RoundSliderThumbShape(
+                        enabledThumbRadius: 6,
+                      ),
+                    ),
+                    child: Slider(
+                      value: progress.clamp(0.0, 1.0),
+                      onChanged: onSeekProgress,
+                    ),
+                  ),
+                ),
+                if (onTts != null)
+                  IconButton(
+                    tooltip: strings.text('朗读'),
+                    onPressed: onTts,
+                    icon: const Icon(Icons.headphones_outlined, size: 18),
+                  ),
+                IconButton(
+                  tooltip: strings.text('下一页'),
+                  onPressed: onNext,
+                  icon: const Icon(Icons.chevron_right),
+                ),
+              ],
+            ),
           ),
         ),
       ),

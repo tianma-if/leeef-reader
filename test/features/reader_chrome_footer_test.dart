@@ -69,4 +69,35 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     }
   });
+
+  testWidgets('desktop footer is a progress bar instead of a floating pill', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ReaderChromeFooter(
+              progress: 0.42,
+              progressLabel: '15 / 226',
+              preferences: const ReaderPreferences(),
+              onPreferencesChanged: (_) {},
+              onPrevious: () {},
+              onNext: () {},
+              onSeekProgress: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('15 / 226'), findsOneWidget);
+      expect(find.byType(Slider), findsOneWidget);
+      expect(find.byIcon(Icons.chevron_left), findsOneWidget);
+      expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+      expect(find.byIcon(Icons.list), findsNothing);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 }

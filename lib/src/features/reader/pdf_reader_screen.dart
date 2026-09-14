@@ -16,7 +16,9 @@ import 'package:leeef_reader/src/domain/reading_location.dart';
 import 'package:leeef_reader/src/features/reader/pdf_page_snapshot_renderer.dart';
 import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
 import 'package:leeef_reader/src/features/reader/reader_chrome_footer.dart';
+import 'package:leeef_reader/src/features/reader/reader_chrome_scaffold.dart';
 import 'package:leeef_reader/src/features/reader/reader_page_turn_policy.dart';
+import 'package:leeef_reader/src/features/reader/reader_sidebar.dart';
 import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/page_curl/page_texture_cache.dart';
 import 'package:leeef_reader/src/page_slide/page_slide_controller.dart';
@@ -71,6 +73,9 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
   DateTime? _sessionStartedAt;
   ReaderPreferences _preferences = const ReaderPreferences();
   bool _controlsVisible = readerChromeStartsVisible();
+  bool _sidebarVisible = readerSidebarStartsVisible();
+  bool _sidebarPinned = true;
+  ReaderSidebarTab _sidebarTab = ReaderSidebarTab.toc;
   DateTime? _lastWheelTurn;
   final ReaderNavigationHistory _history = ReaderNavigationHistory();
   late final SystemTtsController _ttsController = SystemTtsController(
@@ -84,6 +89,7 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+    unawaited(_loadSidebarPin());
     unawaited(_ttsController.initialize());
     _ttsController.addListener(_onTtsChanged);
     _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
@@ -554,29 +560,81 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     }
   }
 
+  Future<void> _loadSidebarPin() async {
+    final pinned = await ReaderSidebarPin.load();
+    if (!mounted) return;
+    setState(() {
+      _sidebarPinned = pinned;
+      _sidebarVisible = isDesktopReaderPlatform() ? pinned : false;
+    });
+  }
+
+  void _toggleSidebarPin() {
+    setState(() {
+      _sidebarPinned = !_sidebarPinned;
+      if (_sidebarPinned) _sidebarVisible = true;
+    });
+    unawaited(ReaderSidebarPin.save(_sidebarPinned));
+  }
+
+  void _openSidebar([ReaderSidebarTab tab = ReaderSidebarTab.toc]) {
+    setState(() {
+      _sidebarTab = tab;
+      _sidebarVisible = true;
+      if (!isDesktopReaderPlatform()) _controlsVisible = false;
+    });
+  }
+
+  void _closeSidebar() {
+    setState(() => _sidebarVisible = false);
+  }
+
+  void _handleHover(PointerHoverEvent event) {
+    if (!isDesktopReaderPlatform()) return;
+    final height = _bodyKey.currentContext?.size?.height ?? 0;
+    if (height <= 0) return;
+    final box = _bodyKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+    final position = box.globalToLocal(event.position);
+    final shouldShow = position.dy < 52 || position.dy > height - 52;
+    if (shouldShow != _controlsVisible) {
+      setState(() => _controlsVisible = shouldShow);
+    }
+  }
+
   Future<void> _showTableOfContents() async {
-    final strings = AppStrings.of(context);
-    final item = await showModalBottomSheet<PdfOutlineEntry>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: ListView(
-          children: [
-            ListTile(title: Text(strings.text('目录'))),
-            for (final item in _toc)
-              ListTile(
-                contentPadding: EdgeInsets.only(
-                  left: 16 + item.depth * 20,
-                  right: 16,
-                ),
-                title: Text(item.title),
-                onTap: () => Navigator.pop(context, item),
-              ),
-          ],
-        ),
+    _openSidebar();
+  }
+
+  List<ReaderSidebarTocItem> get _sidebarToc => [
+    for (var i = 0; i < _toc.length; i++)
+      ReaderSidebarTocItem(
+        id: '$i',
+        label: _toc[i].title,
+        pageLabel: '${_toc[i].dest.pageNumber}',
+        depth: _toc[i].depth,
       ),
+  ];
+
+  Future<void> _openTocItem(ReaderSidebarTocItem item) async {
+    final index = int.tryParse(item.id);
+    if (index == null || index < 0 || index >= _toc.length) return;
+    await _controller.goToDest(_toc[index].dest);
+    if (!_sidebarPinned || !isDesktopReaderPlatform()) _closeSidebar();
+  }
+
+  Future<void> _openSidebarLocator(String locator) async {
+    await _goToPage(parsePdfPageLocator(locator));
+    if (!_sidebarPinned || !isDesktopReaderPlatform()) _closeSidebar();
+  }
+
+  Future<void> _showBookInfo() {
+    return showReaderBookInfoDialog(
+      context: context,
+      title: widget.book.title,
+      author: widget.book.author,
+      description: widget.book.description,
     );
-    if (item != null) await _controller.goToDest(item.dest);
   }
 
   Future<void> _showSearch() async {
@@ -962,10 +1020,14 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
       'time' => _pdfReaderClock(),
       _ => '$_page / $_pageCount',
     };
-    final overlayChrome = !isDesktopReaderPlatform();
-    final showHeader = _controlsVisible && _preferences.showHeader;
+    final toc = _sidebarToc;
+    final pageLabel = readerPageFractionLabel(
+      current: _pageCount < 1 ? null : _page,
+      total: _pageCount < 1 ? null : _pageCount,
+      progress: progress,
+    );
     final appBar = AppBar(
-      primary: !overlayChrome,
+      primary: false,
       leading: Hero(
         tag: 'book-cover-${widget.book.id}',
         child: const Material(color: Colors.transparent, child: BackButton()),
@@ -1032,16 +1094,75 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
         ),
       ],
     );
-    return Scaffold(
-      appBar: overlayChrome || !showHeader ? null : appBar,
-      body: MouseRegion(
-        onHover: overlayChrome
+    return ReaderChromeScaffold(
+      sidebarVisible: _sidebarVisible,
+      sidebarPinned: _sidebarPinned,
+      chromeVisible: _controlsVisible,
+      chapterTitle: chapter,
+      pageLabel: pageLabel,
+      showChapterTitle: _preferences.showHeader,
+      showPageLabel: _preferences.showFooter,
+      onDismissSidebar: _closeSidebar,
+      header: appBar,
+      footer: ReaderChromeFooter(
+        progress: progress,
+        progressLabel: footerText,
+        preferences: _preferences,
+        onPreferencesChanged: (value) =>
+            unawaited(_commitPdfPreferences(value)),
+        onPrevious: _page <= 1 || _preparingTurn
             ? null
-            : (_) {
-                if (!_controlsVisible) {
-                  setState(() => _controlsVisible = true);
-                }
-              },
+            : () => _turnPage(_page - 1),
+        onNext: _page >= _pageCount || _preparingTurn
+            ? null
+            : () => _turnPage(_page + 1),
+        onToc: () => _openSidebar(),
+        onSeekProgress: (value) {
+          if (_pageCount < 1) return;
+          unawaited(
+            _goToPage((value.clamp(0.0, 1.0) * (_pageCount - 1)).round() + 1),
+          );
+        },
+        onOpenFullSettings: () => unawaited(_showReadingSettings()),
+        onTts: Platform.isIOS || _pageCount < 1 ? null : _showTts,
+        onHistoryBack: _history.canGoBack
+            ? () {
+                final page = _history.back();
+                if (page != null) unawaited(_goToPage(page));
+              }
+            : null,
+        onHistoryForward: _history.canGoForward
+            ? () {
+                final page = _history.forward();
+                if (page != null) unawaited(_goToPage(page));
+              }
+            : null,
+      ),
+      sidebar: ReaderSidebar(
+        bookId: widget.book.id,
+        bookTitle: widget.book.title,
+        bookAuthor: widget.book.author,
+        coverPath: widget.book.coverPath,
+        toc: toc,
+        currentTocId: matchingTocIdByPage(toc, _page),
+        currentPageLabel: pageLabel,
+        tab: _sidebarTab,
+        onTabChanged: (tab) => setState(() => _sidebarTab = tab),
+        onOpenToc: (item) => unawaited(_openTocItem(item)),
+        onOpenLocator: (locator) => unawaited(_openSidebarLocator(locator)),
+        pinned: _sidebarPinned,
+        onTogglePin: _toggleSidebarPin,
+        onClose: _closeSidebar,
+        onSearch: _pageCount < 1 ? null : () => unawaited(_showSearch()),
+        onShowBookInfo: () => unawaited(_showBookInfo()),
+        onReadingSettings: _prepared
+            ? () => unawaited(_showReadingSettings())
+            : null,
+        onTts: Platform.isIOS || _pageCount < 1 ? null : _showTts,
+        onAddBookmark: _pageCount < 1 ? null : () => unawaited(_addBookmark()),
+      ),
+      body: MouseRegion(
+        onHover: _handleHover,
         child: Listener(
           onPointerSignal: _handlePointerSignal,
           onPointerDown: (event) {
@@ -1115,45 +1236,6 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
                   _buildTapGestureZone(Alignment.centerRight),
                 ],
               ],
-              if (overlayChrome && showHeader)
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: ReaderChromeOverlayBar(child: appBar),
-                ),
-              if (_pageCount > 0 && _controlsVisible && _preferences.showFooter)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: ReaderChromeFooter(
-                    progress: progress,
-                    progressLabel: footerText,
-                    preferences: _preferences,
-                    onPreferencesChanged: (value) =>
-                        unawaited(_commitPdfPreferences(value)),
-                    onPrevious: _page <= 1 || _preparingTurn
-                        ? null
-                        : () => _turnPage(_page - 1),
-                    onNext: _page >= _pageCount || _preparingTurn
-                        ? null
-                        : () => _turnPage(_page + 1),
-                    onToc: _toc.isEmpty
-                        ? null
-                        : () => unawaited(_showTableOfContents()),
-                    onSeekProgress: (value) {
-                      if (_pageCount < 1) return;
-                      unawaited(
-                        _goToPage(
-                          (value.clamp(0.0, 1.0) * (_pageCount - 1)).round() +
-                              1,
-                        ),
-                      );
-                    },
-                    onOpenFullSettings: () => unawaited(_showReadingSettings()),
-                  ),
-                ),
               if (_searchActive)
                 Positioned(
                   top: 12,
@@ -1317,7 +1399,8 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     left: alignment == Alignment.centerLeft ? 0 : null,
     right: alignment == Alignment.centerRight ? 0 : null,
     width:
-        MediaQuery.sizeOf(context).width *
+        (_bodyKey.currentContext?.size?.width ??
+            MediaQuery.sizeOf(context).width) *
         pageSlideSwipeZoneRatio(_preferences.tapZoneRatio),
     child: Semantics(
       button: true,
@@ -1358,7 +1441,10 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     bottom: 0,
     left: alignment == Alignment.centerLeft ? 0 : null,
     right: alignment == Alignment.centerRight ? 0 : null,
-    width: MediaQuery.sizeOf(context).width * _preferences.tapZoneRatio,
+    width:
+        (_bodyKey.currentContext?.size?.width ??
+            MediaQuery.sizeOf(context).width) *
+        _preferences.tapZoneRatio,
     child: Semantics(
       button: true,
       label: AppStrings.of(context).text(

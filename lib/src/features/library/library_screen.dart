@@ -493,14 +493,15 @@ class _LibraryContentState extends ConsumerState<_LibraryContent> {
   _BookSort _bookSort = _BookSort.recent;
   bool _ascending = true;
 
-  Future<String?> _askForName({String initialValue = ''}) async {
+  Future<String?> _askForName({
+    String initialValue = '',
+    String title = '新建目录',
+  }) async {
     final controller = TextEditingController(text: initialValue);
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(
-          AppStrings.of(context).text(initialValue.isEmpty ? '新建书架' : '重命名书架'),
-        ),
+        title: Text(AppStrings.of(context).text(title)),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -525,20 +526,22 @@ class _LibraryContentState extends ConsumerState<_LibraryContent> {
     return result?.trim().isEmpty ?? true ? null : result!.trim();
   }
 
-  Future<void> _createBookshelf() async {
+  Future<void> _createBookshelf({String? parentId}) async {
     final name = await _askForName();
     if (name == null) return;
     try {
       final repository = await ref.read(libraryRepositoryProvider.future);
-      final id = await repository.createBookshelf(name: name);
-      if (mounted) setState(() => _selectedBookshelfId = id);
+      await repository.createBookshelf(
+        name: name,
+        parentId: parentId ?? _selectedBookshelfId,
+      );
     } on Object catch (error) {
-      _showError('创建书架失败', error);
+      _showError('创建目录失败', error);
     }
   }
 
   Future<void> _renameBookshelf(BookshelfRecord shelf) async {
-    final name = await _askForName(initialValue: shelf.name);
+    final name = await _askForName(initialValue: shelf.name, title: '重命名目录');
     if (name == null) return;
     try {
       final repository = await ref.read(libraryRepositoryProvider.future);
@@ -553,7 +556,7 @@ class _LibraryContentState extends ConsumerState<_LibraryContent> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(AppStrings.of(context).dissolveShelf(shelf.name)),
-        content: Text(AppStrings.of(context).text('书籍不会被删除，只会移出这个书架。')),
+        content: Text(AppStrings.of(context).text('书籍不会被删除，只会移出这个目录。')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -574,7 +577,7 @@ class _LibraryContentState extends ConsumerState<_LibraryContent> {
         setState(() => _selectedBookshelfId = null);
       }
     } on Object catch (error) {
-      _showError('解散书架失败', error);
+      _showError('解散目录失败', error);
     }
   }
 
@@ -811,11 +814,21 @@ class _LibraryContentState extends ConsumerState<_LibraryContent> {
         : visibleBooks;
     final coverFit = AppAppearanceController.instance.coverFit;
     BookshelfRecord? selectedShelf;
+    BookshelfRecord? parentShelf;
     if (selectedId != null) {
       for (final shelf in shelfItems) {
         if (shelf.id == selectedId) {
           selectedShelf = shelf;
           break;
+        }
+      }
+      final parentId = selectedShelf?.parentId;
+      if (parentId != null) {
+        for (final shelf in shelfItems) {
+          if (shelf.id == parentId) {
+            parentShelf = shelf;
+            break;
+          }
         }
       }
     }
@@ -830,8 +843,10 @@ class _LibraryContentState extends ConsumerState<_LibraryContent> {
               if (selectedShelf != null) ...[
                 ActionChip(
                   avatar: const Icon(Icons.arrow_back, size: 16),
-                  label: Text(strings.text('全部')),
-                  onPressed: () => setState(() => _selectedBookshelfId = null),
+                  label: Text(parentShelf?.name ?? strings.text('全部')),
+                  onPressed: () => setState(
+                    () => _selectedBookshelfId = selectedShelf?.parentId,
+                  ),
                 ),
                 const SizedBox(width: 8),
                 InputChip(
@@ -852,8 +867,8 @@ class _LibraryContentState extends ConsumerState<_LibraryContent> {
               ],
               ActionChip(
                 avatar: const Icon(Icons.create_new_folder_outlined, size: 18),
-                label: Text(strings.text('新建书架')),
-                onPressed: _createBookshelf,
+                label: Text(strings.text('新建目录')),
+                onPressed: () => unawaited(_createBookshelf()),
               ),
               const SizedBox(width: 8),
               FilterChip(
@@ -1071,6 +1086,11 @@ class _LibraryContentState extends ConsumerState<_LibraryContent> {
         child: Wrap(
           children: [
             ListTile(
+              leading: const Icon(Icons.create_new_folder_outlined),
+              title: Text(AppStrings.of(context).text('新建子目录')),
+              onTap: () => Navigator.pop(context, 'create-child'),
+            ),
+            ListTile(
               leading: const Icon(Icons.edit_outlined),
               title: Text(AppStrings.of(context).text('重命名')),
               onTap: () => Navigator.pop(context, 'rename'),
@@ -1085,13 +1105,16 @@ class _LibraryContentState extends ConsumerState<_LibraryContent> {
                 Icons.delete_outline,
                 color: Theme.of(context).colorScheme.error,
               ),
-              title: Text(AppStrings.of(context).text('解散书架')),
+              title: Text(AppStrings.of(context).text('解散目录')),
               onTap: () => Navigator.pop(context, 'delete'),
             ),
           ],
         ),
       ),
     );
+    if (action == 'create-child') {
+      await _createBookshelf(parentId: shelf.id);
+    }
     if (action == 'rename') await _renameBookshelf(shelf);
     if (action == 'move') await _moveBookshelf(shelf);
     if (action == 'delete') await _deleteBookshelf(shelf);
@@ -1118,7 +1141,7 @@ class _LibraryContentState extends ConsumerState<_LibraryContent> {
                 onPressed: () => Navigator.pop(context, candidate.id),
                 child: ListTile(
                   leading: const Icon(Icons.folder_outlined),
-                  title: Text(_bookshelfLabel(candidate, shelves)),
+                  title: Text(bookshelfPathLabel(candidate, shelves)),
                 ),
               ),
         ],
@@ -1132,25 +1155,8 @@ class _LibraryContentState extends ConsumerState<_LibraryContent> {
         parentId: destination == '__root__' ? null : destination,
       );
     } on Object catch (error) {
-      _showError('移动书架失败', error);
+      _showError('移动目录失败', error);
     }
-  }
-
-  static String _bookshelfLabel(
-    BookshelfRecord shelf,
-    List<BookshelfRecord> shelves,
-  ) {
-    final byId = {for (final item in shelves) item.id: item};
-    final parts = <String>[shelf.name];
-    final visited = <String>{shelf.id};
-    var parentId = shelf.parentId;
-    while (parentId != null && visited.add(parentId)) {
-      final parent = byId[parentId];
-      if (parent == null) break;
-      parts.add(parent.name);
-      parentId = parent.parentId;
-    }
-    return parts.reversed.join(' / ');
   }
 }
 
@@ -1276,7 +1282,7 @@ class _BookCard extends ConsumerWidget {
     if (!context.mounted) return;
     if (shelves.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppStrings.of(context).text('请先新建一个书架。'))),
+        SnackBar(content: Text(AppStrings.of(context).text('请先新建一个目录。'))),
       );
       return;
     }
@@ -1294,15 +1300,22 @@ class _BookCard extends ConsumerWidget {
             child: ListView(
               shrinkWrap: true,
               children: [
-                for (final shelf in shelves)
+                for (final entry in shelvesInTreeOrder(shelves))
                   CheckboxListTile(
-                    value: selected.contains(shelf.id),
-                    title: Text(shelf.name),
+                    value: selected.contains(entry.$1.id),
+                    contentPadding: EdgeInsets.only(
+                      left: 16.0 + entry.$2 * 16,
+                      right: 16,
+                    ),
+                    title: Text(entry.$1.name),
+                    subtitle: entry.$2 == 0
+                        ? null
+                        : Text(bookshelfPathLabel(entry.$1, shelves)),
                     onChanged: (checked) => setDialogState(() {
                       if (checked ?? false) {
-                        selected.add(shelf.id);
+                        selected.add(entry.$1.id);
                       } else {
-                        selected.remove(shelf.id);
+                        selected.remove(entry.$1.id);
                       }
                     }),
                   ),
@@ -1589,7 +1602,7 @@ class _BookCard extends ConsumerWidget {
             ),
             ListTile(
               leading: const Icon(Icons.folder_outlined),
-              title: Text(AppStrings.of(context).text('整理书架')),
+              title: Text(AppStrings.of(context).text('整理目录')),
               onTap: () => Navigator.pop(context, 'shelves'),
             ),
             ListTile(

@@ -75,10 +75,17 @@ void main() {
     }
   });
 
-  test('mobile chrome starts hidden; desktop chrome starts visible', () {
+  test('header and footer chrome start hidden on every platform', () {
     expect(readerChromeStartsVisible(TargetPlatform.android), isFalse);
     expect(readerChromeStartsVisible(TargetPlatform.iOS), isFalse);
-    expect(readerChromeStartsVisible(TargetPlatform.macOS), isTrue);
+    expect(readerChromeStartsVisible(TargetPlatform.macOS), isFalse);
+  });
+
+  test('desktop starts with a pinned sidebar; mobile does not', () {
+    expect(readerSidebarStartsVisible(TargetPlatform.macOS), isTrue);
+    expect(readerSidebarStartsVisible(TargetPlatform.windows), isTrue);
+    expect(readerSidebarStartsVisible(TargetPlatform.android), isFalse);
+    expect(readerSidebarStartsVisible(TargetPlatform.iOS), isFalse);
   });
 
   test('continuous reading flow does not force a page transition', () {

@@ -16,7 +16,9 @@ import 'package:leeef_reader/src/domain/reading_location.dart';
 import 'package:leeef_reader/src/features/reader/pdf_reader_screen.dart';
 import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
 import 'package:leeef_reader/src/features/reader/reader_chrome_footer.dart';
+import 'package:leeef_reader/src/features/reader/reader_chrome_scaffold.dart';
 import 'package:leeef_reader/src/features/reader/reader_page_turn_policy.dart';
+import 'package:leeef_reader/src/features/reader/reader_sidebar.dart';
 import 'package:leeef_reader/src/features/ai/ai_assistant_screen.dart';
 import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_screen.dart';
@@ -89,6 +91,9 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
   Object? _error;
   bool _opening = false;
   bool _controlsVisible = readerChromeStartsVisible();
+  bool _sidebarVisible = readerSidebarStartsVisible();
+  bool _sidebarPinned = true;
+  ReaderSidebarTab _sidebarTab = ReaderSidebarTab.toc;
   bool _preparingTurn = false;
   _SlideTurn? _slideTurn;
   final GlobalKey _bodyKey = GlobalKey();
@@ -133,6 +138,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+    unawaited(_loadSidebarPin());
     _preferencesFuture = ReaderPreferences.load();
     unawaited(_ttsController.initialize());
     _ttsController.addListener(_followTts);
@@ -539,37 +545,60 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     }
   }
 
-  Future<void> _showTableOfContents() async {
-    final info = _bookInfo;
-    if (info == null) return;
-    final strings = AppStrings.of(context);
-    final locator = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: ListView(
-          children: [
-            ListTile(title: Text(strings.text('目录'))),
-            ..._tocTiles(info.toc),
-          ],
-        ),
-      ),
-    );
-    if (locator != null) await _engine.goTo(locator);
+  Future<void> _loadSidebarPin() async {
+    final pinned = await ReaderSidebarPin.load();
+    if (!mounted) return;
+    setState(() {
+      _sidebarPinned = pinned;
+      _sidebarVisible = isDesktopReaderPlatform() ? pinned : false;
+    });
   }
 
-  Iterable<Widget> _tocTiles(List<ReaderTocItem> items, [int depth = 0]) sync* {
-    for (final item in items) {
-      yield ListTile(
-        contentPadding: EdgeInsetsDirectional.only(
-          start: 16 + depth * 20,
-          end: 16,
-        ),
-        title: Text(item.label),
-        onTap: () => Navigator.pop(context, item.href),
-      );
-      yield* _tocTiles(item.children, depth + 1);
+  void _toggleSidebarPin() {
+    setState(() {
+      _sidebarPinned = !_sidebarPinned;
+      if (_sidebarPinned) _sidebarVisible = true;
+    });
+    unawaited(ReaderSidebarPin.save(_sidebarPinned));
+  }
+
+  void _openSidebar([ReaderSidebarTab tab = ReaderSidebarTab.toc]) {
+    setState(() {
+      _sidebarTab = tab;
+      _sidebarVisible = true;
+      if (!isDesktopReaderPlatform()) _controlsVisible = false;
+    });
+  }
+
+  void _closeSidebar() {
+    if (_sidebarPinned && isDesktopReaderPlatform()) {
+      setState(() => _sidebarVisible = false);
+      return;
     }
+    setState(() => _sidebarVisible = false);
+  }
+
+  Future<void> _showTableOfContents() async {
+    _openSidebar();
+  }
+
+  Future<void> _openTocItem(ReaderSidebarTocItem item) async {
+    await _engine.goTo(item.id);
+    if (!_sidebarPinned || !isDesktopReaderPlatform()) _closeSidebar();
+  }
+
+  Future<void> _openSidebarLocator(String locator) async {
+    await _engine.goTo(locator);
+    if (!_sidebarPinned || !isDesktopReaderPlatform()) _closeSidebar();
+  }
+
+  Future<void> _showBookInfo() {
+    return showReaderBookInfoDialog(
+      context: context,
+      title: _bookInfo?.title ?? widget.book.title,
+      author: _bookInfo?.author ?? widget.book.author,
+      description: widget.book.description,
+    );
   }
 
   Future<void> _showSearch() async {
@@ -848,9 +877,9 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     if (height <= 0) return;
     final position = _bodyPosition(event.position);
     final shouldShow =
-        position != null && (position.dy < 64 || position.dy > height - 84);
-    if (shouldShow && !_controlsVisible) {
-      setState(() => _controlsVisible = true);
+        position != null && (position.dy < 52 || position.dy > height - 52);
+    if (shouldShow != _controlsVisible) {
+      setState(() => _controlsVisible = shouldShow);
     }
   }
 
@@ -1657,10 +1686,13 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     };
     final bookSource = _bookSource;
     final compactToolbar = MediaQuery.sizeOf(context).width < 600;
-    final overlayChrome = !isDesktopReaderPlatform();
-    final showHeader = _controlsVisible && _preferences.showHeader;
+    final toc = flattenReaderToc(_bookInfo?.toc ?? const []);
+    final pageLabel = readerPageFractionLabel(
+      current: _location?.page,
+      progress: progress,
+    );
     final appBar = AppBar(
-      primary: !overlayChrome,
+      primary: false,
       leading: Hero(
         tag: 'book-cover-${widget.book.id}',
         child: const Material(color: Colors.transparent, child: BackButton()),
@@ -1781,8 +1813,62 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
         ),
       ],
     );
-    return Scaffold(
-      appBar: overlayChrome || !showHeader ? null : appBar,
+    return ReaderChromeScaffold(
+      paperColor: _paperColor,
+      sidebarVisible: _sidebarVisible,
+      sidebarPinned: _sidebarPinned,
+      chromeVisible: _controlsVisible,
+      chapterTitle: chapter,
+      pageLabel: pageLabel.isEmpty ? footerText : pageLabel,
+      showChapterTitle: _preferences.showHeader,
+      showPageLabel: _preferences.showFooter,
+      onDismissSidebar: _closeSidebar,
+      header: appBar,
+      footer: ReaderChromeFooter(
+        progress: progress,
+        progressLabel: footerText,
+        preferences: _preferences,
+        onPreferencesChanged: (value) => unawaited(_applyPreferences(value)),
+        onPrevious: _bookInfo == null || _preparingTurn
+            ? null
+            : () => unawaited(_prepareTurn(false)),
+        onNext: _bookInfo == null || _preparingTurn
+            ? null
+            : () => unawaited(_prepareTurn(true)),
+        onToc: _bookInfo == null ? null : () => _openSidebar(),
+        onSeekProgress: (value) => unawaited(_engine.goToFraction(value)),
+        onOpenFullSettings: _bookInfo == null
+            ? null
+            : () => unawaited(_showReadingSettings()),
+        onTts: Platform.isIOS || _bookInfo == null ? null : _showTts,
+        onHistoryBack: _canGoBack ? _engine.historyBack : null,
+        onHistoryForward: _canGoForward ? _engine.historyForward : null,
+      ),
+      sidebar: ReaderSidebar(
+        bookId: widget.book.id,
+        bookTitle: _bookInfo?.title ?? widget.book.title,
+        bookAuthor: _bookInfo?.author ?? widget.book.author,
+        coverPath: widget.book.coverPath,
+        toc: toc,
+        currentTocId: matchingTocId(toc, chapter),
+        currentPageLabel: pageLabel.isEmpty ? footerText : pageLabel,
+        tab: _sidebarTab,
+        onTabChanged: (tab) => setState(() => _sidebarTab = tab),
+        onOpenToc: (item) => unawaited(_openTocItem(item)),
+        onOpenLocator: (locator) => unawaited(_openSidebarLocator(locator)),
+        pinned: _sidebarPinned,
+        onTogglePin: _toggleSidebarPin,
+        onClose: _closeSidebar,
+        onSearch: _bookInfo == null ? null : () => unawaited(_showSearch()),
+        onShowBookInfo: () => unawaited(_showBookInfo()),
+        onReadingSettings: _bookInfo == null
+            ? null
+            : () => unawaited(_showReadingSettings()),
+        onTts: Platform.isIOS || _bookInfo == null ? null : _showTts,
+        onAddBookmark: _location == null
+            ? null
+            : () => unawaited(_addBookmark()),
+      ),
       body: MouseRegion(
         onHover: _handleHover,
         child: Listener(
@@ -1834,40 +1920,6 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
                         child: Text('${strings.text('无法打开书籍')}：$error'),
                       ),
                     ),
-                  ),
-                ),
-              if (overlayChrome && showHeader)
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: ReaderChromeOverlayBar(child: appBar),
-                ),
-              if (_controlsVisible && _preferences.showFooter)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: ReaderChromeFooter(
-                    progress: progress,
-                    progressLabel: footerText,
-                    preferences: _preferences,
-                    onPreferencesChanged: (value) =>
-                        unawaited(_applyPreferences(value)),
-                    onPrevious: _bookInfo == null || _preparingTurn
-                        ? null
-                        : () => unawaited(_prepareTurn(false)),
-                    onNext: _bookInfo == null || _preparingTurn
-                        ? null
-                        : () => unawaited(_prepareTurn(true)),
-                    onToc: _bookInfo == null
-                        ? null
-                        : () => unawaited(_showTableOfContents()),
-                    onSeekProgress: (value) =>
-                        unawaited(_engine.goToFraction(value)),
-                    onOpenFullSettings: _bookInfo == null
-                        ? null
-                        : () => unawaited(_showReadingSettings()),
                   ),
                 ),
               if (_selection != null)
@@ -1958,7 +2010,10 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     bottom: 0,
     left: alignment == Alignment.centerLeft ? 0 : null,
     right: alignment == Alignment.centerRight ? 0 : null,
-    width: MediaQuery.sizeOf(context).width * _preferences.tapZoneRatio,
+    width:
+        (_bodyKey.currentContext?.size?.width ??
+            MediaQuery.sizeOf(context).width) *
+        _preferences.tapZoneRatio,
     child: Semantics(
       button: true,
       label: AppStrings.of(context).text(
