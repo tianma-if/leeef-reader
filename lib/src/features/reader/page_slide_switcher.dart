@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:leeef_reader/src/page_slide/page_slide_gesture.dart';
 
 /// Slides adjacent pages across one shared seam using a single animation.
 ///
@@ -8,7 +9,7 @@ class PageSlideSwitcher extends StatefulWidget {
   const PageSlideSwitcher({
     required this.child,
     required this.direction,
-    this.duration = const Duration(milliseconds: 240),
+    this.duration = const Duration(milliseconds: 300),
     super.key,
   });
 
@@ -62,7 +63,7 @@ class _PageSlideSwitcherState extends State<PageSlideSwitcher>
       builder: (context, constraints) => AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {
-          final progress = Curves.easeOutCubic.transform(_controller.value);
+          final progress = pageSlideEaseOutQuad(_controller.value);
           final width = constraints.maxWidth;
           return Stack(
             fit: StackFit.expand,

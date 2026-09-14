@@ -3,7 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ReaderPreferences {
   const ReaderPreferences({
     this.flow = 'paginated',
-    this.pageTurnEffect = 'curl',
+    this.pageTurnEffect = 'slide',
     this.columns = 1,
     this.margin = 24,
     this.fontSize = 18,
@@ -169,8 +169,9 @@ class ReaderPreferences {
     final values = await SharedPreferences.getInstance();
     return ReaderPreferences(
       flow: values.getString('leeef.reader.flow') ?? 'paginated',
-      pageTurnEffect:
-          values.getString('leeef.reader.page_turn_effect') ?? 'curl',
+      pageTurnEffect: _storedPageTurnEffect(
+        values.getString('leeef.reader.page_turn_effect'),
+      ),
       columns: values.getInt('leeef.reader.columns') ?? 1,
       margin: values.getDouble('leeef.reader.margin') ?? 24,
       fontSize: values.getDouble('leeef.reader.font_size') ?? 18,
@@ -227,7 +228,10 @@ class ReaderPreferences {
     final values = await SharedPreferences.getInstance();
     await Future.wait([
       values.setString('leeef.reader.flow', flow),
-      values.setString('leeef.reader.page_turn_effect', pageTurnEffect),
+      values.setString(
+        'leeef.reader.page_turn_effect',
+        _storedPageTurnEffect(pageTurnEffect),
+      ),
       values.setInt('leeef.reader.columns', columns),
       values.setDouble('leeef.reader.margin', margin),
       values.setDouble('leeef.reader.font_size', fontSize),
@@ -270,4 +274,7 @@ class ReaderPreferences {
       values.setString('leeef.reader.custom_css', customCss),
     ]);
   }
+
+  static String _storedPageTurnEffect(String? value) =>
+      value == null || value == 'curl' ? 'slide' : value;
 }

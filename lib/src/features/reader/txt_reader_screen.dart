@@ -6,7 +6,6 @@ import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:leeef_reader/src/app_providers.dart';
@@ -20,13 +19,10 @@ import 'package:leeef_reader/src/features/reader/txt_layout_paginator.dart';
 import 'package:leeef_reader/src/features/reader/txt_page_layout.dart';
 import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
-import 'package:leeef_reader/src/features/reader/txt_page_snapshot_renderer.dart';
 import 'package:leeef_reader/src/features/reader/page_slide_switcher.dart';
 import 'package:leeef_reader/src/features/reader/reader_chrome_footer.dart';
 import 'package:leeef_reader/src/features/reader/reader_page_turn_policy.dart';
-import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
-import 'package:leeef_reader/src/page_curl/page_curl_gesture.dart';
-import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
+import 'package:leeef_reader/src/page_slide/smooth_page_slide.dart';
 import 'package:leeef_reader/src/platform/app_appearance.dart';
 import 'package:leeef_reader/src/reader/chinese_text_converter.dart';
 import 'package:leeef_reader/src/reader/reader_preferences.dart';
@@ -39,10 +35,14 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 class TxtReaderScreen extends ConsumerStatefulWidget {
-  const TxtReaderScreen({required this.book, super.key, this.pageCurlEnabled});
+  const TxtReaderScreen({
+    required this.book,
+    super.key,
+    this.interactiveSlideEnabled,
+  });
 
   final BookRecord book;
-  final bool? pageCurlEnabled;
+  final bool? interactiveSlideEnabled;
 
   @override
   ConsumerState<TxtReaderScreen> createState() => _TxtReaderScreenState();
@@ -57,19 +57,11 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   Timer? _progressTimer;
   Timer? _clockTimer;
   String? _lastPersistedLocator;
-  bool _preparingTurn = false;
-  _TxtCurlTurn? _curlTurn;
-  int? _snapshotPageIndex;
+
   final GlobalKey _bodyKey = GlobalKey();
-  final GlobalKey _visiblePageBoundaryKey = GlobalKey();
-  final GlobalKey _snapshotPageBoundaryKey = GlobalKey();
   final ScrollController _textScrollController = ScrollController();
-  Offset? _pointerDownPosition;
-  DateTime? _pointerDownAt;
-  PageCurlController? _pointerCurlController;
-  Offset? _lastPointerPosition;
-  Duration? _lastPointerTime;
-  double _horizontalVelocity = 0;
+  final SmoothPageSlideController _smoothSlideController =
+      SmoothPageSlideController();
   LibraryRepository? _repository;
   ReaderPreferences _preferences = const ReaderPreferences();
   final ChineseTextConverter _chineseConverter = const ChineseTextConverter();
@@ -82,7 +74,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   bool _paginationRefreshScheduled = false;
   int _paginationGeneration = 0;
   int? _pendingPaginationOffset;
-  bool _controlsVisible = true;
+  bool _controlsVisible = readerChromeStartsVisible();
   DateTime? _lastWheelTurn;
   String? _loadedFontData;
   final ReaderNavigationHistory _history = ReaderNavigationHistory();
@@ -92,14 +84,12 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     mediaControls: TtsMediaControlBridge.instance,
   );
 
-  bool get _supportsPageCurl =>
-      _preferences.flow == 'paginated' &&
-      effectivePageTurnEffect(
-            flow: _preferences.flow,
-            configuredEffect: _preferences.pageTurnEffect,
-          ) ==
-          'curl' &&
-      (widget.pageCurlEnabled ?? true);
+  bool get _supportsInteractiveSlide =>
+      usesMobileInteractiveSlide(
+        flow: _preferences.flow,
+        configuredEffect: _preferences.pageTurnEffect,
+      ) &&
+      (widget.interactiveSlideEnabled ?? true);
 
   bool get _usesPageSlide =>
       _preferences.flow == 'paginated' &&
@@ -107,7 +97,8 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
             flow: _preferences.flow,
             configuredEffect: _preferences.pageTurnEffect,
           ) ==
-          'slide';
+          'slide' &&
+      !_supportsInteractiveSlide;
 
   @override
   void initState() {
@@ -132,7 +123,6 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     _progressTimer?.cancel();
     _clockTimer?.cancel();
-    _curlTurn?.dispose();
     final repository = _repository;
     final startedAt = _sessionStartedAt;
     if (repository != null && startedAt != null) {
@@ -252,12 +242,30 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     }
   }
 
+  void _onTxtPageViewChanged(int index) {
+    if (index == _pageIndex) return;
+    setState(() {
+      _pageTurnDirection = index > _pageIndex ? 1 : -1;
+      _pageIndex = index;
+      _history.visit(index);
+      _selection = null;
+    });
+    if (Platform.isAndroid || Platform.isIOS) {
+      unawaited(HapticFeedback.selectionClick());
+    }
+    _scheduleProgressSave();
+  }
+
   void _goToPage(int index) {
     final document = _document;
     if (document == null) return;
     final pages = _pagesFor(document);
     final next = index.clamp(0, pages.length - 1);
     if (next == _pageIndex) return;
+    if (_supportsInteractiveSlide) {
+      unawaited(_smoothSlideController.goTo(next));
+      return;
+    }
     setState(() {
       _pageTurnDirection = next > _pageIndex ? 1 : -1;
       _pageIndex = next;
@@ -302,261 +310,13 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     _scheduleProgressSave();
   }
 
-  Future<void> _prepareTurn(
-    int targetIndex, {
-    bool autoComplete = true,
-    PageCurlController? controller,
-  }) async {
+  Future<void> _prepareTurn(int targetIndex) async {
     final document = _document;
-    if (document == null || _preparingTurn || _curlTurn != null) return;
+    if (document == null) return;
     final pages = _pagesFor(document);
     final target = targetIndex.clamp(0, pages.length - 1);
     if (target == _pageIndex) return;
-    if (!_supportsPageCurl) {
-      _goToPage(target);
-      return;
-    }
-
-    final renderObject = _bodyKey.currentContext?.findRenderObject();
-    final size = renderObject is RenderBox && renderObject.hasSize
-        ? renderObject.size
-        : MediaQuery.sizeOf(context);
-    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
-    final backgroundColor = _hexColor(_preferences.background);
-    final textStyle = _pageTextStyle;
-    final textDirection = Directionality.of(context);
-
-    setState(() {
-      _preparingTurn = true;
-      _snapshotPageIndex = target;
-    });
-    ui.Image? currentImage;
-    ui.Image? targetImage;
-    try {
-      await _waitForSnapshotPagePaint();
-      final images = await Future.wait([
-        _captureTxtPage(
-          boundaryKey: _visiblePageBoundaryKey,
-          pixelRatio: pixelRatio,
-          fallback: () => renderTxtPageSnapshot(
-            text: _displayText(pages[_pageIndex]).text,
-            size: size,
-            pixelRatio: pixelRatio,
-            backgroundColor: backgroundColor,
-            textStyle: textStyle,
-            textDirection: textDirection,
-            textScaler: MediaQuery.textScalerOf(context),
-            textAlign: _pageTextAlign,
-            padding: _pageLayout.padding,
-          ),
-        ),
-        _captureTxtPage(
-          boundaryKey: _snapshotPageBoundaryKey,
-          pixelRatio: pixelRatio,
-          fallback: () => renderTxtPageSnapshot(
-            text: _displayText(pages[target]).text,
-            size: size,
-            pixelRatio: pixelRatio,
-            backgroundColor: backgroundColor,
-            textStyle: textStyle,
-            textDirection: textDirection,
-            textScaler: MediaQuery.textScalerOf(context),
-            textAlign: _pageTextAlign,
-            padding: _pageLayout.padding,
-          ),
-        ),
-      ]);
-      currentImage = images[0];
-      targetImage = images[1];
-      if (!mounted) {
-        currentImage.dispose();
-        targetImage.dispose();
-        controller?.dispose();
-        return;
-      }
-      setState(() {
-        _curlTurn = _TxtCurlTurn(
-          current: currentImage!,
-          target: targetImage!,
-          targetIndex: target,
-          direction: target > _pageIndex ? 1 : -1,
-          autoComplete: autoComplete,
-          controller: controller,
-        );
-      });
-    } on Object {
-      currentImage?.dispose();
-      targetImage?.dispose();
-      controller?.dispose();
-      if (mounted) _goToPage(target);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _preparingTurn = false;
-          _snapshotPageIndex = null;
-        });
-      }
-    }
-  }
-
-  Future<void> _waitForSnapshotPagePaint() async {
-    for (var frame = 0; frame < 2 && mounted; frame++) {
-      WidgetsBinding.instance.scheduleFrame();
-      await WidgetsBinding.instance.endOfFrame;
-    }
-  }
-
-  Future<ui.Image> _captureTxtPage({
-    required GlobalKey boundaryKey,
-    required double pixelRatio,
-    required Future<ui.Image> Function() fallback,
-  }) async {
-    final renderObject = boundaryKey.currentContext?.findRenderObject();
-    if (renderObject is! RenderRepaintBoundary || !renderObject.hasSize) {
-      return fallback();
-    }
-    if (renderObject.debugNeedsPaint) {
-      WidgetsBinding.instance.scheduleFrame();
-      await WidgetsBinding.instance.endOfFrame;
-    }
-    if (!mounted || renderObject.debugNeedsPaint) return fallback();
-    return renderObject.toImage(pixelRatio: pixelRatio);
-  }
-
-  void _handlePointerDown(PointerDownEvent event) {
-    final position = _bodyPosition(event.position);
-    if (position == null) return;
-    _pointerDownPosition = position;
-    _pointerDownAt = DateTime.now();
-    _lastPointerPosition = position;
-    _lastPointerTime = event.timeStamp;
-    _horizontalVelocity = 0;
-
-    final document = _document;
-    final renderObject = _bodyKey.currentContext?.findRenderObject();
-    if (document == null ||
-        renderObject is! RenderBox ||
-        !renderObject.hasSize ||
-        _preparingTurn ||
-        _curlTurn != null) {
-      return;
-    }
-    final size = renderObject.size;
-    final direction = pageCurlDirectionForX(
-      x: position.dx,
-      width: size.width,
-      tapZoneRatio: _preferences.tapZoneRatio,
-      swapTapZones: _preferences.swapTapZones,
-    );
-    final target = _pageIndex + direction.toInt();
-    if (direction == 0 || target < 0 || target >= _pagesFor(document).length) {
-      return;
-    }
-
-    final controller = PageCurlController()
-      ..begin(position: position, size: size, direction: direction);
-    _pointerCurlController = controller;
-    unawaited(
-      _prepareTurn(target, autoComplete: false, controller: controller),
-    );
-  }
-
-  void _handlePointerMove(PointerMoveEvent event) {
-    final controller = _pointerCurlController;
-    if (controller == null) return;
-    final position = _bodyPosition(event.position);
-    if (position == null) return;
-    final previousPosition = _lastPointerPosition;
-    final previousTime = _lastPointerTime;
-    if (previousPosition != null && previousTime != null) {
-      final elapsedMicros = (event.timeStamp - previousTime).inMicroseconds
-          .clamp(1, 100000);
-      final instantaneous =
-          (position.dx - previousPosition.dx) *
-          Duration.microsecondsPerSecond /
-          elapsedMicros;
-      _horizontalVelocity = _horizontalVelocity * 0.58 + instantaneous * 0.42;
-    }
-    _lastPointerPosition = position;
-    _lastPointerTime = event.timeStamp;
-    controller.update(position);
-  }
-
-  void _handlePointerUp(PointerUpEvent event) {
-    final position = _bodyPosition(event.position);
-    final start = _pointerDownPosition;
-    final startedAt = _pointerDownAt;
-    _pointerDownPosition = null;
-    _pointerDownAt = null;
-    if (start == null || startedAt == null || position == null) return;
-    final isTap =
-        DateTime.now().difference(startedAt) <=
-            const Duration(milliseconds: 350) &&
-        (position - start).distance <= 12;
-    if (_pointerCurlController case final controller?) {
-      controller
-        ..update(position)
-        ..release(
-          horizontalVelocity: _horizontalVelocity,
-          forceComplete: isTap,
-        );
-      _pointerCurlController = null;
-      _lastPointerPosition = null;
-      _lastPointerTime = null;
-      return;
-    }
-    if (!isTap) return;
-    final width = _bodyKey.currentContext?.size?.width ?? 0;
-    if (width <= 0) return;
-    if (position.dx <= width * _preferences.tapZoneRatio) {
-      unawaited(
-        _prepareTurn(_pageIndex + (_preferences.swapTapZones ? 1 : -1)),
-      );
-    } else if (position.dx >= width * (1 - _preferences.tapZoneRatio)) {
-      unawaited(
-        _prepareTurn(_pageIndex + (_preferences.swapTapZones ? -1 : 1)),
-      );
-    }
-  }
-
-  Offset? _bodyPosition(Offset globalPosition) {
-    final renderObject = _bodyKey.currentContext?.findRenderObject();
-    return renderObject is RenderBox && renderObject.hasSize
-        ? renderObject.globalToLocal(globalPosition)
-        : null;
-  }
-
-  void _handlePointerCancel(PointerCancelEvent event) {
-    _pointerDownPosition = null;
-    _pointerDownAt = null;
-    _pointerCurlController?.release(horizontalVelocity: 0);
-    _pointerCurlController = null;
-    _lastPointerPosition = null;
-    _lastPointerTime = null;
-  }
-
-  Future<void> _finishTurn({required bool completed}) async {
-    final turn = _curlTurn;
-    if (turn == null) return;
-    if (completed) {
-      setState(() {
-        _pageIndex = turn.targetIndex;
-        _history.visit(turn.targetIndex);
-        _selection = null;
-      });
-      _scheduleProgressSave();
-      await _waitForTargetPagePaint();
-      if (!mounted || !identical(_curlTurn, turn)) return;
-    }
-    setState(() => _curlTurn = null);
-    WidgetsBinding.instance.addPostFrameCallback((_) => turn.dispose());
-  }
-
-  Future<void> _waitForTargetPagePaint() async {
-    for (var frame = 0; frame < 2 && mounted; frame++) {
-      WidgetsBinding.instance.scheduleFrame();
-      await WidgetsBinding.instance.endOfFrame;
-    }
+    _goToPage(target);
   }
 
   void _scheduleProgressSave() {
@@ -819,10 +579,6 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                     SegmentedButton<String>(
                       segments: [
                         ButtonSegment(
-                          value: 'curl',
-                          label: Text(strings.text('仿真')),
-                        ),
-                        ButtonSegment(
                           value: 'slide',
                           label: Text(strings.text('滑动')),
                         ),
@@ -831,7 +587,11 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                           label: Text(strings.text('无动画')),
                         ),
                       ],
-                      selected: {draft.pageTurnEffect},
+                      selected: {
+                        normalizePageTurnEffect(draft.pageTurnEffect) == 'none'
+                            ? 'none'
+                            : 'slide',
+                      },
                       onSelectionChanged: (value) => setDialogState(
                         () => draft = draft.copyWith(
                           pageTurnEffect: value.single,
@@ -1566,6 +1326,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
 
   TxtPageLayout get _pageLayout => TxtPageLayout(
     margin: _preferences.margin,
+    topInset: isDesktopReaderPlatform() ? 0 : MediaQuery.paddingOf(context).top,
     bottomInset: MediaQuery.paddingOf(context).bottom,
   );
 
@@ -1729,6 +1490,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       _pendingPaginationOffset = null;
       _history.reset(_pageIndex);
     });
+    unawaited(_smoothSlideController.goTo(_pageIndex, animate: false));
     _schedulePaginationSizeCheck();
   }
 
@@ -1788,88 +1550,88 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       'time' => _txtReaderClock(),
       _ => document == null ? '—' : '${_pageIndex + 1} / ${pages.length}',
     };
+    final overlayChrome = !isDesktopReaderPlatform();
+    final showHeader = _controlsVisible && _preferences.showHeader;
+    final appBar = AppBar(
+      primary: !overlayChrome,
+      leading: Hero(
+        tag: 'book-cover-${widget.book.id}',
+        child: const Material(color: Colors.transparent, child: BackButton()),
+      ),
+      title: Text(headerText),
+      actions: [
+        IconButton(
+          tooltip: strings.text('后退到上次位置'),
+          onPressed: _history.canGoBack
+              ? () {
+                  final page = _history.back();
+                  if (page != null) _goToPage(page);
+                }
+              : null,
+          icon: const Icon(Icons.arrow_back),
+        ),
+        IconButton(
+          tooltip: strings.text('前进到下个位置'),
+          onPressed: _history.canGoForward
+              ? () {
+                  final page = _history.forward();
+                  if (page != null) _goToPage(page);
+                }
+              : null,
+          icon: const Icon(Icons.arrow_forward),
+        ),
+        if (!Platform.isIOS)
+          IconButton(
+            tooltip: strings.text('朗读'),
+            onPressed: document == null ? null : _showTts,
+            icon: const Icon(Icons.volume_up_outlined),
+          ),
+        PopupMenuButton<String>(
+          tooltip: strings.text('AI 阅读助手'),
+          icon: const Icon(Icons.auto_awesome_outlined),
+          onSelected: _openAi,
+          itemBuilder: (_) => [
+            PopupMenuItem(value: 'chat', child: Text(strings.text('基于全文对话'))),
+            PopupMenuItem(
+              value: 'translate',
+              child: Text(strings.text('全文翻译')),
+            ),
+          ],
+        ),
+        IconButton(
+          tooltip: strings.text('书内搜索'),
+          onPressed: document == null ? null : _showSearch,
+          icon: const Icon(Icons.search),
+        ),
+        IconButton(
+          tooltip: strings.text('阅读样式'),
+          onPressed: document == null ? null : _showReadingSettings,
+          icon: const Icon(Icons.text_fields),
+        ),
+        IconButton(
+          tooltip: strings.text('添加书签'),
+          onPressed: document == null ? null : _addBookmark,
+          icon: const Icon(Icons.bookmark_add_outlined),
+        ),
+        IconButton(
+          tooltip: strings.text('目录'),
+          onPressed: document == null || document.chapters.isEmpty
+              ? null
+              : _showTableOfContents,
+          icon: const Icon(Icons.toc),
+        ),
+      ],
+    );
     return Scaffold(
-      appBar: _controlsVisible && _preferences.showHeader
-          ? AppBar(
-              leading: Hero(
-                tag: 'book-cover-${widget.book.id}',
-                child: const Material(
-                  color: Colors.transparent,
-                  child: BackButton(),
-                ),
-              ),
-              title: Text(headerText),
-              actions: [
-                IconButton(
-                  tooltip: strings.text('后退到上次位置'),
-                  onPressed: _history.canGoBack
-                      ? () {
-                          final page = _history.back();
-                          if (page != null) _goToPage(page);
-                        }
-                      : null,
-                  icon: const Icon(Icons.arrow_back),
-                ),
-                IconButton(
-                  tooltip: strings.text('前进到下个位置'),
-                  onPressed: _history.canGoForward
-                      ? () {
-                          final page = _history.forward();
-                          if (page != null) _goToPage(page);
-                        }
-                      : null,
-                  icon: const Icon(Icons.arrow_forward),
-                ),
-                if (!Platform.isIOS)
-                  IconButton(
-                    tooltip: strings.text('朗读'),
-                    onPressed: document == null ? null : _showTts,
-                    icon: const Icon(Icons.volume_up_outlined),
-                  ),
-                PopupMenuButton<String>(
-                  tooltip: strings.text('AI 阅读助手'),
-                  icon: const Icon(Icons.auto_awesome_outlined),
-                  onSelected: _openAi,
-                  itemBuilder: (_) => [
-                    PopupMenuItem(
-                      value: 'chat',
-                      child: Text(strings.text('基于全文对话')),
-                    ),
-                    PopupMenuItem(
-                      value: 'translate',
-                      child: Text(strings.text('全文翻译')),
-                    ),
-                  ],
-                ),
-                IconButton(
-                  tooltip: strings.text('书内搜索'),
-                  onPressed: document == null ? null : _showSearch,
-                  icon: const Icon(Icons.search),
-                ),
-                IconButton(
-                  tooltip: strings.text('阅读样式'),
-                  onPressed: document == null ? null : _showReadingSettings,
-                  icon: const Icon(Icons.text_fields),
-                ),
-                IconButton(
-                  tooltip: strings.text('添加书签'),
-                  onPressed: document == null ? null : _addBookmark,
-                  icon: const Icon(Icons.bookmark_add_outlined),
-                ),
-                IconButton(
-                  tooltip: strings.text('目录'),
-                  onPressed: document == null || document.chapters.isEmpty
-                      ? null
-                      : _showTableOfContents,
-                  icon: const Icon(Icons.toc),
-                ),
-              ],
-            )
-          : null,
+      appBar: overlayChrome || !showHeader ? null : appBar,
       body: MouseRegion(
-        onHover: (_) {
-          if (!_controlsVisible) setState(() => _controlsVisible = true);
-        },
+        onHover: overlayChrome
+            ? null
+            : (_) {
+                if (!_controlsVisible) {
+                  setState(() => _controlsVisible = true);
+                }
+              },
         child: Listener(
           onPointerSignal: _handlePointerSignal,
           onPointerDown: (event) {
@@ -1890,48 +1652,57 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
               else if (page == null)
                 const Center(child: CircularProgressIndicator())
               else ...[
-                if (_preferences.flow == 'paginated')
-                  if (_snapshotPageIndex case final snapshotPageIndex?)
-                    Positioned.fill(
-                      child: ExcludeSemantics(
-                        child: IgnorePointer(
-                          child: RepaintBoundary(
-                            key: _snapshotPageBoundaryKey,
+                Positioned.fill(
+                  child: _supportsInteractiveSlide
+                      ? SmoothPageSlide(
+                          key: const Key('txt-page-view'),
+                          controller: _smoothSlideController,
+                          pageIndex: _pageIndex,
+                          pageCount: pages.length,
+                          onPageChanged: _onTxtPageViewChanged,
+                          onCenterTap: () => setState(
+                            () => _controlsVisible = !_controlsVisible,
+                          ),
+                          tapZoneRatio: _preferences.tapZoneRatio,
+                          swapTapZones: _preferences.swapTapZones,
+                          leftZoneKey: const Key('txt-slide-left-zone'),
+                          rightZoneKey: const Key('txt-slide-right-zone'),
+                          pageBuilder: (context, index) => _buildTxtPage(
+                            pages[index],
+                            interactive: true,
+                            pageIndex: index,
+                          ),
+                        )
+                      : _usesPageSlide
+                      ? PageSlideSwitcher(
+                          key: const Key('txt-page-slide'),
+                          direction: _pageTurnDirection,
+                          child: KeyedSubtree(
+                            key: ValueKey(_pageIndex),
                             child: _buildTxtPage(
-                              pages[snapshotPageIndex],
-                              interactive: false,
+                              page,
+                              interactive: true,
+                              pageIndex: _pageIndex,
                             ),
+                          ),
+                        )
+                      : KeyedSubtree(
+                          key: ValueKey(
+                            _preferences.flow == 'scrolled'
+                                ? 'continuous'
+                                : _pageIndex,
+                          ),
+                          child: _buildTxtPage(
+                            page,
+                            interactive: true,
+                            pageIndex: _pageIndex,
                           ),
                         ),
-                      ),
-                    ),
-                Positioned.fill(
-                  child: RepaintBoundary(
-                    key: _visiblePageBoundaryKey,
-                    child: _usesPageSlide
-                        ? PageSlideSwitcher(
-                            key: const Key('txt-page-slide'),
-                            direction: _pageTurnDirection,
-                            child: KeyedSubtree(
-                              key: ValueKey(_pageIndex),
-                              child: _buildTxtPage(page, interactive: true),
-                            ),
-                          )
-                        : KeyedSubtree(
-                            key: ValueKey(
-                              _preferences.flow == 'scrolled'
-                                  ? 'continuous'
-                                  : _pageIndex,
-                            ),
-                            child: _buildTxtPage(page, interactive: true),
-                          ),
-                  ),
                 ),
               ],
-              if (page != null && _supportsPageCurl) ...[
-                _buildCurlGestureZone(Alignment.centerLeft),
-                _buildCurlGestureZone(Alignment.centerRight),
-              ] else if (page != null && _preferences.flow == 'paginated') ...[
+              if (page != null &&
+                  _preferences.flow == 'paginated' &&
+                  !_supportsInteractiveSlide) ...[
                 _buildTapGestureZone(Alignment.centerLeft),
                 _buildTapGestureZone(Alignment.centerRight),
               ],
@@ -1948,10 +1719,10 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                     preferences: _preferences,
                     onPreferencesChanged: (value) =>
                         unawaited(_commitTxtPreferences(value)),
-                    onPrevious: _pageIndex == 0 || _preparingTurn
+                    onPrevious: _pageIndex == 0
                         ? null
                         : () => unawaited(_prepareTurn(_pageIndex - 1)),
-                    onNext: _pageIndex == pages.length - 1 || _preparingTurn
+                    onNext: _pageIndex == pages.length - 1
                         ? null
                         : () => unawaited(_prepareTurn(_pageIndex + 1)),
                     onToc: document.chapters.isEmpty
@@ -1963,9 +1734,15 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                         (value.clamp(0.0, 1.0) * (pages.length - 1)).round(),
                       );
                     },
-                    onOpenFullSettings: () =>
-                        unawaited(_showReadingSettings()),
+                    onOpenFullSettings: () => unawaited(_showReadingSettings()),
                   ),
+                ),
+              if (overlayChrome && showHeader)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: ReaderChromeOverlayBar(child: appBar),
                 ),
               if (_selection case final selection?)
                 Positioned(
@@ -2025,69 +1802,12 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                     ),
                   ),
                 ),
-              if (_curlTurn case final turn?)
-                Positioned.fill(
-                  child: PageCurlSurface(
-                    key: const Key('txt-page-curl'),
-                    currentPage: turn.current,
-                    nextPage: turn.target,
-                    direction: turn.direction,
-                    autoComplete: turn.autoComplete,
-                    controller: turn.controller,
-                    onTurnCompleted: () => _finishTurn(completed: true),
-                    onTurnCancelled: () => _finishTurn(completed: false),
-                    onUnavailable: () => _finishTurn(completed: true),
-                  ),
-                ),
             ],
           ),
         ),
       ),
     );
   }
-
-  Widget _buildCurlGestureZone(Alignment alignment) => Positioned(
-    top: 0,
-    bottom: 0,
-    left: alignment == Alignment.centerLeft ? 0 : null,
-    right: alignment == Alignment.centerRight ? 0 : null,
-    width:
-        MediaQuery.sizeOf(context).width *
-        pageCurlSwipeZoneRatio(_preferences.tapZoneRatio),
-    child: Semantics(
-      button: true,
-      label: AppStrings.of(context).text(
-        (_preferences.swapTapZones
-                ? alignment == Alignment.centerLeft
-                : alignment == Alignment.centerRight)
-            ? '下一页'
-            : '上一页',
-      ),
-      onTap: () {
-        final document = _document;
-        if (document == null) return;
-        final isLeft = alignment == Alignment.centerLeft;
-        final forward = _preferences.swapTapZones ? isLeft : !isLeft;
-        final target = _pageIndex + (forward ? 1 : -1);
-        if (target >= 0 && target < _pagesFor(document).length) {
-          unawaited(_prepareTurn(target));
-        }
-      },
-      child: Listener(
-        key: Key(
-          alignment == Alignment.centerLeft
-              ? 'txt-curl-left-zone'
-              : 'txt-curl-right-zone',
-        ),
-        behavior: HitTestBehavior.opaque,
-        onPointerDown: _handlePointerDown,
-        onPointerMove: _handlePointerMove,
-        onPointerUp: _handlePointerUp,
-        onPointerCancel: _handlePointerCancel,
-        child: const SizedBox.expand(),
-      ),
-    ),
-  );
 
   Widget _buildTapGestureZone(Alignment alignment) => Positioned(
     top: 0,
@@ -2107,8 +1827,12 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       child: GestureDetector(
         key: Key(
           alignment == Alignment.centerLeft
-              ? 'txt-tap-left-zone'
-              : 'txt-tap-right-zone',
+              ? (_supportsInteractiveSlide
+                    ? 'txt-slide-left-zone'
+                    : 'txt-tap-left-zone')
+              : (_supportsInteractiveSlide
+                    ? 'txt-slide-right-zone'
+                    : 'txt-tap-right-zone'),
         ),
         behavior: HitTestBehavior.translucent,
         onTap: () {
@@ -2125,7 +1849,11 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     ),
   );
 
-  Widget _buildTxtPage(TxtPage page, {required bool interactive}) {
+  Widget _buildTxtPage(
+    TxtPage page, {
+    required bool interactive,
+    int? pageIndex,
+  }) {
     final background = _preferences.eInkMode
         ? Colors.white
         : _hexColor(_preferences.background);
@@ -2137,17 +1865,35 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     final backgroundBytes = _preferences.eInkMode
         ? null
         : _decodeDataUri(selectedBackground);
-    final pageKey = ValueKey(
-      interactive ? 'txt-page-$_pageIndex' : 'txt-snapshot-$_snapshotPageIndex',
+    final index = pageIndex ?? _pageIndex;
+    final pageKey = ValueKey('txt-page-$index');
+    final span = _ttsTextSpan(
+      _displayText(page).text,
+      interactive: interactive,
     );
-    final text = SelectableText.rich(
-      _ttsTextSpan(_displayText(page).text, interactive: interactive),
-      key: interactive ? const Key('txt-reader-text') : null,
-      onSelectionChanged: interactive ? _onSelectionChanged : null,
-      textAlign: _pageTextAlign,
-      style: _pageTextStyle,
-      textScaler: MediaQuery.textScalerOf(context),
-    );
+    final useSelectableText =
+        interactive &&
+        !(_supportsInteractiveSlide && _preferences.flow == 'paginated');
+    final text = useSelectableText
+        ? SelectableText.rich(
+            span,
+            key: interactive && index == _pageIndex
+                ? const Key('txt-reader-text')
+                : null,
+            onSelectionChanged: _onSelectionChanged,
+            textAlign: _pageTextAlign,
+            style: _pageTextStyle,
+            textScaler: MediaQuery.textScalerOf(context),
+          )
+        : Text.rich(
+            span,
+            key: interactive && index == _pageIndex
+                ? const Key('txt-reader-text')
+                : null,
+            textAlign: _pageTextAlign,
+            style: _pageTextStyle,
+            textScaler: MediaQuery.textScalerOf(context),
+          );
     final content = _preferences.flow == 'scrolled'
         ? SingleChildScrollView(
             key: pageKey,
@@ -2240,30 +1986,6 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
 String _txtReaderClock() {
   final now = DateTime.now();
   return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-}
-
-class _TxtCurlTurn {
-  const _TxtCurlTurn({
-    required this.current,
-    required this.target,
-    required this.targetIndex,
-    required this.direction,
-    required this.autoComplete,
-    this.controller,
-  });
-
-  final ui.Image current;
-  final ui.Image target;
-  final int targetIndex;
-  final double direction;
-  final bool autoComplete;
-  final PageCurlController? controller;
-
-  void dispose() {
-    current.dispose();
-    target.dispose();
-    controller?.dispose();
-  }
 }
 
 class _TxtSelection {

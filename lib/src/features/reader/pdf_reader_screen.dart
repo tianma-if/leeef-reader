@@ -18,10 +18,10 @@ import 'package:leeef_reader/src/features/reader/reader_excerpt_dialog.dart';
 import 'package:leeef_reader/src/features/reader/reader_chrome_footer.dart';
 import 'package:leeef_reader/src/features/reader/reader_page_turn_policy.dart';
 import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
-import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
-import 'package:leeef_reader/src/page_curl/page_curl_gesture.dart';
-import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
 import 'package:leeef_reader/src/page_curl/page_texture_cache.dart';
+import 'package:leeef_reader/src/page_slide/page_slide_controller.dart';
+import 'package:leeef_reader/src/page_slide/page_slide_gesture.dart';
+import 'package:leeef_reader/src/page_slide/page_slide_surface.dart';
 import 'package:leeef_reader/src/platform/app_appearance.dart';
 import 'package:leeef_reader/src/reader/reader_preferences.dart';
 import 'package:leeef_reader/src/reader/reader_navigation_history.dart';
@@ -56,11 +56,12 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
   Object? _error;
   bool _prepared = false;
   bool _preparingTurn = false;
-  _PdfCurlTurn? _curlTurn;
+  _PdfSlideTurn? _slideTurn;
   final GlobalKey _bodyKey = GlobalKey();
   Offset? _pointerDownPosition;
   DateTime? _pointerDownAt;
-  PageCurlController? _pointerCurlController;
+  PageSlideController? _pointerSlideController;
+  bool _pointerOwnedTurn = false;
   Offset? _lastPointerPosition;
   Duration? _lastPointerTime;
   double _horizontalVelocity = 0;
@@ -69,7 +70,7 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
   bool _searchActive = false;
   DateTime? _sessionStartedAt;
   ReaderPreferences _preferences = const ReaderPreferences();
-  bool _controlsVisible = true;
+  bool _controlsVisible = readerChromeStartsVisible();
   DateTime? _lastWheelTurn;
   final ReaderNavigationHistory _history = ReaderNavigationHistory();
   late final SystemTtsController _ttsController = SystemTtsController(
@@ -77,8 +78,7 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     mediaControls: TtsMediaControlBridge.instance,
   );
 
-  bool get _usesDesktopClickSlide =>
-      usesDesktopClickSlide(flow: _preferences.flow);
+  bool get _supportsInteractiveSlide => false;
 
   @override
   void initState() {
@@ -105,7 +105,7 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     _progressTimer?.cancel();
     _clockTimer?.cancel();
-    _curlTurn?.dispose();
+    _slideTurn?.dispose();
     _textureCache.dispose();
     _textSearcher?.dispose();
     final repository = _repository;
@@ -716,9 +716,13 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
   Future<void> _prepareTurn(
     int targetPage, {
     bool autoComplete = true,
-    PageCurlController? controller,
+    PageSlideController? controller,
   }) async {
-    if (!_controller.isReady || _preparingTurn || _curlTurn != null) return;
+    if (!_supportsInteractiveSlide) {
+      await _goToPage(targetPage);
+      return;
+    }
+    if (!_controller.isReady || _preparingTurn || _slideTurn != null) return;
     final target = targetPage.clamp(1, _pageCount);
     if (target == _page) return;
     final renderObject = _bodyKey.currentContext?.findRenderObject();
@@ -762,7 +766,7 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
         return;
       }
       setState(() {
-        _curlTurn = _PdfCurlTurn(
+        _slideTurn = _PdfSlideTurn(
           current: currentImage!,
           target: targetImage!,
           targetPage: target,
@@ -780,21 +784,23 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     }
   }
 
-  Future<void> _turnPage(int targetPage) =>
-      _usesDesktopClickSlide ? _goToPage(targetPage) : _prepareTurn(targetPage);
+  Future<void> _turnPage(int targetPage) => _supportsInteractiveSlide
+      ? _prepareTurn(targetPage)
+      : _goToPage(targetPage);
 
   Future<void> _finishTurn({required bool completed}) async {
-    final turn = _curlTurn;
+    final turn = _slideTurn;
     if (turn == null) return;
     if (completed) await _goToPage(turn.targetPage);
     if (!mounted) return;
-    setState(() => _curlTurn = null);
+    setState(() => _slideTurn = null);
     WidgetsBinding.instance.addPostFrameCallback((_) => turn.dispose());
   }
 
   Future<void> _prefetchAdjacentTextures() async {
     final renderObject = _bodyKey.currentContext?.findRenderObject();
     if (!mounted ||
+        !_supportsInteractiveSlide ||
         !_controller.isReady ||
         renderObject is! RenderBox ||
         !renderObject.hasSize) {
@@ -850,11 +856,11 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
         !renderObject.hasSize ||
         !_controller.isReady ||
         _preparingTurn ||
-        _curlTurn != null) {
+        _slideTurn != null) {
       return;
     }
     final size = renderObject.size;
-    final direction = pageCurlDirectionForX(
+    final direction = pageSlideDirectionForX(
       x: position.dx,
       width: size.width,
       tapZoneRatio: _preferences.tapZoneRatio,
@@ -862,16 +868,17 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     );
     final target = _page + direction.toInt();
     if (direction == 0 || target < 1 || target > _pageCount) return;
-    final controller = PageCurlController()
+    final controller = PageSlideController()
       ..begin(position: position, size: size, direction: direction);
-    _pointerCurlController = controller;
+    _pointerSlideController = controller;
+    _pointerOwnedTurn = true;
     unawaited(
       _prepareTurn(target, autoComplete: false, controller: controller),
     );
   }
 
   void _handlePointerMove(PointerMoveEvent event) {
-    final controller = _pointerCurlController;
+    final controller = _pointerSlideController;
     if (controller == null) return;
     final position = _bodyPosition(event.position);
     if (position == null) return;
@@ -904,14 +911,14 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
         DateTime.now().difference(startedAt) <=
             const Duration(milliseconds: 350) &&
         (position - start).distance <= 12;
-    if (_pointerCurlController case final controller?) {
+    if (_pointerSlideController case final controller?) {
       if (position != null) controller.update(position);
       controller.release(
         horizontalVelocity: _horizontalVelocity,
         forceComplete: isTap,
       );
     }
-    _pointerCurlController = null;
+    _pointerSlideController = null;
     _lastPointerPosition = null;
     _lastPointerTime = null;
   }
@@ -919,8 +926,9 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
   void _handlePointerCancel(PointerCancelEvent event) {
     _pointerDownPosition = null;
     _pointerDownAt = null;
-    _pointerCurlController?.release(horizontalVelocity: 0);
-    _pointerCurlController = null;
+    _pointerSlideController?.release(horizontalVelocity: 0);
+    _pointerSlideController = null;
+    _pointerOwnedTurn = false;
     _lastPointerPosition = null;
     _lastPointerTime = null;
   }
@@ -948,86 +956,86 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
       'time' => _pdfReaderClock(),
       _ => '$_page / $_pageCount',
     };
+    final overlayChrome = !isDesktopReaderPlatform();
+    final showHeader = _controlsVisible && _preferences.showHeader;
+    final appBar = AppBar(
+      primary: !overlayChrome,
+      leading: Hero(
+        tag: 'book-cover-${widget.book.id}',
+        child: const Material(color: Colors.transparent, child: BackButton()),
+      ),
+      title: Text(headerText),
+      actions: [
+        IconButton(
+          tooltip: strings.text('后退到上次位置'),
+          onPressed: _history.canGoBack
+              ? () {
+                  final page = _history.back();
+                  if (page != null) unawaited(_goToPage(page));
+                }
+              : null,
+          icon: const Icon(Icons.arrow_back),
+        ),
+        IconButton(
+          tooltip: strings.text('前进到下个位置'),
+          onPressed: _history.canGoForward
+              ? () {
+                  final page = _history.forward();
+                  if (page != null) unawaited(_goToPage(page));
+                }
+              : null,
+          icon: const Icon(Icons.arrow_forward),
+        ),
+        if (!Platform.isIOS)
+          IconButton(
+            tooltip: strings.text('朗读'),
+            onPressed: _pageCount < 1 ? null : _showTts,
+            icon: const Icon(Icons.volume_up_outlined),
+          ),
+        PopupMenuButton<String>(
+          tooltip: strings.text('AI 阅读助手'),
+          icon: const Icon(Icons.auto_awesome_outlined),
+          onSelected: _openAi,
+          itemBuilder: (_) => [
+            PopupMenuItem(value: 'chat', child: Text(strings.text('基于全文对话'))),
+            PopupMenuItem(
+              value: 'translate',
+              child: Text(strings.text('全文翻译')),
+            ),
+          ],
+        ),
+        IconButton(
+          tooltip: strings.text('书内搜索'),
+          onPressed: _pageCount < 1 ? null : _showSearch,
+          icon: const Icon(Icons.search),
+        ),
+        IconButton(
+          tooltip: strings.text('阅读设置'),
+          onPressed: _prepared ? _showReadingSettings : null,
+          icon: const Icon(Icons.tune),
+        ),
+        IconButton(
+          tooltip: strings.text('添加书签'),
+          onPressed: _pageCount < 1 ? null : _addBookmark,
+          icon: const Icon(Icons.bookmark_add_outlined),
+        ),
+        IconButton(
+          tooltip: strings.text('目录'),
+          onPressed: _toc.isEmpty ? null : _showTableOfContents,
+          icon: const Icon(Icons.toc),
+        ),
+      ],
+    );
     return Scaffold(
-      appBar: _controlsVisible && _preferences.showHeader
-          ? AppBar(
-              leading: Hero(
-                tag: 'book-cover-${widget.book.id}',
-                child: const Material(
-                  color: Colors.transparent,
-                  child: BackButton(),
-                ),
-              ),
-              title: Text(headerText),
-              actions: [
-                IconButton(
-                  tooltip: strings.text('后退到上次位置'),
-                  onPressed: _history.canGoBack
-                      ? () {
-                          final page = _history.back();
-                          if (page != null) unawaited(_goToPage(page));
-                        }
-                      : null,
-                  icon: const Icon(Icons.arrow_back),
-                ),
-                IconButton(
-                  tooltip: strings.text('前进到下个位置'),
-                  onPressed: _history.canGoForward
-                      ? () {
-                          final page = _history.forward();
-                          if (page != null) unawaited(_goToPage(page));
-                        }
-                      : null,
-                  icon: const Icon(Icons.arrow_forward),
-                ),
-                if (!Platform.isIOS)
-                  IconButton(
-                    tooltip: strings.text('朗读'),
-                    onPressed: _pageCount < 1 ? null : _showTts,
-                    icon: const Icon(Icons.volume_up_outlined),
-                  ),
-                PopupMenuButton<String>(
-                  tooltip: strings.text('AI 阅读助手'),
-                  icon: const Icon(Icons.auto_awesome_outlined),
-                  onSelected: _openAi,
-                  itemBuilder: (_) => [
-                    PopupMenuItem(
-                      value: 'chat',
-                      child: Text(strings.text('基于全文对话')),
-                    ),
-                    PopupMenuItem(
-                      value: 'translate',
-                      child: Text(strings.text('全文翻译')),
-                    ),
-                  ],
-                ),
-                IconButton(
-                  tooltip: strings.text('书内搜索'),
-                  onPressed: _pageCount < 1 ? null : _showSearch,
-                  icon: const Icon(Icons.search),
-                ),
-                IconButton(
-                  tooltip: strings.text('阅读设置'),
-                  onPressed: _prepared ? _showReadingSettings : null,
-                  icon: const Icon(Icons.tune),
-                ),
-                IconButton(
-                  tooltip: strings.text('添加书签'),
-                  onPressed: _pageCount < 1 ? null : _addBookmark,
-                  icon: const Icon(Icons.bookmark_add_outlined),
-                ),
-                IconButton(
-                  tooltip: strings.text('目录'),
-                  onPressed: _toc.isEmpty ? null : _showTableOfContents,
-                  icon: const Icon(Icons.toc),
-                ),
-              ],
-            )
-          : null,
+      appBar: overlayChrome || !showHeader ? null : appBar,
       body: MouseRegion(
-        onHover: (_) {
-          if (!_controlsVisible) setState(() => _controlsVisible = true);
-        },
+        onHover: overlayChrome
+            ? null
+            : (_) {
+                if (!_controlsVisible) {
+                  setState(() => _controlsVisible = true);
+                }
+              },
         child: Listener(
           onPointerSignal: _handlePointerSignal,
           onPointerDown: (event) {
@@ -1049,53 +1057,65 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
                 const Center(child: CircularProgressIndicator())
               else
                 Positioned.fill(
-                  child: PdfViewer.file(
-                    widget.book.filePath!,
-                    key: const Key('pdf-reader-view'),
-                    controller: _controller,
-                    initialPageNumber: _initialPage,
-                    params: PdfViewerParams(
-                      margin: 12,
-                      backgroundColor: Theme.of(
-                        context,
-                      ).scaffoldBackgroundColor,
-                      layoutPages: _preferences.flow == 'scrolled'
-                          ? null
-                          : _layoutPdfPagesHorizontally,
-                      panAxis: _preferences.flow == 'scrolled'
-                          ? PanAxis.vertical
-                          : PanAxis.horizontal,
-                      pageAnchor: PdfPageAnchor.all,
-                      pageAnchorEnd: PdfPageAnchor.all,
-                      pageDropShadow: null,
-                      sizeDelegateProvider:
-                          const PdfViewerSizeDelegateProviderLegacy(
-                            minScale: 0.1,
-                            useAlternativeFitScaleAsMinScale: false,
-                            calculateInitialZoom: _fitInitialPdfPage,
-                          ),
-                      onViewerReady: _onViewerReady,
-                      onPageChanged: _onPageChanged,
-                      pagePaintCallbacks: [
-                        if (_textSearcher case final textSearcher?)
-                          textSearcher.pageTextMatchPaintCallback,
-                      ],
-                      textSelectionParams: PdfTextSelectionParams(
-                        onTextSelectionChange: (selection) =>
-                            unawaited(_onTextSelectionChange(selection)),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: () =>
+                        setState(() => _controlsVisible = !_controlsVisible),
+                    child: PdfViewer.file(
+                      widget.book.filePath!,
+                      key: const Key('pdf-reader-view'),
+                      controller: _controller,
+                      initialPageNumber: _initialPage,
+                      params: PdfViewerParams(
+                        margin: 12,
+                        backgroundColor: Theme.of(
+                          context,
+                        ).scaffoldBackgroundColor,
+                        layoutPages: _preferences.flow == 'scrolled'
+                            ? null
+                            : _layoutPdfPagesHorizontally,
+                        panAxis: _preferences.flow == 'scrolled'
+                            ? PanAxis.vertical
+                            : PanAxis.horizontal,
+                        pageAnchor: PdfPageAnchor.all,
+                        pageAnchorEnd: PdfPageAnchor.all,
+                        pageDropShadow: null,
+                        sizeDelegateProvider:
+                            const PdfViewerSizeDelegateProviderLegacy(
+                              minScale: 0.1,
+                              useAlternativeFitScaleAsMinScale: false,
+                              calculateInitialZoom: _fitInitialPdfPage,
+                            ),
+                        onViewerReady: _onViewerReady,
+                        onPageChanged: _onPageChanged,
+                        pagePaintCallbacks: [
+                          if (_textSearcher case final textSearcher?)
+                            textSearcher.pageTextMatchPaintCallback,
+                        ],
+                        textSelectionParams: PdfTextSelectionParams(
+                          onTextSelectionChange: (selection) =>
+                              unawaited(_onTextSelectionChange(selection)),
+                        ),
                       ),
                     ),
                   ),
                 ),
               if (_pageCount > 0 && _preferences.flow == 'paginated') ...[
-                if (_usesDesktopClickSlide) ...[
+                if (_supportsInteractiveSlide) ...[
+                  _buildSlideGestureZone(Alignment.centerLeft),
+                  _buildSlideGestureZone(Alignment.centerRight),
+                ] else ...[
                   _buildTapGestureZone(Alignment.centerLeft),
                   _buildTapGestureZone(Alignment.centerRight),
-                ] else ...[
-                  _buildCurlGestureZone(Alignment.centerLeft),
-                  _buildCurlGestureZone(Alignment.centerRight),
                 ],
               ],
+              if (overlayChrome && showHeader)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: ReaderChromeOverlayBar(child: appBar),
+                ),
               if (_pageCount > 0 && _controlsVisible && _preferences.showFooter)
                 Positioned(
                   left: 0,
@@ -1125,8 +1145,7 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
                         ),
                       );
                     },
-                    onOpenFullSettings: () =>
-                        unawaited(_showReadingSettings()),
+                    onOpenFullSettings: () => unawaited(_showReadingSettings()),
                   ),
                 ),
               if (_searchActive)
@@ -1266,10 +1285,10 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
                     ),
                   ),
                 ),
-              if (_curlTurn case final turn?)
+              if (_slideTurn case final turn?)
                 Positioned.fill(
-                  child: PageCurlSurface(
-                    key: const Key('pdf-page-curl'),
+                  child: PageSlideSurface(
+                    key: const Key('pdf-page-slide-overlay'),
                     currentPage: turn.current,
                     nextPage: turn.target,
                     direction: turn.targetPage > _page ? 1 : -1,
@@ -1277,7 +1296,6 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
                     controller: turn.controller,
                     onTurnCompleted: () => _finishTurn(completed: true),
                     onTurnCancelled: () => _finishTurn(completed: false),
-                    onUnavailable: () => _finishTurn(completed: true),
                   ),
                 ),
             ],
@@ -1287,14 +1305,14 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     );
   }
 
-  Widget _buildCurlGestureZone(Alignment alignment) => Positioned(
+  Widget _buildSlideGestureZone(Alignment alignment) => Positioned(
     top: 0,
     bottom: 0,
     left: alignment == Alignment.centerLeft ? 0 : null,
     right: alignment == Alignment.centerRight ? 0 : null,
     width:
         MediaQuery.sizeOf(context).width *
-        pageCurlSwipeZoneRatio(_preferences.tapZoneRatio),
+        pageSlideSwipeZoneRatio(_preferences.tapZoneRatio),
     child: Semantics(
       button: true,
       label: AppStrings.of(context).text(
@@ -1305,6 +1323,10 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
             : '上一页',
       ),
       onTap: () {
+        if (_pointerOwnedTurn) {
+          _pointerOwnedTurn = false;
+          return;
+        }
         final isLeft = alignment == Alignment.centerLeft;
         final forward = _preferences.swapTapZones ? isLeft : !isLeft;
         unawaited(_prepareTurn(_page + (forward ? 1 : -1)));
@@ -1312,8 +1334,8 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
       child: Listener(
         key: Key(
           alignment == Alignment.centerLeft
-              ? 'pdf-curl-left-zone'
-              : 'pdf-curl-right-zone',
+              ? 'pdf-slide-left-zone'
+              : 'pdf-slide-right-zone',
         ),
         behavior: HitTestBehavior.opaque,
         onPointerDown: _handlePointerDown,
@@ -1425,8 +1447,8 @@ class _PdfSelection {
   final String locator;
 }
 
-class _PdfCurlTurn {
-  const _PdfCurlTurn({
+class _PdfSlideTurn {
+  const _PdfSlideTurn({
     required this.current,
     required this.target,
     required this.targetPage,
@@ -1438,7 +1460,7 @@ class _PdfCurlTurn {
   final ui.Image target;
   final int targetPage;
   final bool autoComplete;
-  final PageCurlController? controller;
+  final PageSlideController? controller;
 
   void dispose() {
     current.dispose();

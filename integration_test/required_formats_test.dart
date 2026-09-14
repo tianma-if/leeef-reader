@@ -26,7 +26,7 @@ void main() {
     await preferences.clear();
     await Future.wait([
       preferences.setString('leeef.reader.flow', 'paginated'),
-      preferences.setString('leeef.reader.page_turn_effect', 'curl'),
+      preferences.setString('leeef.reader.page_turn_effect', 'slide'),
       preferences.setBool('leeef.reader.show_header', true),
       preferences.setBool('leeef.reader.show_footer', true),
       preferences.setString('leeef.reader.footer_content', 'page'),
@@ -59,7 +59,7 @@ void main() {
       book.id,
     );
     await tester.tap(find.byKey(const Key('epub-tap-right-zone')));
-    expect(find.byKey(const Key('epub-page-curl')), findsNothing);
+    expect(find.byKey(const Key('epub-page-slide-overlay')), findsNothing);
     await tester.pump(const Duration(milliseconds: 800));
 
     final completedProgress = await fixture.repository.getReadingProgress(
@@ -87,7 +87,7 @@ void main() {
       expect(find.byKey(const ValueKey('txt-page-0')), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('txt-tap-right-zone')));
-      expect(find.byKey(const Key('txt-page-curl')), findsNothing);
+      expect(find.byKey(const Key('txt-page-slide-overlay')), findsNothing);
       expect(find.byKey(const Key('txt-page-slide')), findsOneWidget);
       await _pumpUntilFound(tester, find.byKey(const ValueKey('txt-page-1')));
 
@@ -172,7 +172,7 @@ void main() {
       final textRect = tester.getRect(find.byKey(const Key('txt-reader-text')));
       expect(textRect.top, closeTo(pageRect.top + 24, 1));
       expect(textRect.width, closeTo(pageRect.width - 48, 1));
-      expect(textRect.bottom, lessThanOrEqualTo(pageRect.bottom - 71));
+      expect(textRect.bottom, lessThanOrEqualTo(pageRect.bottom - 23));
       final measured = TextPainter(
         text: TextSpan(text: visibleText, style: selectable.style),
         textDirection: TextDirection.ltr,
@@ -215,7 +215,7 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('TXT visible pages are contiguous through mobile page curl', (
+  testWidgets('TXT visible pages are contiguous through mobile page slide', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -234,7 +234,7 @@ void main() {
 
     await tester.pumpWidget(fixture.reader(book, enableTxtPageCurl: true));
     await _pumpUntilFound(tester, find.byKey(const Key('txt-reader-text')));
-    expect(find.byKey(const Key('txt-curl-right-zone')), findsOneWidget);
+    expect(find.byKey(const Key('txt-slide-right-zone')), findsOneWidget);
     expect(find.byKey(const Key('txt-page-slide')), findsNothing);
 
     var sourceOffset = 0;
@@ -258,11 +258,11 @@ void main() {
       final pageRect = tester.getRect(pageFinder);
       final textRect = tester.getRect(find.byKey(const Key('txt-reader-text')));
       expect(textRect.top, closeTo(pageRect.top + 24, 1));
-      expect(textRect.bottom, lessThanOrEqualTo(pageRect.bottom - 71));
+      expect(textRect.bottom, lessThanOrEqualTo(pageRect.bottom - 23));
       sourceOffset += visibleText.length;
 
       if (pageIndex < 4) {
-        await tester.tap(find.byKey(const Key('txt-curl-right-zone')));
+        await tester.tap(find.byKey(const Key('txt-slide-right-zone')));
         await _pumpUntilFound(
           tester,
           find.byKey(ValueKey('txt-page-${pageIndex + 1}')),
@@ -270,13 +270,13 @@ void main() {
         );
         await _pumpUntilNotFound(
           tester,
-          find.byKey(const Key('txt-page-curl')),
+          find.byKey(const Key('txt-page-slide-overlay')),
           timeout: const Duration(seconds: 20),
         );
       }
     }
 
-    await tester.tap(find.byKey(const Key('txt-curl-left-zone')));
+    await tester.tap(find.byKey(const Key('txt-slide-left-zone')));
     await _pumpUntilFound(
       tester,
       find.byKey(const ValueKey('txt-page-3')),
@@ -284,7 +284,7 @@ void main() {
     );
     await _pumpUntilNotFound(
       tester,
-      find.byKey(const Key('txt-page-curl')),
+      find.byKey(const Key('txt-page-slide-overlay')),
       timeout: const Duration(seconds: 20),
     );
     await tester.pumpWidget(const SizedBox.shrink());
@@ -309,7 +309,7 @@ void main() {
       );
 
       await tester.tap(find.byKey(const Key('pdf-tap-right-zone')));
-      expect(find.byKey(const Key('pdf-page-curl')), findsNothing);
+      expect(find.byKey(const Key('pdf-page-slide-overlay')), findsNothing);
       await _pumpUntilFound(tester, find.text('2 / 2'));
       await tester.pump(const Duration(milliseconds: 700));
 
@@ -450,7 +450,7 @@ class _Fixture {
             GlobalCupertinoLocalizations.delegate,
           ],
           home: enableTxtPageCurl
-              ? TxtReaderScreen(book: book, pageCurlEnabled: true)
+              ? TxtReaderScreen(book: book, interactiveSlideEnabled: true)
               : ReaderScreen(book: book),
         ),
       );

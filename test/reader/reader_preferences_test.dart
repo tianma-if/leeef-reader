@@ -93,4 +93,12 @@ void main() {
       expect(restored.customCss, preferences.customCss);
     },
   );
+
+  test('stored curl page-turn effect migrates to slide', () async {
+    SharedPreferences.setMockInitialValues({
+      'leeef.reader.page_turn_effect': 'curl',
+    });
+    final restored = await ReaderPreferences.load();
+    expect(restored.pageTurnEffect, 'slide');
+  });
 }

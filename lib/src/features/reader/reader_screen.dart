@@ -21,10 +21,9 @@ import 'package:leeef_reader/src/features/ai/ai_assistant_screen.dart';
 import 'package:leeef_reader/src/features/notes/excerpt_share_card_screen.dart';
 import 'package:leeef_reader/src/features/reader/txt_reader_screen.dart';
 import 'package:leeef_reader/src/page_curl/foliate_page_snapshot_view.dart';
-import 'package:leeef_reader/src/page_curl/page_curl_controller.dart';
-import 'package:leeef_reader/src/page_curl/page_curl_gesture.dart';
-import 'package:leeef_reader/src/page_curl/page_curl_surface.dart';
 import 'package:leeef_reader/src/page_curl/page_snapshot_cache.dart';
+import 'package:leeef_reader/src/page_slide/page_slide_controller.dart';
+import 'package:leeef_reader/src/page_slide/page_slide_surface.dart';
 import 'package:leeef_reader/src/platform/app_appearance.dart';
 import 'package:leeef_reader/src/reader/foliate_reader_engine.dart';
 import 'package:leeef_reader/src/reader/foliate_reader_view.dart';
@@ -89,16 +88,11 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
   String? _lastPersistedLocation;
   Object? _error;
   bool _opening = false;
-  bool _controlsVisible = true;
+  bool _controlsVisible = readerChromeStartsVisible();
   bool _preparingTurn = false;
-  _CurlTurn? _curlTurn;
+  _SlideTurn? _slideTurn;
   final GlobalKey _bodyKey = GlobalKey();
-  Offset? _pointerDownPosition;
-  DateTime? _pointerDownAt;
-  PageCurlController? _pointerCurlController;
-  Offset? _lastPointerPosition;
-  Duration? _lastPointerTime;
-  double _horizontalVelocity = 0;
+  PageSlideController? _pointerSlideController;
   ReaderPreferences _preferences = const ReaderPreferences();
   late final Future<ReaderPreferences> _preferencesFuture;
   int _themeRevision = 0;
@@ -114,14 +108,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     mediaControls: TtsMediaControlBridge.instance,
   );
 
-  bool get _supportsPageCurl =>
-      widget.book.mediaType == 'application/epub+zip' &&
-      _preferences.flow == 'paginated' &&
-      effectivePageTurnEffect(
-            flow: _preferences.flow,
-            configuredEffect: _preferences.pageTurnEffect,
-          ) ==
-          'curl';
+  bool get _supportsInteractiveSlide => false;
 
   ReaderBookSource? get _bookSource {
     final path = widget.book.filePath;
@@ -171,7 +158,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     unawaited(_persistProgress());
     unawaited(_eventSubscription?.cancel());
     unawaited(_engine.close());
-    _curlTurn?.dispose();
+    _slideTurn?.dispose();
     _snapshotCache.clear();
     _recordReadingSession();
     _ttsController.dispose();
@@ -690,14 +677,10 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
       flow: preferences.flow,
       maxColumnCount: preferences.columns,
       margin: preferences.margin,
-      pageTurnEffect:
-          effectivePageTurnEffect(
-                flow: preferences.flow,
-                configuredEffect: preferences.pageTurnEffect,
-              ) ==
-              'none'
-          ? 'none'
-          : 'slide',
+      pageTurnEffect: enginePageTurnEffect(
+        flow: preferences.flow,
+        configuredEffect: preferences.pageTurnEffect,
+      ),
     );
     await _engine.setTheme(
       foreground: preferences.foreground,
@@ -775,6 +758,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
   }
 
   void _handleHover(PointerHoverEvent event) {
+    if (!isDesktopReaderPlatform()) return;
     final height = _bodyKey.currentContext?.size?.height ?? 0;
     if (height <= 0) return;
     final position = _bodyPosition(event.position);
@@ -875,10 +859,6 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
                     SegmentedButton<String>(
                       segments: [
                         ButtonSegment(
-                          value: 'curl',
-                          label: Text(strings.text('仿真')),
-                        ),
-                        ButtonSegment(
                           value: 'slide',
                           label: Text(strings.text('滑动')),
                         ),
@@ -887,7 +867,11 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
                           label: Text(strings.text('无动画')),
                         ),
                       ],
-                      selected: {draft.pageTurnEffect},
+                      selected: {
+                        normalizePageTurnEffect(draft.pageTurnEffect) == 'none'
+                            ? 'none'
+                            : 'slide',
+                      },
                       onSelectionChanged: (value) => setDialogState(
                         () => draft = draft.copyWith(
                           pageTurnEffect: value.single,
@@ -1440,14 +1424,14 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
   Future<void> _prepareTurn(
     bool forward, {
     bool autoComplete = true,
-    PageCurlController? controller,
+    PageSlideController? controller,
   }) async {
-    if (!_supportsPageCurl) {
+    if (!_supportsInteractiveSlide) {
       await (forward ? _engine.next() : _engine.previous());
       return;
     }
     final location = _location;
-    if (location == null || _preparingTurn || _curlTurn != null) return;
+    if (location == null || _preparingTurn || _slideTurn != null) return;
     setState(() => _preparingTurn = true);
     ui.Image? currentImage;
     ui.Image? targetImage;
@@ -1487,7 +1471,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
         return;
       }
       setState(
-        () => _curlTurn = _CurlTurn(
+        () => _slideTurn = _SlideTurn(
           current: currentImage!,
           target: targetImage!,
           forward: forward,
@@ -1500,8 +1484,8 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
       targetImage?.dispose();
       // Snapshot failure is an expected capability boundary. Preserve reading
       // with the ordinary foliate page transition.
-      if (identical(_pointerCurlController, controller)) {
-        _pointerCurlController = null;
+      if (identical(_pointerSlideController, controller)) {
+        _pointerSlideController = null;
       }
       controller?.dispose();
       if (mounted && autoComplete) {
@@ -1512,7 +1496,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     }
   }
 
-  void _finishTurn(_CurlTurn turn, {required bool completed}) {
+  void _finishTurn(_SlideTurn turn, {required bool completed}) {
     if (!mounted) return;
     if (completed) {
       if (Platform.isAndroid || Platform.isIOS) {
@@ -1520,7 +1504,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
       }
       unawaited(turn.forward ? _engine.next() : _engine.previous());
     }
-    setState(() => _curlTurn = null);
+    setState(() => _slideTurn = null);
     WidgetsBinding.instance.addPostFrameCallback((_) => turn.dispose());
   }
 
@@ -1528,7 +1512,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     final location = _location;
     final renderObject = _bodyKey.currentContext?.findRenderObject();
     if (!mounted ||
-        !_supportsPageCurl ||
+        !_supportsInteractiveSlide ||
         location == null ||
         _bookInfo == null ||
         renderObject is! RenderBox ||
@@ -1560,94 +1544,6 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     }
   }
 
-  void _handlePointerDown(PointerDownEvent event) {
-    final position = _bodyPosition(event.position);
-    if (position == null) return;
-    _pointerDownPosition = position;
-    _pointerDownAt = DateTime.now();
-    _lastPointerPosition = position;
-    _lastPointerTime = event.timeStamp;
-    _horizontalVelocity = 0;
-    final renderObject = _bodyKey.currentContext?.findRenderObject();
-    if (_bookInfo == null ||
-        _location == null ||
-        renderObject is! RenderBox ||
-        !renderObject.hasSize ||
-        _preparingTurn ||
-        _curlTurn != null) {
-      return;
-    }
-    final size = renderObject.size;
-    final direction = pageCurlDirectionForX(
-      x: position.dx,
-      width: size.width,
-      tapZoneRatio: _preferences.tapZoneRatio,
-      swapTapZones: _preferences.swapTapZones,
-    );
-    if (direction == 0) return;
-    final controller = PageCurlController()
-      ..begin(position: position, size: size, direction: direction);
-    _pointerCurlController = controller;
-    unawaited(
-      _prepareTurn(direction > 0, autoComplete: false, controller: controller),
-    );
-  }
-
-  void _handlePointerMove(PointerMoveEvent event) {
-    final controller = _pointerCurlController;
-    if (controller == null) return;
-    final position = _bodyPosition(event.position);
-    if (position == null) return;
-    final previousPosition = _lastPointerPosition;
-    final previousTime = _lastPointerTime;
-    if (previousPosition != null && previousTime != null) {
-      final elapsedMicros = (event.timeStamp - previousTime).inMicroseconds
-          .clamp(1, 100000);
-      final instantaneous =
-          (position.dx - previousPosition.dx) *
-          Duration.microsecondsPerSecond /
-          elapsedMicros;
-      _horizontalVelocity = _horizontalVelocity * 0.58 + instantaneous * 0.42;
-    }
-    _lastPointerPosition = position;
-    _lastPointerTime = event.timeStamp;
-    controller.update(position);
-  }
-
-  void _handlePointerUp(PointerUpEvent event) {
-    final position = _bodyPosition(event.position);
-    final start = _pointerDownPosition;
-    final startedAt = _pointerDownAt;
-    _pointerDownPosition = null;
-    _pointerDownAt = null;
-    final isTap =
-        start != null &&
-        startedAt != null &&
-        position != null &&
-        DateTime.now().difference(startedAt) <=
-            const Duration(milliseconds: 350) &&
-        (position - start).distance <= 12;
-    if (_pointerCurlController case final controller?) {
-      if (position != null) controller.update(position);
-      controller.release(
-        horizontalVelocity: _horizontalVelocity,
-        forceComplete: isTap,
-      );
-    }
-    _pointerCurlController = null;
-    _lastPointerPosition = null;
-    _lastPointerTime = null;
-  }
-
-  void _handlePointerCancel(PointerCancelEvent event) {
-    _pointerDownPosition = null;
-    _pointerDownAt = null;
-    _pointerCurlController?.release(horizontalVelocity: 0);
-    _pointerCurlController = null;
-    _lastPointerPosition = null;
-    _lastPointerTime = null;
-  }
-
   Offset? _bodyPosition(Offset globalPosition) {
     final renderObject = _bodyKey.currentContext?.findRenderObject();
     return renderObject is RenderBox && renderObject.hasSize
@@ -1676,136 +1572,132 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     };
     final bookSource = _bookSource;
     final compactToolbar = MediaQuery.sizeOf(context).width < 600;
-    return Scaffold(
-      appBar: _controlsVisible && _preferences.showHeader
-          ? AppBar(
-              leading: Hero(
-                tag: 'book-cover-${widget.book.id}',
-                child: const Material(
-                  color: Colors.transparent,
-                  child: BackButton(),
+    final overlayChrome = !isDesktopReaderPlatform();
+    final showHeader = _controlsVisible && _preferences.showHeader;
+    final appBar = AppBar(
+      primary: !overlayChrome,
+      leading: Hero(
+        tag: 'book-cover-${widget.book.id}',
+        child: const Material(color: Colors.transparent, child: BackButton()),
+      ),
+      title: Text(headerText),
+      actions: [
+        if (!compactToolbar) ...[
+          IconButton(
+            tooltip: strings.text('后退到上次跳转位置'),
+            onPressed: _canGoBack ? _engine.historyBack : null,
+            icon: const Icon(Icons.arrow_back),
+          ),
+          IconButton(
+            tooltip: strings.text('前进到下个跳转位置'),
+            onPressed: _canGoForward ? _engine.historyForward : null,
+            icon: const Icon(Icons.arrow_forward),
+          ),
+        ],
+        if (!Platform.isIOS)
+          IconButton(
+            tooltip: strings.text('朗读'),
+            onPressed: _bookInfo == null ? null : _showTts,
+            icon: const Icon(Icons.volume_up_outlined),
+          ),
+        PopupMenuButton<String>(
+          tooltip: strings.text('AI 阅读助手'),
+          icon: const Icon(Icons.auto_awesome_outlined),
+          onSelected: _openAi,
+          itemBuilder: (_) => [
+            PopupMenuItem(value: 'chat', child: Text(strings.text('基于当前章节对话'))),
+            PopupMenuItem(
+              value: 'full-summary',
+              child: Text(strings.text('基于全书对话与总结')),
+            ),
+            PopupMenuItem(
+              value: 'translate',
+              child: Text(strings.text('全文翻译')),
+            ),
+          ],
+        ),
+        if (!compactToolbar) ...[
+          IconButton(
+            tooltip: strings.text('书内搜索'),
+            onPressed: _bookInfo == null ? null : _showSearch,
+            icon: const Icon(Icons.search),
+          ),
+          IconButton(
+            tooltip: strings.text('阅读样式'),
+            onPressed: _bookInfo == null ? null : _showReadingSettings,
+            icon: const Icon(Icons.text_fields),
+          ),
+          IconButton(
+            tooltip: strings.text('添加书签'),
+            onPressed: _location == null ? null : _addBookmark,
+            icon: const Icon(Icons.bookmark_add_outlined),
+          ),
+          IconButton(
+            tooltip: strings.text('目录'),
+            onPressed: _bookInfo == null ? null : _showTableOfContents,
+            icon: const Icon(Icons.toc),
+          ),
+        ],
+        PopupMenuButton<String>(
+          tooltip: strings.text('更多阅读操作'),
+          onSelected: (value) {
+            final action = switch (value) {
+              'search' => _showSearch,
+              'style' => _showReadingSettings,
+              'bookmark' => _addBookmark,
+              'toc' => _showTableOfContents,
+              _ => _copyCurrentChapter,
+            };
+            unawaited(action());
+          },
+          itemBuilder: (_) => [
+            if (compactToolbar) ...[
+              PopupMenuItem(
+                value: 'search',
+                enabled: _bookInfo != null,
+                child: ListTile(
+                  leading: const Icon(Icons.search),
+                  title: Text(strings.text('书内搜索')),
                 ),
               ),
-              title: Text(headerText),
-              actions: [
-                if (!compactToolbar) ...[
-                  IconButton(
-                    tooltip: strings.text('后退到上次跳转位置'),
-                    onPressed: _canGoBack ? _engine.historyBack : null,
-                    icon: const Icon(Icons.arrow_back),
-                  ),
-                  IconButton(
-                    tooltip: strings.text('前进到下个跳转位置'),
-                    onPressed: _canGoForward ? _engine.historyForward : null,
-                    icon: const Icon(Icons.arrow_forward),
-                  ),
-                ],
-                if (!Platform.isIOS)
-                  IconButton(
-                    tooltip: strings.text('朗读'),
-                    onPressed: _bookInfo == null ? null : _showTts,
-                    icon: const Icon(Icons.volume_up_outlined),
-                  ),
-                PopupMenuButton<String>(
-                  tooltip: strings.text('AI 阅读助手'),
-                  icon: const Icon(Icons.auto_awesome_outlined),
-                  onSelected: _openAi,
-                  itemBuilder: (_) => [
-                    PopupMenuItem(
-                      value: 'chat',
-                      child: Text(strings.text('基于当前章节对话')),
-                    ),
-                    PopupMenuItem(
-                      value: 'full-summary',
-                      child: Text(strings.text('基于全书对话与总结')),
-                    ),
-                    PopupMenuItem(
-                      value: 'translate',
-                      child: Text(strings.text('全文翻译')),
-                    ),
-                  ],
+              PopupMenuItem(
+                value: 'style',
+                enabled: _bookInfo != null,
+                child: ListTile(
+                  leading: const Icon(Icons.text_fields),
+                  title: Text(strings.text('阅读样式')),
                 ),
-                if (!compactToolbar) ...[
-                  IconButton(
-                    tooltip: strings.text('书内搜索'),
-                    onPressed: _bookInfo == null ? null : _showSearch,
-                    icon: const Icon(Icons.search),
-                  ),
-                  IconButton(
-                    tooltip: strings.text('阅读样式'),
-                    onPressed: _bookInfo == null ? null : _showReadingSettings,
-                    icon: const Icon(Icons.text_fields),
-                  ),
-                  IconButton(
-                    tooltip: strings.text('添加书签'),
-                    onPressed: _location == null ? null : _addBookmark,
-                    icon: const Icon(Icons.bookmark_add_outlined),
-                  ),
-                  IconButton(
-                    tooltip: strings.text('目录'),
-                    onPressed: _bookInfo == null ? null : _showTableOfContents,
-                    icon: const Icon(Icons.toc),
-                  ),
-                ],
-                PopupMenuButton<String>(
-                  tooltip: strings.text('更多阅读操作'),
-                  onSelected: (value) {
-                    final action = switch (value) {
-                      'search' => _showSearch,
-                      'style' => _showReadingSettings,
-                      'bookmark' => _addBookmark,
-                      'toc' => _showTableOfContents,
-                      _ => _copyCurrentChapter,
-                    };
-                    unawaited(action());
-                  },
-                  itemBuilder: (_) => [
-                    if (compactToolbar) ...[
-                      PopupMenuItem(
-                        value: 'search',
-                        enabled: _bookInfo != null,
-                        child: ListTile(
-                          leading: const Icon(Icons.search),
-                          title: Text(strings.text('书内搜索')),
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'style',
-                        enabled: _bookInfo != null,
-                        child: ListTile(
-                          leading: const Icon(Icons.text_fields),
-                          title: Text(strings.text('阅读样式')),
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'bookmark',
-                        enabled: _location != null,
-                        child: ListTile(
-                          leading: const Icon(Icons.bookmark_add_outlined),
-                          title: Text(strings.text('添加书签')),
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'toc',
-                        enabled: _bookInfo != null,
-                        child: ListTile(
-                          leading: const Icon(Icons.toc),
-                          title: Text(strings.text('目录')),
-                        ),
-                      ),
-                    ],
-                    PopupMenuItem(
-                      value: 'copy-chapter',
-                      child: ListTile(
-                        leading: Icon(Icons.copy_all_outlined),
-                        title: Text(strings.text('复制当前章节正文')),
-                      ),
-                    ),
-                  ],
+              ),
+              PopupMenuItem(
+                value: 'bookmark',
+                enabled: _location != null,
+                child: ListTile(
+                  leading: const Icon(Icons.bookmark_add_outlined),
+                  title: Text(strings.text('添加书签')),
                 ),
-              ],
-            )
-          : null,
+              ),
+              PopupMenuItem(
+                value: 'toc',
+                enabled: _bookInfo != null,
+                child: ListTile(
+                  leading: const Icon(Icons.toc),
+                  title: Text(strings.text('目录')),
+                ),
+              ),
+            ],
+            PopupMenuItem(
+              value: 'copy-chapter',
+              child: ListTile(
+                leading: Icon(Icons.copy_all_outlined),
+                title: Text(strings.text('复制当前章节正文')),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+    return Scaffold(
+      appBar: overlayChrome || !showHeader ? null : appBar,
       body: MouseRegion(
         onHover: _handleHover,
         child: Listener(
@@ -1818,7 +1710,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
           child: Stack(
             key: _bodyKey,
             children: [
-              if (_supportsPageCurl && bookSource != null)
+              if (_supportsInteractiveSlide && bookSource != null)
                 Positioned.fill(
                   child: FoliatePageSnapshotView(
                     controller: _snapshotController,
@@ -1836,10 +1728,11 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
                   ),
                 ),
               ),
-              if (_supportsPageCurl && _bookInfo != null) ...[
-                _buildCurlGestureZone(Alignment.centerLeft),
-                _buildCurlGestureZone(Alignment.centerRight),
-              ] else if (_bookInfo != null) ...[
+              if (_bookInfo != null &&
+                  !usesMobileInteractiveSlide(
+                    flow: _preferences.flow,
+                    configuredEffect: _preferences.pageTurnEffect,
+                  )) ...[
                 _buildTapGestureZone(Alignment.centerLeft),
                 _buildTapGestureZone(Alignment.centerRight),
               ],
@@ -1854,6 +1747,13 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
                       ),
                     ),
                   ),
+                ),
+              if (overlayChrome && showHeader)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: ReaderChromeOverlayBar(child: appBar),
                 ),
               if (_controlsVisible && _preferences.showFooter)
                 Positioned(
@@ -1872,7 +1772,9 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
                     onNext: _bookInfo == null || _preparingTurn
                         ? null
                         : () => unawaited(_prepareTurn(true)),
-                    onToc: _bookInfo == null ? null : () => unawaited(_showTableOfContents()),
+                    onToc: _bookInfo == null
+                        ? null
+                        : () => unawaited(_showTableOfContents()),
                     onSeekProgress: (value) =>
                         unawaited(_engine.goToFraction(value)),
                     onOpenFullSettings: _bookInfo == null
@@ -1943,10 +1845,10 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
                     ),
                   ),
                 ),
-              if (_curlTurn case final turn?)
+              if (_slideTurn case final turn?)
                 Positioned.fill(
-                  child: PageCurlSurface(
-                    key: const Key('epub-page-curl'),
+                  child: PageSlideSurface(
+                    key: const Key('epub-page-slide-overlay'),
                     currentPage: turn.current,
                     nextPage: turn.target,
                     direction: turn.forward ? 1 : -1,
@@ -1954,7 +1856,6 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
                     controller: turn.controller,
                     onTurnCompleted: () => _finishTurn(turn, completed: true),
                     onTurnCancelled: () => _finishTurn(turn, completed: false),
-                    onUnavailable: () => _finishTurn(turn, completed: true),
                   ),
                 ),
             ],
@@ -1963,43 +1864,6 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
       ),
     );
   }
-
-  Widget _buildCurlGestureZone(Alignment alignment) => Positioned(
-    top: 0,
-    bottom: 0,
-    left: alignment == Alignment.centerLeft ? 0 : null,
-    right: alignment == Alignment.centerRight ? 0 : null,
-    width:
-        MediaQuery.sizeOf(context).width *
-        pageCurlSwipeZoneRatio(_preferences.tapZoneRatio),
-    child: Semantics(
-      button: true,
-      label: AppStrings.of(context).text(
-        (_preferences.swapTapZones
-                ? alignment == Alignment.centerLeft
-                : alignment == Alignment.centerRight)
-            ? '下一页'
-            : '上一页',
-      ),
-      onTap: () {
-        final isLeft = alignment == Alignment.centerLeft;
-        unawaited(_prepareTurn(_preferences.swapTapZones ? isLeft : !isLeft));
-      },
-      child: Listener(
-        key: Key(
-          alignment == Alignment.centerLeft
-              ? 'epub-curl-left-zone'
-              : 'epub-curl-right-zone',
-        ),
-        behavior: HitTestBehavior.opaque,
-        onPointerDown: _handlePointerDown,
-        onPointerMove: _handlePointerMove,
-        onPointerUp: _handlePointerUp,
-        onPointerCancel: _handlePointerCancel,
-        child: const SizedBox.expand(),
-      ),
-    ),
-  );
 
   Widget _buildTapGestureZone(Alignment alignment) => Positioned(
     top: 0,
@@ -2038,8 +1902,8 @@ String _readerClock() {
   return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 }
 
-class _CurlTurn {
-  const _CurlTurn({
+class _SlideTurn {
+  const _SlideTurn({
     required this.current,
     required this.target,
     required this.forward,
@@ -2051,7 +1915,7 @@ class _CurlTurn {
   final ui.Image target;
   final bool forward;
   final bool autoComplete;
-  final PageCurlController? controller;
+  final PageSlideController? controller;
 
   void dispose() {
     current.dispose();

@@ -18,11 +18,19 @@ void main() {
           ),
           'slide',
         );
+        expect(
+          usesMobileInteractiveSlide(
+            flow: 'paginated',
+            configuredEffect: configuredEffect,
+            platform: platform,
+          ),
+          isFalse,
+        );
       }
     }
   });
 
-  test('mobile readers preserve the configured page-turn effect', () {
+  test('mobile paginated readers treat retired curl as interactive slide', () {
     for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
       expect(
         effectivePageTurnEffect(
@@ -30,9 +38,47 @@ void main() {
           configuredEffect: 'curl',
           platform: platform,
         ),
-        'curl',
+        'slide',
+      );
+      expect(
+        usesMobileInteractiveSlide(
+          flow: 'paginated',
+          configuredEffect: 'curl',
+          platform: platform,
+        ),
+        isTrue,
+      );
+      expect(
+        usesMobileInteractiveSlide(
+          flow: 'paginated',
+          configuredEffect: 'slide',
+          platform: platform,
+        ),
+        isTrue,
+      );
+      expect(
+        usesMobileInteractiveSlide(
+          flow: 'paginated',
+          configuredEffect: 'none',
+          platform: platform,
+        ),
+        isFalse,
+      );
+      expect(
+        enginePageTurnEffect(
+          flow: 'paginated',
+          configuredEffect: 'slide',
+          platform: platform,
+        ),
+        'slide',
       );
     }
+  });
+
+  test('mobile chrome starts hidden; desktop chrome starts visible', () {
+    expect(readerChromeStartsVisible(TargetPlatform.android), isFalse);
+    expect(readerChromeStartsVisible(TargetPlatform.iOS), isFalse);
+    expect(readerChromeStartsVisible(TargetPlatform.macOS), isTrue);
   });
 
   test('continuous reading flow does not force a page transition', () {
@@ -43,6 +89,14 @@ void main() {
         platform: TargetPlatform.macOS,
       ),
       'none',
+    );
+    expect(
+      usesMobileInteractiveSlide(
+        flow: 'scrolled',
+        configuredEffect: 'slide',
+        platform: TargetPlatform.iOS,
+      ),
+      isFalse,
     );
   });
 }

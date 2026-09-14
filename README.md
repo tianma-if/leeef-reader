@@ -2,7 +2,7 @@
 
 # 🍃 Leeef Reader
 
-**跨端同步、MCP 原生、移动端支持 3D 仿真翻页的电子书阅读器。**
+**跨端同步、MCP 原生、移动端支持滑动翻页的电子书阅读器。**
 
 iOS · Android · macOS · Windows
 
@@ -98,23 +98,21 @@ update_reading_progress
 
 删除书籍、批量移动等高风险写操作需要显式确认，并记录调用方、参数、时间和执行结果。
 
-### 3. 移动端交互式 3D 翻页
+### 3. 移动端滑动翻页
 
-3D Page Curl 是 iOS 和 Android 的核心阅读能力：
+iOS 和 Android 的分页阅读使用跟手滑动，而不是 3D 仿真翻页：
 
 - 支持左右区域单击翻页，以及拖拽、回弹、甩页和取消
+- 当前页与相邻页贴合在同一条接缝上，手指移动与页面位移 1:1
 - 针对触控手势和不同屏幕尺寸优化
-- 当前支持 EPUB、TXT；其他格式在对应阅读器接入页面纹理后扩展
-- 卷页轴由页角和触点轨迹共同决定，渲染纸张背面、圆柱弧面高光与动态投影
-- 支持单页、双页与横竖屏布局
+- 当前支持 EPUB、TXT、PDF
 - 翻页时预渲染相邻页面，避免动画帧内重新排版
-- 60fps 为基础目标，高刷新率设备针对 120Hz 优化
 
-翻页引擎采用页面纹理、高密度三角网格、三维圆柱弯曲与透视投影实现，通过 `Canvas.drawVertices` 渲染，不依赖通用翻页 Widget。macOS 和 Windows 不实现 3D Page Curl，提供滑动、无动画和连续滚动模式。
+macOS 和 Windows 使用点击触发的滑动、无动画和连续滚动模式。
 
 ## 功能树
 
-以下是 Leeef 已完成的功能范围。除 MCP 和移动端 3D Page Curl 外，功能范围以 Anx Reader 的对应能力为兼容基线；OPDS 作为独立生态能力实现。
+以下是 Leeef 已完成的功能范围。除 MCP 和移动端滑动翻页外，功能范围以 Anx Reader 的对应能力为兼容基线；OPDS 作为独立生态能力实现。
 
 ```text
 Leeef Reader
@@ -210,11 +208,11 @@ Leeef Reader
 │   ├── 写操作：plan → confirm → apply
 │   └── 安全：权限、调用审计、幂等 operationId
 │
-├── 移动端 3D Page Curl（Leeef）
+├── 移动端滑动翻页（Leeef）
 │   ├── 平台：iOS、Android
 │   ├── 手势：左右区域单击、拖拽、回弹、甩页和取消
-│   ├── 渲染：相邻页预渲染、双页纹理、三维三角网格
-│   └── 性能：60fps 基线、高刷新率优化
+│   ├── 渲染：相邻页预渲染、双页纹理、跟手 2D 滑动
+│   └── 格式：EPUB、TXT、PDF
 │
 ├── 全局搜索
 │   ├── 书名和作者
@@ -255,7 +253,7 @@ Leeef Reader
 │                              │                                       │
 │                  ┌───────────┴───────────┐                           │
 │                  ▼                       ▼                           │
-│       Mobile PageCurlEngine      Desktop Page Navigation             │
+│       Mobile PageSlideEngine     Desktop Page Navigation             │
 │                                                                     │
 │  Riverpod ───── Drift/SQLite/FTS5 ───── Sync Engine                 │
 │                                │                 │                  │
@@ -282,8 +280,8 @@ Leeef Reader
 | 格式支持 | EPUB、MOBI、AZW3、FB2、TXT、PDF；首期优先 EPUB、PDF、TXT |
 | WebView 资源服务 | 随机端口 loopback HTTP Server + session token + `bookId` 路径白名单 |
 | PDF | `pdfrx` / PDFium |
-| 移动端 3D 翻页 | iOS / Android 的 EPUB、TXT 使用自研 `PageCurlEngine` + Flutter `Canvas.drawVertices` 三维纹理网格 |
-| 桌面端翻页 | macOS / Windows 支持滑动、无动画和连续滚动，不实现 3D Page Curl |
+| 移动端滑动翻页 | iOS / Android 的 EPUB、TXT、PDF 使用页面快照 + 跟手 2D 滑动 |
+| 桌面端翻页 | macOS / Windows 支持滑动、无动画和连续滚动 |
 | 移动端页面快照 | EPUB 使用 foliate-js 相邻页预渲染；TXT 使用 Canvas 页面纹理；PDF 保持原生阅读器翻页 |
 | 同步接口 | 自研 `SyncBackend`，统一对象读写、列举、条件写入与能力检测 |
 | 默认同步后端 | S3 兼容对象存储 |
@@ -342,13 +340,13 @@ S3 是默认后端；WebDAV 作为可选适配器。启动同步前执行能力�
 
 ### P0：产品成立
 
-只实现“阅读 + 同步 + MCP + 移动端 3D 翻页”的完整闭环：
+只实现“阅读 + 同步 + MCP + 移动端滑动翻页”的完整闭环：
 
 - 四端 Material 3 应用骨架和统一数据模型
 - EPUB、PDF、TXT 导入、书架和基础阅读
 - 阅读进度、书摘、书签、书架目录本地管理
 - 基础字体、字号、行距、主题、目录、进度和书内搜索
-- iOS / Android 的 EPUB、TXT 交互式 3D Page Curl
+- iOS / Android 的 EPUB、TXT、PDF 跟手滑动翻页
 - macOS / Windows 滑动、无动画和连续滚动
 - S3 `SyncBackend`：五类核心数据和书籍文件的增量同步
 - UUID/ULID、操作日志、幂等、删除标记、冲突合并和失败恢复
@@ -361,7 +359,7 @@ P0 验收标准：
 1. 任一设备新增书摘、书签或调整目录，其他设备能正确合并并恢复现场。
 2. AI 能通过 MCP 查询正文和阅读数据，并在确认后移动书籍、修改书摘或书签。
 3. MCP 修改能通过同步引擎传播到其他设备，不绕过操作日志。
-4. iOS 和 Android 的 3D Page Curl 在目标设备上稳定达到 60fps，失败时可降级为普通翻页。
+4. iOS 和 Android 的滑动翻页跟手、可回弹，失败时可降级为无动画翻页。
 
 ### P1：日常主力阅读器
 
@@ -403,7 +401,7 @@ P0 验收标准：
 
 - [x] 完成 EPUB、PDF、TXT 从导入、阅读、摘录到同步的完整流程
 - [x] 完成 MCP 查询、确认写入和跨端同步流程
-- [x] 完成移动端 EPUB、TXT 3D Page Curl 与普通翻页降级
+- [x] 完成移动端 EPUB、TXT、PDF 滑动翻页与无动画降级
 - [x] 完成四端数据完整性、离线和故障恢复测试
 
 M1 的实现边界和四端验证证据见 [`docs/m1-validation.md`](docs/m1-validation.md)。

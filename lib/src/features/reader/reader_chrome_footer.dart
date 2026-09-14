@@ -132,6 +132,26 @@ class _ReaderChromeFooterState extends State<ReaderChromeFooter> {
   }
 }
 
+/// Mobile header overlays the page so showing chrome does not reflow text.
+class ReaderChromeOverlayBar extends StatelessWidget {
+  const ReaderChromeOverlayBar({required this.child, super.key});
+
+  final PreferredSizeWidget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      elevation: 1,
+      color: theme.appBarTheme.backgroundColor ?? theme.colorScheme.surface,
+      child: SafeArea(
+        bottom: false,
+        child: SizedBox(height: child.preferredSize.height, child: child),
+      ),
+    );
+  }
+}
+
 class _DesktopProgressPill extends StatelessWidget {
   const _DesktopProgressPill({
     required this.label,
@@ -296,10 +316,7 @@ class _ProgressPanel extends StatelessWidget {
                 overlayShape: SliderComponentShape.noOverlay,
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
               ),
-              child: Slider(
-                value: progress.clamp(0.0, 1.0),
-                onChanged: onSeek,
-              ),
+              child: Slider(value: progress.clamp(0.0, 1.0), onChanged: onSeek),
             ),
           ),
         ],

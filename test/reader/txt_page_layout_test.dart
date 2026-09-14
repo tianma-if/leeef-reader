@@ -79,7 +79,7 @@ void main() {
 
   test('safe-area reserve is shared with pagination', () {
     const layout = TxtPageLayout(margin: 32, bottomInset: 34);
-    expect(layout.padding, const EdgeInsets.fromLTRB(32, 24, 32, 106));
-    expect(layout.contentSize(const Size(400, 800)), const Size(333, 670));
+    expect(layout.padding, const EdgeInsets.fromLTRB(32, 24, 32, 58));
+    expect(layout.contentSize(const Size(400, 800)), const Size(333, 718));
   });
 }
