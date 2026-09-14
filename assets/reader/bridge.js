@@ -114,10 +114,13 @@ view.addEventListener('external-link', event => {
 })
 
 globalThis.leeefReader = {
-    async open(bookURL, initialLocator) {
+    async open(bookURL, initialLocator, layout, theme, bookJavaScriptEnabled) {
         if (currentBookURL) await view.close()
         currentBookURL = bookURL
+        allowBookJavaScript = bookJavaScriptEnabled === true
         await view.open(bookURL)
+        if (layout) globalThis.leeefReader.setLayout(layout)
+        if (theme) globalThis.leeefReader.setTheme(theme)
         await view.init({
             lastLocation: initialLocator || null,
             showTextStart: !initialLocator,

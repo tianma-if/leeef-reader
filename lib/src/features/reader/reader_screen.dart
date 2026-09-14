@@ -86,6 +86,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
   Timer? _progressTimer;
   Timer? _clockTimer;
   ReaderBookInfo? _bookInfo;
+  List<ReaderSidebarTocItem> _flatToc = const [];
   ReadingLocation? _location;
   ReaderSelectionChanged? _selection;
   String? _lastPersistedLocation;
@@ -139,6 +140,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+    unawaited(_engine.initialize());
     unawaited(_loadSidebarPin());
     _preferencesFuture = ReaderPreferences.load();
     unawaited(_ttsController.initialize());
@@ -256,7 +258,10 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     }
     _opening = true;
     try {
-      final repository = await ref.read(libraryRepositoryProvider.future);
+      final repositoryFuture = ref.read(libraryRepositoryProvider.future);
+      final preferencesFuture = _preferencesFuture;
+      final jsPrefFuture = SharedPreferences.getInstance();
+      final repository = await repositoryFuture;
       _repository = repository;
       final progress = await repository.getReadingProgress(widget.book.id);
       if (progress != null) {
@@ -267,6 +272,10 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
           page: progress.page,
         ).encode();
       }
+      final preferences = await preferencesFuture;
+      final appPreferences = await jsPrefFuture;
+      _preferences = preferences;
+      final resolvedImage = _resolvedBackgroundImage(preferences);
       final info = await _engine.open(
         ReaderBookSource(
           bookId: widget.book.id,
@@ -274,22 +283,41 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
           mediaType: widget.book.mediaType,
         ),
         initialLocator: progress?.locator,
+        layout: {
+          'flow': preferences.flow,
+          'maxColumnCount': preferences.columns,
+          'margin': preferences.margin,
+          'pageTurnEffect': enginePageTurnEffect(
+            flow: preferences.flow,
+            configuredEffect: preferences.pageTurnEffect,
+          ),
+        },
+        theme: _foliateThemePayload(
+          preferences,
+          backgroundImage: resolvedImage,
+        ),
+        bookJavaScriptEnabled:
+            appPreferences.getBool('leeef.reader.epub_javascript') ?? false,
       );
-      final preferences = await _preferencesFuture;
-      final appPreferences = await SharedPreferences.getInstance();
-      await _engine.setBookJavaScriptEnabled(
-        appPreferences.getBool('leeef.reader.epub_javascript') ?? false,
-      );
-      _preferences = preferences;
-      await _applyPreferences(preferences, persist: false);
-      await repository.updateBookMetadata(
-        bookId: widget.book.id,
-        title: info.title.isEmpty ? widget.book.title : info.title,
-        author: info.author,
-        description: widget.book.description,
-      );
-      if (mounted) setState(() => _bookInfo = info);
+      _styleAppliedToEngine = true;
+      _lastResolvedBackgroundImage = resolvedImage;
+      if (mounted) {
+        setState(() {
+          _bookInfo = info;
+          _flatToc = flattenReaderToc(info.toc);
+          _preferences = preferences;
+        });
+      }
       _sessionStartedAt ??= DateTime.now();
+      unawaited(_applyReadingState(preferences));
+      unawaited(
+        repository.updateBookMetadata(
+          bookId: widget.book.id,
+          title: info.title.isEmpty ? widget.book.title : info.title,
+          author: info.author,
+          description: widget.book.description,
+        ),
+      );
     } on Object catch (error) {
       if (mounted) setState(() => _error = error);
     } finally {
@@ -846,8 +874,47 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     );
   }
 
+  Map<String, Object?> _foliateThemePayload(
+    ReaderPreferences preferences, {
+    required String backgroundImage,
+    bool paintOnly = false,
+  }) => paintOnly
+      ? {
+          'foreground': preferences.foreground,
+          'background': preferences.background,
+          'paintOnly': true,
+        }
+      : {
+          'foreground': preferences.foreground,
+          'background': preferences.background,
+          'fontSize': preferences.fontSize,
+          'lineHeight': preferences.lineHeight,
+          'fontFamily': preferences.fontFamily,
+          'fontWeight': preferences.fontWeight,
+          'headingScale': preferences.headingScale,
+          'letterSpacing': preferences.letterSpacing,
+          'paragraphSpacing': preferences.paragraphSpacing,
+          'textIndent': preferences.textIndent,
+          'textAlign': preferences.textAlign,
+          'writingMode': preferences.writingMode,
+          'preserveBookStyles': preferences.preserveBookStyles,
+          'eInkMode': preferences.eInkMode,
+          'codeHighlight': preferences.codeHighlight,
+          'backgroundImage': backgroundImage,
+          'backgroundOpacity': preferences.backgroundOpacity,
+          'backgroundBlur': preferences.backgroundBlur,
+          'backgroundFit': preferences.backgroundFit,
+          'importedFontName': preferences.importedFontName,
+          'importedFontData': preferences.importedFontData,
+          'customCss': preferences.customCss,
+          'paintOnly': false,
+        };
+
   Future<void> _applyChineseConversion([String? mode]) async {
-    if (_bookInfo == null) return;
+    final resolved = mode ?? _preferences.chineseConversion;
+    if (_bookInfo == null || resolved == 'original' || resolved.isEmpty) {
+      return;
+    }
     try {
       final nodes = await _engine.visibleTextNodes();
       final converted = _chineseConverter.convertAll(
@@ -1687,7 +1754,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     };
     final bookSource = _bookSource;
     final compactToolbar = MediaQuery.sizeOf(context).width < 600;
-    final toc = flattenReaderToc(_bookInfo?.toc ?? const []);
+    final toc = _flatToc;
     final pageLabel = readerPageFractionLabel(
       current: _location?.page,
       progress: progress,

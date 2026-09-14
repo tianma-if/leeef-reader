@@ -86,6 +86,21 @@ void main() {
     expect(() => server.registerBook('../secret', book), throwsArgumentError);
     expect(() => server.bookUri('a/b'), throwsArgumentError);
   });
+
+  test('concurrent start binds a single HTTP server', () async {
+    final extra = ReaderContentServer(sessionToken: 'concurrent-start');
+    extra.registerBook('book-1', book);
+    try {
+      await Future.wait([extra.start(), extra.start(), extra.start()]);
+      final first = extra.readerUri;
+      await extra.start();
+      expect(extra.readerUri, first);
+      final response = await _get(extra.bookUri('book-1'));
+      expect(response.statusCode, HttpStatus.ok);
+    } finally {
+      await extra.close();
+    }
+  });
 }
 
 Future<_Response> _get(

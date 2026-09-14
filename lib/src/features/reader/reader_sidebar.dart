@@ -89,6 +89,40 @@ String readerPageFractionLabel({int? current, int? total, double? progress}) {
   return '';
 }
 
+sealed class ReaderTocDisplayRow {
+  const ReaderTocDisplayRow();
+}
+
+class ReaderTocEntryRow extends ReaderTocDisplayRow {
+  const ReaderTocEntryRow(this.item);
+  final ReaderSidebarTocItem item;
+}
+
+class ReaderTocCurrentRow extends ReaderTocDisplayRow {
+  const ReaderTocCurrentRow(this.pageLabel);
+  final String? pageLabel;
+}
+
+List<ReaderTocDisplayRow> readerTocDisplayRows({
+  required List<ReaderSidebarTocItem> toc,
+  String? currentTocId,
+  String? currentPageLabel,
+}) {
+  final rows = <ReaderTocDisplayRow>[];
+  var insertedCurrent = false;
+  for (final item in toc) {
+    rows.add(ReaderTocEntryRow(item));
+    if (item.id == currentTocId) {
+      rows.add(ReaderTocCurrentRow(currentPageLabel));
+      insertedCurrent = true;
+    }
+  }
+  if (!insertedCurrent) {
+    rows.insert(0, ReaderTocCurrentRow(currentPageLabel));
+  }
+  return rows;
+}
+
 class ReaderSidebar extends ConsumerWidget {
   const ReaderSidebar({
     required this.bookId,
@@ -136,14 +170,16 @@ class ReaderSidebar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final excerpts =
-        ref.watch(bookExcerptsProvider(bookId)).asData?.value ?? const [];
-    final bookmarks =
-        ref.watch(bookBookmarksProvider(bookId)).asData?.value ?? const [];
+    final excerpts = tab == ReaderSidebarTab.annotations
+        ? ref.watch(bookExcerptsProvider(bookId)).asData?.value ?? const []
+        : const <ExcerptRecord>[];
+    final bookmarks = tab == ReaderSidebarTab.bookmarks
+        ? ref.watch(bookBookmarksProvider(bookId)).asData?.value ?? const []
+        : const <BookmarkRecord>[];
     final desktop = isDesktopReaderPlatform();
     return Material(
       color: scheme.surfaceContainerLow,
-      clipBehavior: Clip.antiAlias,
+      clipBehavior: desktop ? Clip.hardEdge : Clip.antiAlias,
       shape: desktop
           ? null
           : const RoundedRectangleBorder(
@@ -365,17 +401,20 @@ class _BookTitleRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
-    final hasCover = coverPath != null && File(coverPath!).existsSync();
+    final path = coverPath;
     return Row(
       children: [
-        if (hasCover) ...[
+        if (path != null && path.isNotEmpty) ...[
           ClipRRect(
             borderRadius: BorderRadius.circular(2),
             child: Image.file(
-              File(coverPath!),
+              File(path),
               width: 28,
               height: 40,
               fit: BoxFit.cover,
+              gaplessPlayback: true,
+              filterQuality: FilterQuality.low,
+              errorBuilder: (_, _, _) => const SizedBox(width: 28, height: 40),
             ),
           ),
           const SizedBox(width: 10),
@@ -434,28 +473,37 @@ class _TocList extends StatelessWidget {
     if (toc.isEmpty && currentPageLabel == null) {
       return const SizedBox.shrink();
     }
-    final children = <Widget>[];
-    var insertedCurrent = false;
-    for (final item in toc) {
-      children.add(_TocRow(item: item, onTap: () => onOpenToc(item)));
-      if (item.id == currentTocId) {
-        children.add(_CurrentPositionRow(pageLabel: currentPageLabel));
-        insertedCurrent = true;
-      }
-    }
-    if (!insertedCurrent) {
-      children.insert(0, _CurrentPositionRow(pageLabel: currentPageLabel));
-    }
-    return ListView(
+    final rows = readerTocDisplayRows(
+      toc: toc,
+      currentTocId: currentTocId,
+      currentPageLabel: currentPageLabel,
+    );
+    return ListView.builder(
       key: const Key('reader-sidebar-toc'),
       padding: const EdgeInsets.symmetric(vertical: 8),
-      children: children,
+      itemCount: rows.length,
+      addAutomaticKeepAlives: false,
+      itemBuilder: (context, index) {
+        final row = rows[index];
+        return switch (row) {
+          ReaderTocEntryRow(:final item) => RepaintBoundary(
+            child: _TocRow(
+              key: ValueKey(item.id),
+              item: item,
+              onTap: () => onOpenToc(item),
+            ),
+          ),
+          ReaderTocCurrentRow(:final pageLabel) => _CurrentPositionRow(
+            pageLabel: pageLabel,
+          ),
+        };
+      },
     );
   }
 }
 
 class _TocRow extends StatelessWidget {
-  const _TocRow({required this.item, required this.onTap});
+  const _TocRow({required this.item, required this.onTap, super.key});
 
   final ReaderSidebarTocItem item;
   final VoidCallback onTap;

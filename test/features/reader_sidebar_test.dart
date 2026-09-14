@@ -33,6 +33,25 @@ void main() {
     expect(matchingTocIdByPage(toc, 49), 'c2');
   });
 
+  test(
+    'readerTocDisplayRows inserts current position after the active chapter',
+    () {
+      const toc = [
+        ReaderSidebarTocItem(id: 'c1', label: '第一讲 汉代', pageLabel: '11'),
+        ReaderSidebarTocItem(id: 'c2', label: '第二讲 唐代', pageLabel: '49'),
+      ];
+      final rows = readerTocDisplayRows(
+        toc: toc,
+        currentTocId: 'c1',
+        currentPageLabel: '15',
+      );
+      expect(rows, hasLength(3));
+      expect((rows[0] as ReaderTocEntryRow).item.id, 'c1');
+      expect((rows[1] as ReaderTocCurrentRow).pageLabel, '15');
+      expect((rows[2] as ReaderTocEntryRow).item.id, 'c2');
+    },
+  );
+
   test('readerPageFractionLabel uses current/total when available', () {
     expect(
       readerPageFractionLabel(current: 15, total: 226, progress: 0.06),

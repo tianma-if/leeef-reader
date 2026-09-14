@@ -15,6 +15,7 @@ class ReaderContentServer {
   final String _sessionToken;
   final Map<String, File> _books = {};
   HttpServer? _server;
+  Future<void>? _starting;
 
   bool get isRunning => _server != null;
 
@@ -51,6 +52,22 @@ class ReaderContentServer {
   }
 
   Future<void> start() async {
+    if (_server != null) return;
+    final existing = _starting;
+    if (existing != null) {
+      await existing;
+      return;
+    }
+    final starting = _bind();
+    _starting = starting;
+    try {
+      await starting;
+    } finally {
+      if (identical(_starting, starting)) _starting = null;
+    }
+  }
+
+  Future<void> _bind() async {
     if (_server != null) return;
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     _server = server;

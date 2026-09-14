@@ -47,6 +47,9 @@ class FoliateReaderEngine implements ReaderEngine {
   Future<ReaderBookInfo> open(
     ReaderBookSource source, {
     String? initialLocator,
+    Map<String, Object?>? layout,
+    Map<String, Object?>? theme,
+    bool bookJavaScriptEnabled = false,
   }) async {
     _ensureOpen();
     if (!await source.file.exists()) {
@@ -60,10 +63,13 @@ class FoliateReaderEngine implements ReaderEngine {
     try {
       await _waitForBridge();
       final result = await _call(
-        'return await globalThis.leeefReader.open(bookUrl, initialLocator);',
+        'return await globalThis.leeefReader.open(bookUrl, initialLocator, layout, theme, bookJavaScriptEnabled);',
         {
           'bookUrl': _contentServer.bookUri(source.bookId).toString(),
           'initialLocator': initialLocator,
+          'layout': layout,
+          'theme': theme,
+          'bookJavaScriptEnabled': bookJavaScriptEnabled,
         },
       );
       _openBookId = source.bookId;

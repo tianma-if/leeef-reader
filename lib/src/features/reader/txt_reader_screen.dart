@@ -221,11 +221,13 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     try {
       final path = widget.book.filePath;
       if (path == null) throw StateError('这本书尚未下载到本机。');
-      final preferences = await ReaderPreferences.load();
-      await _loadImportedFont(preferences);
-      await _applyReadingState(preferences);
+      final preferencesFuture = ReaderPreferences.load();
+      final bytesFuture = File(path).readAsBytes();
+      final preferences = await preferencesFuture;
+      unawaited(_loadImportedFont(preferences));
+      unawaited(_applyReadingState(preferences));
       final document = await decodeTxtDocumentInBackground(
-        await File(path).readAsBytes(),
+        await bytesFuture,
         chapterPattern: preferences.txtChapterPattern,
       );
       if (!mounted) return;

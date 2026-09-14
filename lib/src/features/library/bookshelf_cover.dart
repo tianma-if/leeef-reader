@@ -25,7 +25,7 @@ class BookshelfCover extends StatelessWidget {
 
   bool get _hasCover {
     final path = coverPath;
-    return path != null && File(path).existsSync();
+    return path != null && path.isNotEmpty;
   }
 
   @override
