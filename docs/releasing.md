@@ -7,8 +7,8 @@ Leeef Reader 使用三个 GitHub Actions 发布工作流。首次发布前，应
 - 正式 Tag 与 Release 标题使用 `vX.Y.Z`；`pubspec.yaml` 必须使用匹配的 `X.Y.Z+N`，其中 `N` 严格递增。
 - 必须按 SemVer 显式决定 patch、minor 或 major。用户可感知的新能力和新增平台不能仅因发版方便而归入 patch。
 - 以上一个正式 Release 为基线审计变更，并使用中英文说明公开的用户可感知变化；构建、签名和公证细节留在 Actions 或关联 Issue。
-- 先创建 Draft Release，在 Draft 内准备并核验 macOS 资产，然后才公开。Release 的 `published` 事件只审计已有资产；审计失败会尝试把 Release 恢复为 Draft。
-- Android 与 iOS 是独立的商店交付，按用户指定的目标渠道执行。正式上架可直接发布 Google Play production 或提交 App Store 审核；internal、draft、TestFlight 测试分发和移动端真机回归均不是项目强制前置条件。平台自身的构建处理、资料与审核要求仍适用。
+- 先创建 Draft Release，在 Draft 内准备并核验 macOS 资产，资产齐全后立即公开，不得停下来询问确认。Release 的 `published` 事件只审计已有资产；审计失败会尝试把 Release 恢复为 Draft。
+- 正式发版默认交付 Google Play production（`completed`）和 App Store Connect 上传。internal、draft、TestFlight 测试分发和移动端真机回归均不是项目强制前置条件。平台自身的构建处理、资料与审核要求仍适用。
 - 当前没有正式 Windows 安装包、签名和更新资产工作流，因此不得在 Release 说明中把 Windows 写成该版本已经交付的平台。
 
 ## 标准发布命令
@@ -33,7 +33,7 @@ dart run tool/release.dart \
 
 仅有发布流程、测试或文档调整且仍需发版时，使用 `--bump patch --maintenance`，不提供 `--change-*`，并用 `--ignore-commit` 为基线后的每个提交注明排除原因。工具仍执行完整提交覆盖审计；公开说明明确本次无用户可感知的功能变化，不虚构功能更新。
 
-确认 dry run 输出的版本、构建号、提交覆盖和说明后，使用完全相同的参数并增加 `--execute`。执行模式会确认 `main` 与 `origin/main` 一致，并复用该提交已经通过的跨平台 CI（不存在时只补跑一次）；随后创建跟踪 Issue、更新并提交 `pubspec.yaml`、推送正式 Tag、创建 Draft Release，并触发一次 macOS 资产工作流。仅修改版本号的发版提交带 `[skip ci]`，不会把同一套门禁再跑一遍。它不会公开 Release，也不会批准 Google Play production 或 App Store 审核。
+用户要求发版时，代理完成 dry run 覆盖审计后立即使用完全相同的参数加上 `--execute`，不得停下来等人确认计划。执行模式会确认 `main` 与 `origin/main` 一致，并复用该提交已经通过的跨平台 CI（不存在时只补跑一次）；随后创建跟踪 Issue、更新并提交 `pubspec.yaml`、推送正式 Tag、创建 Draft Release，触发并等待 macOS 资产工作流，核验 DMG、ZIP 和 `appcast.xml` 后公开 Release。仅修改版本号的发版提交带 `[skip ci]`，不会把同一套门禁再跑一遍。公开稳定 Release 会自动触发 Google Play production（`completed`）和 App Store Connect 上传。
 
 若 `pubspec.yaml` 已因未公开的 Draft 递增，显式添加 `--pending-draft vX.Y.Z`。
 工具会验证该 Draft 的 Tag、构建号与当前版本一致，并且位于上一正式 Release 与当前提交之间；
@@ -94,7 +94,7 @@ Leeef Reader 不申请 `android.permission.REQUEST_INSTALL_PACKAGES`。发布工
 - Variables：`APPSTORE_ISSUER_ID`、`APPSTORE_API_KEY_ID`。
 - Secrets：`APPSTORE_API_PRIVATE_KEY`（`.p8` 内容）、`APPSTORE_CERTIFICATES_FILE_BASE64`（Apple Distribution `.p12` 的 base64）、`APPSTORE_CERTIFICATES_PASSWORD`。
 
-API Key 至少需要 App Manager 权限。工作流会从 App Store Connect 下载主应用与分享扩展的 profile，使用 `ios/ExportOptions.plist` 导出 IPA。关闭 `upload_testflight` 可只生成 IPA，不上传。上传只会把 build 送入 App Store Connect/TestFlight；商店元数据、隐私问卷、截图、定价和最终提交审核仍在 App Store Connect 完成。
+API Key 至少需要 App Manager 权限。工作流会从 App Store Connect 下载主应用与分享扩展的 profile，使用 `ios/ExportOptions.plist` 导出 IPA。关闭 `upload_testflight` 可只生成 IPA，不上传。正式公开稳定 GitHub Release 时会自动构建并上传 IPA。上传会把 build 送入 App Store Connect/TestFlight；商店元数据、隐私问卷、截图、定价和最终提交审核仍在 App Store Connect 完成。
 
 ## macOS DMG
 
@@ -112,7 +112,7 @@ GitHub 的 `macos-distribution` Environment 配置：
 - Secrets：`MACOS_CERTIFICATES_FILE_BASE64`、`MACOS_CERTIFICATES_PASSWORD`、`MACOS_CERTIFICATE_NAME`、`APPSTORE_API_PRIVATE_KEY`。
 - Sparkle 更新签名 Secret：`MACOS_SPARKLE_PRIVATE_KEY`。内容是 Sparkle Ed25519 私钥种子的单行 base64；对应公钥固定在 `macos/Runner/Info.plist`，丢失后不能为已安装客户端发布可信更新。
 
-手动执行工作流可选择无签名构建用于内部测试。正式发布时，先创建 Draft Release，再以该 Draft 的 Tag 作为 `release_tag` 手动运行工作流；工作流会从 Tag 构建、签名、公证，并向 Draft 附加 DMG、供静默下载的 ZIP 以及签名的 `appcast.xml`。Tag 必须与 `pubspec.yaml` 的版本一致，例如版本 `1.0.0+2` 对应 `v1.0.0`。确认工作流成功且 Draft 中三项资产齐全后才可公开 Release；`published` 事件不会重新构建，只审计已有资产。已安装的 macOS 客户端启动时立即检查，持续运行期间每 5 分钟静默检查并下载；下载、验签和解压完成后才提示用户重启安装，选择稍后时正常退出应用也会完成安装。
+手动执行工作流可选择无签名构建用于内部测试。正式发布时，先创建 Draft Release，再以该 Draft 的 Tag 作为 `release_tag` 运行工作流；工作流会从 Tag 构建、签名、公证，并向 Draft 附加 DMG、供静默下载的 ZIP 以及签名的 `appcast.xml`。Tag 必须与 `pubspec.yaml` 的版本一致，例如版本 `1.0.0+2` 对应 `v1.0.0`。工作流成功且 Draft 中三项资产齐全后立即公开 Release；`published` 事件不会重新构建，只审计已有资产。已安装的 macOS 客户端启动时立即检查，持续运行期间每 5 分钟静默检查并下载；下载、验签和解压完成后才提示用户重启安装，选择稍后时正常退出应用也会完成安装。
 
 macOS 客户端启用了 App Sandbox，因此 Release 签名必须保留 Sparkle 要求的 `<bundle-id>-spks` 与 `<bundle-id>-spki` Mach lookup 权限。`tool/verify_macos_bundle.sh` 会从最终签名产物中核验这两项；缺失时安装器无法把下载结果交回应用，发布必须中止。
 
@@ -132,7 +132,7 @@ gh secret set MACOS_SPARKLE_PRIVATE_KEY \
 1. 确认 `main` 与 `origin/main` 一致且工作区干净；以上一个正式 Release 为基线整理中英文用户变更。
 2. 显式选择 SemVer 级别，更新 `pubspec.yaml` 的 `version: X.Y.Z+N`；`N` 必须严格递增。
 3. 等待当前源码提交的跨平台 CI 全部通过；该工作流统一执行 Flutter 分析与测试、MCP `go test ./...` 以及 Android、iOS、macOS、Windows 构建。发布规划器会直接复用这一结果，不重复执行同一套门禁。
-4. 创建 `vX.Y.Z` Draft Release，使用同一 Tag 手动运行 `Build macOS DMG`，确认 DMG、ZIP、`appcast.xml` 已上传且工作流成功。
-5. 如用户要求，提交 App Store 审核；Google Play production 将在公开稳定 Release 时自动触发，无需先经过测试渠道。建议检查真机导入、阅读、分享导入、后台音频、同步和 Android 更新流程；如未执行，如实记录，不阻塞正式上架或送审，也不得将其标记为通过。
-6. 在 Intel 与 Apple Silicon Mac 上验证 DMG 可挂载、拖入 Applications，并运行 `spctl --assess --type execute --verbose "Leeef Reader.app"`；从前一正式版本启动应用，确认新版 ZIP 静默下载后出现“重启以更新”，重启后版本号已更新。
-7. 公开 GitHub Release，并确认发布后 macOS 资产审计与自动触发的 Google Play production 工作流通过。iOS 商店交付仍独立执行；分别核验生产轨道、送审和正式上架状态，不将上传成功等同于上架成功。
+4. 创建 `vX.Y.Z` Draft Release，使用同一 Tag 运行 `Build macOS DMG`，确认 DMG、ZIP、`appcast.xml` 已上传且工作流成功。
+5. 立即公开 GitHub Release。Google Play production 与 App Store Connect 上传由 `published` 事件自动触发，无需先经过测试渠道，也不得为此询问用户。建议检查真机导入、阅读、分享导入、后台音频、同步和 Android 更新流程；如未执行，如实记录，不阻塞正式上架或送审，也不得将其标记为通过。
+6. 在 Intel 与 Apple Silicon Mac 上验证 DMG 可挂载、拖入 Applications，并运行 `spctl --assess --type execute --verbose "Leeef Reader.app"`；从前一正式版本启动应用，确认新版 ZIP 静默下载后出现“重启以更新”，重启后版本号已更新。该 macOS 验收仍按发布后行为执行，默认不覆盖安装开发者机器上的现有应用。
+7. 确认发布后 macOS 资产审计、Google Play production 与 App Store Connect 上传工作流已触发；分别核验生产轨道、送审和正式上架状态，不将上传成功等同于上架成功。

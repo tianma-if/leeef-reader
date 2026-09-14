@@ -8,6 +8,8 @@ on:
         required: true
         default: true
         type: boolean
+  release:
+    types: [published]
 
 concurrency:
   group: leeef-ios-app-store
@@ -15,12 +17,16 @@ concurrency:
 
 jobs:
   build:
-    if: github.repository == 'tianma-if/leeef-reader'
+    if: >-
+      github.repository == 'tianma-if/leeef-reader' &&
+      (github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false)
     runs-on: macos-26
     timeout-minutes: 60
     environment: app-store
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
       - name: Select stable Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
@@ -70,7 +76,7 @@ jobs:
         id: ipa
         run: echo "path=$(find build/ios/ipa -maxdepth 1 -name '*.ipa' -print -quit)" >> "$GITHUB_OUTPUT"
       - name: Upload to App Store Connect
-        if: inputs.upload_testflight
+        if: github.event_name == 'release' || inputs.upload_testflight
         uses: apple-actions/upload-testflight-build@v4
         with:
           app-path: ${{ steps.ipa.outputs.path }}

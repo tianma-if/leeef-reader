@@ -22,7 +22,10 @@ void main() {
     expect(gates, contains('签名、公证与更新元数据通过'));
     expect(gates, isNot(contains('真机')));
     expect(gates, isNot(contains('TestFlight')));
-    expect(body, contains('正式上架不要求先经过测试渠道或真机回归'));
+    expect(
+      body,
+      contains('正式发版默认 Google Play production 与 App Store Connect 上传'),
+    );
     expect(body, contains('未执行时如实记录，不作为发布门禁'));
   });
 
@@ -320,14 +323,60 @@ void main() {
     expect(notes, isNot(contains('flutter test')));
   });
 
-  test('execution prepares a Draft and never publishes it', () {
+  test('execution publishes after macOS assets land on the Draft', () {
     final source = File('tool/release.dart').readAsStringSync();
 
     expect(source, contains("'--draft'"));
     expect(source, contains("'push',\n    '--atomic'"));
     expect(source, contains('chore: release \$targetTag [skip ci]'));
-    expect(source, isNot(contains('--draft=false')));
-    expect(source, isNot(contains('release edit')));
+    expect(source, contains('macos-dmg.yml'));
+    expect(source, contains('--draft=false'));
+    expect(source, contains("'release',\n    'edit'"));
+    expect(
+      source,
+      contains('Google Play production and App Store Connect upload'),
+    );
+  });
+
+  test('published iOS workflow uploads the tagged build', () {
+    final workflow = File(
+      '.github/workflows/ios-app-store.yml',
+    ).readAsStringSync();
+
+    expect(workflow, contains('types: [published]'));
+    expect(workflow, contains('github.event.release.tag_name'));
+    expect(
+      workflow,
+      contains('github.event_name == \'release\' || inputs.upload_testflight'),
+    );
+  });
+
+  test('required macOS assets are the signed DMG, ZIP, and appcast', () {
+    expect(
+      releaseAssetNames(
+        '{"assets":[{"name":"Leeef-Reader-1.5.0-macos-universal.dmg"},{"name":"Leeef-Reader-1.5.0-macos-universal.zip"},{"name":"appcast.xml"}]}',
+      ),
+      [
+        'Leeef-Reader-1.5.0-macos-universal.dmg',
+        'Leeef-Reader-1.5.0-macos-universal.zip',
+        'appcast.xml',
+      ],
+    );
+    expect(
+      () => requireMacosReleaseAssets(
+        names: const ['Leeef-Reader-1.5.0-macos-universal.dmg'],
+        version: '1.5.0',
+      ),
+      throwsStateError,
+    );
+    requireMacosReleaseAssets(
+      names: const [
+        'Leeef-Reader-1.5.0-macos-universal.dmg',
+        'Leeef-Reader-1.5.0-macos-universal.zip',
+        'appcast.xml',
+      ],
+      version: '1.5.0',
+    );
   });
 
   test('publishing audits existing macOS assets without rebuilding', () {

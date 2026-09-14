@@ -159,11 +159,11 @@ Repeat --change-zh, --change-en and --change-commit as a group for multiple
 release bullets. One bullet may cover comma-separated commit SHAs. Account for
 non-user-facing commits with --ignore-commit "abcdef1:reason".
 
-The command is a read-only dry run by default. Add --execute only after checking
-the plan. Execution reuses the cross-platform CI result for the exact main
-commit (or dispatches it once when absent), creates a tracking Issue, updates
-the version, commits and pushes main and the tag, creates a Draft Release, and
-dispatches the macOS asset workflow. It never publishes the Release.
+The command is a read-only dry run by default. --execute reuses the
+cross-platform CI result for the exact main commit (or dispatches it once when
+absent), creates a tracking Issue, updates the version, commits and pushes main
+and the tag, creates a Draft Release, waits for macOS assets, then publishes.
+Publishing triggers Google Play production and App Store Connect upload.
 
 Options:
   --bump <patch|minor|major>  Required SemVer bump
@@ -530,11 +530,12 @@ $ignoredRows
 
 - [ ] 当前源码提交的跨平台 CI 通过（含 Flutter 与 MCP 测试）
 - [ ] macOS Draft 资产、签名、公证与更新元数据通过
-- [ ] GitHub Release 公开后资产审计通过
+- [ ] GitHub Release 已公开，资产审计通过
+- [ ] Google Play production 与 App Store Connect 上传已触发
 
 ## 移动端交付记录
 
-- 按用户指定渠道交付；正式上架不要求先经过测试渠道或真机回归。
+- 正式发版默认 Google Play production 与 App Store Connect 上传；不要求先经过测试渠道或真机回归。
 - 分别记录 Google Play 与 App Store 的上传、送审和上架状态，不将上传成功等同于正式上架。
 - 真机回归为建议检查，未执行时如实记录，不作为发布门禁。
 ''';
@@ -589,9 +590,10 @@ Future<String> _output(
 }) async =>
     (await _run(executable, arguments, cwd: cwd)).stdout.toString().trim();
 
-Future<CiRun?> _latestCiRun({
+Future<CiRun?> _latestWorkflowRun({
   required String repoRoot,
   required String repository,
+  required String workflow,
   required String headSha,
 }) async {
   final source = await _output('gh', [
@@ -600,7 +602,7 @@ Future<CiRun?> _latestCiRun({
     '--repo',
     repository,
     '--workflow',
-    'ci.yml',
+    workflow,
     '--commit',
     headSha,
     '--limit',
@@ -609,6 +611,57 @@ Future<CiRun?> _latestCiRun({
     'databaseId,status,conclusion,headSha,url',
   ], cwd: repoRoot);
   return selectLatestCiRun(parseCiRuns(source), headSha);
+}
+
+Future<CiRun?> _latestCiRun({
+  required String repoRoot,
+  required String repository,
+  required String headSha,
+}) => _latestWorkflowRun(
+  repoRoot: repoRoot,
+  repository: repository,
+  workflow: 'ci.yml',
+  headSha: headSha,
+);
+
+List<String> releaseAssetNames(String jsonSource) {
+  final decoded = jsonDecode(jsonSource);
+  if (decoded is! Map<String, Object?>) {
+    throw const FormatException('Expected a GitHub Release JSON object.');
+  }
+  final assets = decoded['assets'];
+  if (assets is! List<Object?>) {
+    throw const FormatException('Expected Release assets to be a JSON list.');
+  }
+  return assets
+      .map((item) {
+        if (item is! Map<String, Object?>) {
+          throw const FormatException('Expected each asset to be an object.');
+        }
+        final name = item['name'];
+        if (name is! String || name.isEmpty) {
+          throw const FormatException('Expected each asset to have a name.');
+        }
+        return name;
+      })
+      .toList(growable: false);
+}
+
+void requireMacosReleaseAssets({
+  required List<String> names,
+  required String version,
+}) {
+  final requiredNames = {
+    'Leeef-Reader-$version-macos-universal.dmg',
+    'Leeef-Reader-$version-macos-universal.zip',
+    'appcast.xml',
+  };
+  final missing = requiredNames.difference(names.toSet());
+  if (missing.isNotEmpty) {
+    throw StateError(
+      'Release is missing required macOS assets: ${missing.join(', ')}.',
+    );
+  }
 }
 
 Future<void> _ensureCrossPlatformCi({
@@ -816,7 +869,7 @@ Future<void> runRelease(List<String> arguments) async {
   stdout.writeln('\n$previewNotes');
   if (!options.execute) {
     stdout.writeln(
-      'Dry run complete. Re-run with --execute to prepare the Draft Release.',
+      'Dry run complete. Re-run with --execute to publish the Release.',
     );
     return;
   }
@@ -914,10 +967,86 @@ Future<void> runRelease(List<String> arguments) async {
     '-f',
     'notarize=true',
   ], cwd: repoRoot);
-  stdout.writeln('\nDraft $targetTag prepared. It has not been published.');
-  stdout.writeln(
-    'Track remaining CI, assets, store delivery, and device gates in #$issueNumber.',
+  final releaseHead = await _output('git', [
+    'rev-parse',
+    'HEAD',
+  ], cwd: repoRoot);
+  await _ensureWorkflowSucceeded(
+    repoRoot: repoRoot,
+    repository: options.repository,
+    workflow: 'macos-dmg.yml',
+    headSha: releaseHead,
   );
+  final assetSource = await _output('gh', [
+    'release',
+    'view',
+    targetTag,
+    '--repo',
+    options.repository,
+    '--json',
+    'assets',
+  ], cwd: repoRoot);
+  requireMacosReleaseAssets(
+    names: releaseAssetNames(assetSource),
+    version: '${next.version}',
+  );
+  await _runVisible('gh', [
+    'release',
+    'edit',
+    targetTag,
+    '--repo',
+    options.repository,
+    '--draft=false',
+  ], cwd: repoRoot);
+  stdout.writeln(
+    '\nPublished $targetTag. Google Play production and App Store Connect upload start from the published event.',
+  );
+  stdout.writeln(
+    'Track remaining asset audit and store status in #$issueNumber.',
+  );
+}
+
+Future<void> _ensureWorkflowSucceeded({
+  required String repoRoot,
+  required String repository,
+  required String workflow,
+  required String headSha,
+}) async {
+  var run = await _latestWorkflowRun(
+    repoRoot: repoRoot,
+    repository: repository,
+    workflow: workflow,
+    headSha: headSha,
+  );
+  for (var attempt = 0; attempt < 20 && run == null; attempt += 1) {
+    await Future<void>.delayed(const Duration(seconds: 3));
+    run = await _latestWorkflowRun(
+      repoRoot: repoRoot,
+      repository: repository,
+      workflow: workflow,
+      headSha: headSha,
+    );
+  }
+  if (run == null) {
+    throw StateError('Dispatched $workflow but could not find its run.');
+  }
+  if (!run.isComplete) {
+    stdout.writeln('Waiting for $workflow: ${run.url}');
+    await _runVisible('gh', [
+      'run',
+      'watch',
+      '${run.databaseId}',
+      '--repo',
+      repository,
+      '--exit-status',
+    ], cwd: repoRoot);
+    stdout.writeln('$workflow passed.');
+    return;
+  }
+  if (!run.isSuccessful) {
+    throw StateError('$workflow concluded ${run.conclusion}: ${run.url}');
+  }
+  stdout.writeln('Reusing successful $workflow: ${run.url}');
 }
 
 Future<void> main(List<String> arguments) async {
