@@ -24,14 +24,14 @@ Enjoy interactive page curl on mobile, or choose slide, no animation, and contin
 HIGHLIGHTS, NOTES, AND INSIGHTS
 Create bookmarks, highlights, and notes, review them by book or date, and export to Markdown, TXT, or CSV. Reading statistics help you understand time, streaks, and completion.
 
-AI CONFIGURED ON DESKTOP, SYNCED TO IPHONE
-Connect your own AI service on a computer for explanations, translation, chapter summaries, and reading questions. The iPhone app does not include API endpoint or key entry; credentials reach iOS through trusted-device or cloud sync.
+AI AND CLOUD STORAGE CONFIGURED ON DESKTOP, SYNCED TO IPHONE
+Connect your own object storage and AI service on a computer for cross-device sync, explanations, translation, chapter summaries, and reading questions. The iPhone app does not include object-storage, AI, or cloud TTS endpoint, key, or provider entry; credentials reach iOS after you scan a pairing QR code or through trusted-device / cloud sync.
 
 YOUR CLOUD, YOUR DATA
 Leeef stores data locally by default and requires no account. Optional S3 or WebDAV sync keeps books, progress, highlights, and shelves in step across iOS, Android, macOS, and Windows.
 
-Some online features require a network connection. S3/WebDAV uses storage you provide. AI credentials are configured on desktop and synced; they are not purchased or entered in the iOS app.
+Some online features require a network connection. S3/WebDAV uses storage you provide. Storage and AI credentials are configured on desktop and synced; they are not purchased or entered in the iOS app.
 
 ## Review Notes
 
-No account is required. Complete the three-page onboarding, tap Import Books, and select an EPUB, PDF, TXT, MOBI, AZW3, or FB2 file from Files. iOS does not present AI or cloud TTS API-key or provider configuration. Those settings are made on a computer and reach the phone through trusted-device or cloud sync. Reviewers do not need to configure third-party AI. S3/WebDAV and OPDS are optional and are not required for core offline reading.
+No account is required. Complete the three-page onboarding, tap Import Books, and select an EPUB, PDF, TXT, MOBI, AZW3, or FB2 file from Files. iOS does not present object-storage, AI, or cloud TTS API-key or provider configuration. Those settings are made on a computer and reach the phone after scanning a pairing QR code or through trusted-device / cloud sync. Reviewers do not need to configure third-party AI or cloud storage. S3/WebDAV and OPDS are optional and are not required for core offline reading.

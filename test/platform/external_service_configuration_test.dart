@@ -24,6 +24,20 @@ void main() {
         missingAiServiceConfigurationMessage(platform),
         '请先在电脑上配置 AI，并同步到此设备。',
       );
+      expect(
+        missingSyncBackendConfigurationMessage('请先在设置中配置对象存储。', platform),
+        '请先在电脑上配置存储，并同步到此设备。',
+      );
     }
+  });
+
+  test('desktop platforms keep the original storage configuration errors', () {
+    expect(
+      missingSyncBackendConfigurationMessage(
+        '请先在设置中配置对象存储。',
+        TargetPlatform.macOS,
+      ),
+      '请先在设置中配置对象存储。',
+    );
   });
 }

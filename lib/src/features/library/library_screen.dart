@@ -3798,7 +3798,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         final endpoint = _s3Endpoint;
         final bucket = _s3Bucket;
         if (endpoint == null || bucket == null) {
-          throw StateError('请先配置对象存储。');
+          throw StateError(missingSyncBackendConfigurationMessage('请先配置对象存储。'));
         }
         final accessKeyId =
             await _secureStorage.read(key: _s3AccessKeyIdKey) ?? '';
@@ -3816,11 +3816,17 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         );
       case _SyncBackendKind.directory:
         final path = _syncDirectory;
-        if (path == null) throw StateError('请先选择同步目录。');
+        if (path == null) {
+          throw StateError(missingSyncBackendConfigurationMessage('请先选择同步目录。'));
+        }
         return DirectorySyncBackend(Directory(path));
       case _SyncBackendKind.webDav:
         final url = _webDavUrl;
-        if (url == null) throw StateError('请先配置 WebDAV。');
+        if (url == null) {
+          throw StateError(
+            missingSyncBackendConfigurationMessage('请先配置 WebDAV。'),
+          );
+        }
         return WebDavSyncBackend(
           root: Uri.parse(url),
           username: _webDavUsername,
@@ -3945,6 +3951,12 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
     }
   }
 
+  bool get _hasConfiguredSyncBackend => switch (_syncBackend) {
+    _SyncBackendKind.s3 => _s3Endpoint != null,
+    _SyncBackendKind.directory => _syncDirectory != null,
+    _SyncBackendKind.webDav => _webDavUrl != null,
+  };
+
   String _aiTranslationStatus(AppStrings strings) {
     if (allowsExternalServiceConfiguration()) {
       return _aiBaseUrl == null
@@ -3956,9 +3968,65 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         : strings.text('已从电脑同步');
   }
 
+  String _mobileSyncStorageStatus(AppStrings strings) {
+    if (!_hasConfiguredSyncBackend) {
+      return strings.text('请先在电脑上配置对象存储和 AI，再扫描二维码同步到此设备');
+    }
+    return switch (_syncBackend) {
+      _SyncBackendKind.s3 =>
+        '${strings.text('已从电脑同步对象存储')}\n${_objectStorageSubtitle(strings)}',
+      _SyncBackendKind.webDav =>
+        '${strings.text('已从电脑同步 WebDAV')}\n${_webDavUrl ?? ''}',
+      _SyncBackendKind.directory => strings.text('已从电脑同步'),
+    };
+  }
+
+  Future<void> _openTrustedDevices([
+    TrustedDevicesInitialAction initialAction =
+        TrustedDevicesInitialAction.none,
+  ]) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => TrustedDevicesScreen(initialAction: initialAction),
+      ),
+    );
+    await _loadSettingsPreferences();
+  }
+
+  List<Widget> _pairingSettingsTiles(AppStrings strings) => [
+    ListTile(
+      leading: const Icon(Icons.qr_code_2),
+      title: Text(strings.text(canScanPairingQr() ? '扫描配对二维码' : '生成配对二维码')),
+      subtitle: Text(
+        strings.text(
+          canScanPairingQr()
+              ? '扫描电脑上的二维码，同步已配置的存储、AI 和阅读设置'
+              : '手机扫描后即可同步这台电脑上的存储、AI 和阅读配置',
+        ),
+      ),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => unawaited(
+        _openTrustedDevices(
+          canScanPairingQr()
+              ? TrustedDevicesInitialAction.scan
+              : TrustedDevicesInitialAction.host,
+        ),
+      ),
+    ),
+    ListTile(
+      leading: const Icon(Icons.devices_other),
+      title: Text(strings.text('我的同步设备')),
+      subtitle: Text(strings.text('配对新设备，自动迁移配置、凭据和书库数据')),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => unawaited(_openTrustedDevices()),
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
+    final desktopConfig = allowsExternalServiceConfiguration();
     return ListView(
       children: [
         ListTile(
@@ -4182,6 +4250,15 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
           },
         ),
         const Divider(),
+        if (!desktopConfig) ...[
+          ..._pairingSettingsTiles(strings),
+          ListTile(
+            leading: const Icon(Icons.cloud_outlined),
+            title: Text(strings.text('同步存储')),
+            subtitle: Text(_mobileSyncStorageStatus(strings)),
+            isThreeLine: true,
+          ),
+        ],
         SwitchListTile(
           secondary: const Icon(Icons.sync_lock),
           title: Text(strings.text('自动同步')),
@@ -4210,27 +4287,27 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
             if (mounted) setState(() => _syncNotifications = value);
           },
         ),
-        ListTile(
-          leading: const Icon(Icons.lan_outlined),
-          title: Text(strings.text('HTTP/HTTPS 代理')),
-          subtitle: Text(
-            _proxyHost == null
-                ? strings.text('未启用')
-                : '$_proxyHost:${_proxyPort ?? ''}',
+        if (desktopConfig)
+          ListTile(
+            leading: const Icon(Icons.lan_outlined),
+            title: Text(strings.text('HTTP/HTTPS 代理')),
+            subtitle: Text(
+              _proxyHost == null
+                  ? strings.text('未启用')
+                  : '$_proxyHost:${_proxyPort ?? ''}',
+            ),
+            trailing: TextButton(
+              onPressed: _busy ? null : _configureProxy,
+              child: Text(strings.text('配置')),
+            ),
           ),
-          trailing: TextButton(
-            onPressed: _busy ? null : _configureProxy,
-            child: Text(strings.text('配置')),
-          ),
-        ),
         const Divider(),
         ListTile(
           leading: const Icon(Icons.translate),
           title: Text(strings.text('AI 上下文翻译')),
           subtitle: Text(_aiTranslationStatus(strings)),
-          isThreeLine:
-              !allowsExternalServiceConfiguration() || _aiBaseUrl != null,
-          trailing: allowsExternalServiceConfiguration()
+          isThreeLine: !desktopConfig || _aiBaseUrl != null,
+          trailing: desktopConfig
               ? TextButton(
                   onPressed: _busy ? null : _configureAi,
                   child: Text(strings.text('配置')),
@@ -4247,7 +4324,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
             MaterialPageRoute<void>(builder: (_) => const AiAssistantScreen()),
           ),
         ),
-        if (allowsExternalServiceConfiguration())
+        if (desktopConfig)
           ListTile(
             leading: const Icon(Icons.tune),
             title: Text(strings.text('AI Provider、Prompt 与 Tools')),
@@ -4257,19 +4334,20 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
             trailing: const Icon(Icons.chevron_right),
             onTap: _busy ? null : _configureAiAdvanced,
           ),
-        ListTile(
-          leading: const Icon(Icons.edit_note),
-          title: Text(strings.text('AI Prompt 管理')),
-          subtitle: Text(strings.text('编辑内置 Prompt，添加或删除用户 Prompt')),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute<void>(
-              builder: (_) => const AiPromptManagerScreen(),
+        if (desktopConfig)
+          ListTile(
+            leading: const Icon(Icons.edit_note),
+            title: Text(strings.text('AI Prompt 管理')),
+            subtitle: Text(strings.text('编辑内置 Prompt，添加或删除用户 Prompt')),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => const AiPromptManagerScreen(),
+              ),
             ),
           ),
-        ),
-        if (allowsExternalServiceConfiguration()) ...[
+        if (desktopConfig) ...[
           ListTile(
             leading: const Icon(Icons.fact_check_outlined),
             title: Text(strings.text('检测 AI 模型')),
@@ -4296,25 +4374,27 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
             ),
           ),
         ],
-        const Divider(),
-        ListTile(
-          leading: const Icon(Icons.archive_outlined),
-          title: Text(strings.text('完整备份')),
-          subtitle: Text(strings.text('导出数据库、操作日志、书籍和封面，并附带 SHA-256 完整性信息')),
-          trailing: TextButton(
-            onPressed: _busy ? null : _exportBackup,
-            child: Text(strings.text('导出')),
+        if (desktopConfig) ...[
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.archive_outlined),
+            title: Text(strings.text('完整备份')),
+            subtitle: Text(strings.text('导出数据库、操作日志、书籍和封面，并附带 SHA-256 完整性信息')),
+            trailing: TextButton(
+              onPressed: _busy ? null : _exportBackup,
+              child: Text(strings.text('导出')),
+            ),
           ),
-        ),
-        ListTile(
-          leading: const Icon(Icons.settings_backup_restore),
-          title: Text(strings.text('恢复备份')),
-          subtitle: Text(strings.text('先校验、再原子恢复；恢复的操作日志会重新参与同步')),
-          trailing: TextButton(
-            onPressed: _busy ? null : _restoreBackup,
-            child: Text(strings.text('恢复')),
+          ListTile(
+            leading: const Icon(Icons.settings_backup_restore),
+            title: Text(strings.text('恢复备份')),
+            subtitle: Text(strings.text('先校验、再原子恢复；恢复的操作日志会重新参与同步')),
+            trailing: TextButton(
+              onPressed: _busy ? null : _restoreBackup,
+              child: Text(strings.text('恢复')),
+            ),
           ),
-        ),
+        ],
         const Divider(),
         ListTile(
           leading: const Icon(Icons.storage_outlined),
@@ -4346,65 +4426,67 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
           trailing: const Icon(Icons.chevron_right),
           onTap: _busy ? null : _manageFonts,
         ),
-        ListTile(
-          leading: const Icon(Icons.drive_file_move_outline),
-          title: Text(strings.text('自定义书籍数据目录')),
-          subtitle: Text(_customDirectory ?? strings.text('使用应用默认目录')),
-          trailing: TextButton(
-            onPressed: _busy ? null : _chooseDataDirectory,
-            child: Text(strings.text('迁移')),
+        if (desktopConfig) ...[
+          ListTile(
+            leading: const Icon(Icons.drive_file_move_outline),
+            title: Text(strings.text('自定义书籍数据目录')),
+            subtitle: Text(_customDirectory ?? strings.text('使用应用默认目录')),
+            trailing: TextButton(
+              onPressed: _busy ? null : _chooseDataDirectory,
+              child: Text(strings.text('迁移')),
+            ),
           ),
-        ),
-        Wrap(
-          alignment: WrapAlignment.end,
-          spacing: 8,
-          children: [
-            TextButton.icon(
-              onPressed: _busy
-                  ? null
-                  : () => _runMaintenance(
-                      (service) => service.backfillMd5(),
-                      '已补算 MD5 本数',
-                    ),
-              icon: const Icon(Icons.fingerprint),
-              label: Text(strings.text('补算 MD5')),
-            ),
-            TextButton.icon(
-              onPressed: _busy
-                  ? null
-                  : () => _runMaintenance(
-                      (service) => service.repairMissingFileFlags(),
-                      '已修复缺失文件状态',
-                    ),
-              icon: const Icon(Icons.find_in_page_outlined),
-              label: Text(strings.text('修复缺失状态')),
-            ),
-            TextButton.icon(
-              onPressed: _busy
-                  ? null
-                  : () => _runMaintenance(
-                      (service) => service.clearOrphanFiles(),
-                      '已清理字节数',
-                    ),
-              icon: const Icon(Icons.cleaning_services_outlined),
-              label: Text(strings.text('清理孤立缓存')),
-            ),
-          ],
-        ),
-        const Divider(),
-        SwitchListTile(
-          secondary: const Icon(Icons.code_outlined),
-          title: Text(strings.text('EPUB JavaScript')),
-          subtitle: Text(strings.text('仅对信任的互动书籍开启；关闭可减少脚本风险')),
-          value: _epubJavaScript,
-          onChanged: (value) async {
-            await (await SharedPreferences.getInstance()).setBool(
-              'leeef.reader.epub_javascript',
-              value,
-            );
-            if (mounted) setState(() => _epubJavaScript = value);
-          },
-        ),
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            children: [
+              TextButton.icon(
+                onPressed: _busy
+                    ? null
+                    : () => _runMaintenance(
+                        (service) => service.backfillMd5(),
+                        '已补算 MD5 本数',
+                      ),
+                icon: const Icon(Icons.fingerprint),
+                label: Text(strings.text('补算 MD5')),
+              ),
+              TextButton.icon(
+                onPressed: _busy
+                    ? null
+                    : () => _runMaintenance(
+                        (service) => service.repairMissingFileFlags(),
+                        '已修复缺失文件状态',
+                      ),
+                icon: const Icon(Icons.find_in_page_outlined),
+                label: Text(strings.text('修复缺失状态')),
+              ),
+              TextButton.icon(
+                onPressed: _busy
+                    ? null
+                    : () => _runMaintenance(
+                        (service) => service.clearOrphanFiles(),
+                        '已清理字节数',
+                      ),
+                icon: const Icon(Icons.cleaning_services_outlined),
+                label: Text(strings.text('清理孤立缓存')),
+              ),
+            ],
+          ),
+          const Divider(),
+          SwitchListTile(
+            secondary: const Icon(Icons.code_outlined),
+            title: Text(strings.text('EPUB JavaScript')),
+            subtitle: Text(strings.text('仅对信任的互动书籍开启；关闭可减少脚本风险')),
+            value: _epubJavaScript,
+            onChanged: (value) async {
+              await (await SharedPreferences.getInstance()).setBool(
+                'leeef.reader.epub_javascript',
+                value,
+              );
+              if (mounted) setState(() => _epubJavaScript = value);
+            },
+          ),
+        ],
         ListTile(
           leading: const Icon(Icons.restart_alt),
           title: Text(strings.text('重置新手引导与提示')),
@@ -4446,153 +4528,128 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
             MaterialPageRoute<void>(builder: (_) => const OpdsScreen()),
           ),
         ),
-        const Divider(),
-        ListTile(
-          leading: const Icon(Icons.qr_code_2),
-          title: Text(strings.text(canScanPairingQr() ? '扫描配对二维码' : '生成配对二维码')),
-          subtitle: Text(
-            strings.text(
-              canScanPairingQr()
-                  ? '扫描电脑上的二维码，同步已配置的存储、AI 和阅读设置'
-                  : '手机扫描后即可同步这台电脑上的存储、AI 和阅读配置',
-            ),
-          ),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () async {
-            await Navigator.push(
-              context,
-              MaterialPageRoute<void>(
-                builder: (_) => TrustedDevicesScreen(
-                  initialAction: canScanPairingQr()
-                      ? TrustedDevicesInitialAction.scan
-                      : TrustedDevicesInitialAction.host,
+        if (desktopConfig) ...[
+          const Divider(),
+          ..._pairingSettingsTiles(strings),
+          ListTile(
+            leading: const Icon(Icons.cloud_outlined),
+            title: Text(strings.text('同步方式')),
+            trailing: DropdownButton<_SyncBackendKind>(
+              value: _syncBackend,
+              onChanged: _busy
+                  ? null
+                  : (value) {
+                      if (value != null) _setBackend(value);
+                    },
+              items: [
+                DropdownMenuItem(
+                  value: _SyncBackendKind.s3,
+                  child: Text(strings.text('对象存储')),
                 ),
+                DropdownMenuItem(
+                  value: _SyncBackendKind.directory,
+                  child: Text(strings.text('共享目录')),
+                ),
+                DropdownMenuItem(
+                  value: _SyncBackendKind.webDav,
+                  child: Text('WebDAV'),
+                ),
+              ],
+            ),
+          ),
+          if (_syncBackend == _SyncBackendKind.s3)
+            ListTile(
+              leading: const Icon(Icons.cloud_queue),
+              title: Text(strings.text('对象存储')),
+              subtitle: Text(_objectStorageSubtitle(strings)),
+              isThreeLine: _s3Endpoint != null,
+              trailing: TextButton(
+                onPressed: _busy ? null : _configureS3,
+                child: Text(strings.text('配置')),
               ),
-            );
-            await _loadSettingsPreferences();
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.devices_other),
-          title: Text(strings.text('我的同步设备')),
-          subtitle: Text(strings.text('配对新设备，自动迁移配置、凭据和书库数据')),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () async {
-            await Navigator.push(
-              context,
-              MaterialPageRoute<void>(
-                builder: (_) => const TrustedDevicesScreen(),
+            ),
+          if (_syncBackend == _SyncBackendKind.s3)
+            ListTile(
+              leading: const Icon(Icons.fact_check_outlined),
+              title: Text(strings.text('检测对象存储')),
+              subtitle: Text(strings.text('验证签名、条件写入、上传、下载、列举和删除')),
+              trailing: TextButton(
+                onPressed: _busy || _s3Endpoint == null
+                    ? null
+                    : _testBackendCapabilities,
+                child: Text(strings.text('检测')),
               ),
-            );
-            await _loadSettingsPreferences();
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.cloud_outlined),
-          title: Text(strings.text('同步方式')),
-          trailing: DropdownButton<_SyncBackendKind>(
-            value: _syncBackend,
-            onChanged: _busy
-                ? null
-                : (value) {
-                    if (value != null) _setBackend(value);
-                  },
-            items: [
-              DropdownMenuItem(
-                value: _SyncBackendKind.s3,
-                child: Text(strings.text('对象存储')),
+            ),
+          if (_syncBackend == _SyncBackendKind.directory)
+            ListTile(
+              leading: const Icon(Icons.folder_outlined),
+              title: Text(strings.text('同步目录')),
+              subtitle: Text(
+                _syncDirectory ?? strings.text('尚未选择，可使用共享目录或网络盘'),
               ),
-              DropdownMenuItem(
-                value: _SyncBackendKind.directory,
-                child: Text(strings.text('共享目录')),
+              trailing: TextButton(
+                onPressed: _busy ? null : _chooseDirectory,
+                child: Text(strings.text('选择')),
               ),
-              DropdownMenuItem(
-                value: _SyncBackendKind.webDav,
-                child: Text('WebDAV'),
+            ),
+          if (_syncBackend == _SyncBackendKind.webDav)
+            ListTile(
+              leading: const Icon(Icons.dns_outlined),
+              title: Text(strings.text('WebDAV 服务器')),
+              subtitle: Text(
+                _webDavUrl == null
+                    ? strings.text('尚未配置')
+                    : '${_webDavUrl!}\n${_webDavUsername?.isEmpty ?? true ? strings.text('匿名访问') : _webDavUsername}',
               ),
-            ],
-          ),
-        ),
-        if (_syncBackend == _SyncBackendKind.s3)
-          ListTile(
-            leading: const Icon(Icons.cloud_queue),
-            title: Text(strings.text('对象存储')),
-            subtitle: Text(_objectStorageSubtitle(strings)),
-            isThreeLine: _s3Endpoint != null,
-            trailing: TextButton(
-              onPressed: _busy ? null : _configureS3,
-              child: Text(strings.text('配置')),
+              isThreeLine: _webDavUrl != null,
+              trailing: TextButton(
+                onPressed: _busy ? null : _configureWebDav,
+                child: Text(strings.text('配置')),
+              ),
             ),
-          ),
-        if (_syncBackend == _SyncBackendKind.s3)
-          ListTile(
-            leading: const Icon(Icons.fact_check_outlined),
-            title: Text(strings.text('检测对象存储')),
-            subtitle: Text(strings.text('验证签名、条件写入、上传、下载、列举和删除')),
-            trailing: TextButton(
-              onPressed: _busy || _s3Endpoint == null
-                  ? null
-                  : _testBackendCapabilities,
-              child: Text(strings.text('检测')),
+          if (_syncBackend == _SyncBackendKind.webDav)
+            ListTile(
+              leading: const Icon(Icons.fact_check_outlined),
+              title: Text(strings.text('检测 WebDAV 能力')),
+              subtitle: Text(strings.text('验证目录、上传、下载、条件写入、列举和删除')),
+              trailing: TextButton(
+                onPressed: _busy || _webDavUrl == null
+                    ? null
+                    : _testBackendCapabilities,
+                child: Text(strings.text('检测')),
+              ),
             ),
-          ),
-        if (_syncBackend == _SyncBackendKind.directory)
-          ListTile(
-            leading: const Icon(Icons.folder_outlined),
-            title: Text(strings.text('同步目录')),
-            subtitle: Text(_syncDirectory ?? strings.text('尚未选择，可使用共享目录或网络盘')),
-            trailing: TextButton(
-              onPressed: _busy ? null : _chooseDirectory,
-              child: Text(strings.text('选择')),
-            ),
-          ),
-        if (_syncBackend == _SyncBackendKind.webDav)
-          ListTile(
-            leading: const Icon(Icons.dns_outlined),
-            title: Text(strings.text('WebDAV 服务器')),
-            subtitle: Text(
-              _webDavUrl == null
-                  ? strings.text('尚未配置')
-                  : '${_webDavUrl!}\n${_webDavUsername?.isEmpty ?? true ? strings.text('匿名访问') : _webDavUsername}',
-            ),
-            isThreeLine: _webDavUrl != null,
-            trailing: TextButton(
-              onPressed: _busy ? null : _configureWebDav,
-              child: Text(strings.text('配置')),
-            ),
-          ),
-        if (_syncBackend == _SyncBackendKind.webDav)
-          ListTile(
-            leading: const Icon(Icons.fact_check_outlined),
-            title: Text(strings.text('检测 WebDAV 能力')),
-            subtitle: Text(strings.text('验证目录、上传、下载、条件写入、列举和删除')),
-            trailing: TextButton(
-              onPressed: _busy || _webDavUrl == null
-                  ? null
-                  : _testBackendCapabilities,
-              child: Text(strings.text('检测')),
-            ),
-          ),
+        ],
         ListTile(
           leading: const Icon(Icons.sync),
           title: Text(strings.text('立即同步')),
-          subtitle: Text(strings.text('离线失败不会丢失变更，恢复连接后可安全重试')),
+          subtitle: Text(
+            strings.text(
+              !desktopConfig && !_hasConfiguredSyncBackend
+                  ? '请先扫描电脑上的二维码，同步存储和 AI 配置'
+                  : '离线失败不会丢失变更，恢复连接后可安全重试',
+            ),
+          ),
           trailing: _busy
               ? const SizedBox.square(
                   dimension: 20,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : FilledButton.tonal(
-                  onPressed:
-                      (_syncBackend == _SyncBackendKind.directory &&
-                              _syncDirectory == null) ||
-                          (_syncBackend == _SyncBackendKind.s3 &&
-                              _s3Endpoint == null) ||
-                          (_syncBackend == _SyncBackendKind.webDav &&
-                              _webDavUrl == null)
+                  onPressed: _hasConfiguredSyncBackend
+                      ? _synchronize
+                      : desktopConfig
                       ? null
-                      : _synchronize,
-                  child: Text(strings.text('同步')),
+                      : () => unawaited(
+                          _openTrustedDevices(TrustedDevicesInitialAction.scan),
+                        ),
+                  child: Text(
+                    strings.text(
+                      !desktopConfig && !_hasConfiguredSyncBackend
+                          ? '扫码同步'
+                          : '同步',
+                    ),
+                  ),
                 ),
         ),
         ListTile(
@@ -4600,14 +4657,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
           title: Text(strings.text('批量下载云端书籍')),
           subtitle: Text(strings.text('下载所有仅保留在同步后端、当前设备尚无副本的书籍')),
           trailing: FilledButton.tonal(
-            onPressed:
-                _busy ||
-                    (_syncBackend == _SyncBackendKind.directory &&
-                        _syncDirectory == null) ||
-                    (_syncBackend == _SyncBackendKind.s3 &&
-                        _s3Endpoint == null) ||
-                    (_syncBackend == _SyncBackendKind.webDav &&
-                        _webDavUrl == null)
+            onPressed: _busy || !_hasConfiguredSyncBackend
                 ? null
                 : _downloadCloudBooks,
             child: Text(strings.text('全部下载')),

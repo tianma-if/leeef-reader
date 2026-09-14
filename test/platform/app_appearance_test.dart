@@ -22,6 +22,8 @@ void main() {
       'Configure on a computer; it will sync to this device',
     );
     expect(english.text('已从电脑同步'), 'Synced from a computer');
+    expect(english.text('同步存储'), 'Sync storage');
+    expect(english.text('扫码同步'), 'Scan to sync');
     expect(english.failure('读取书库', 'offline'), 'Load library failed: offline');
     expect(english.deleteExcerpts(3), 'Delete 3 excerpts?');
     expect(japanese.settings, '設定');

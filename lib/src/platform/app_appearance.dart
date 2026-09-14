@@ -528,6 +528,16 @@ class AppStrings {
     '尚未配置': 'Not configured',
     '在电脑上配置后会自动同步到此设备': 'Configure on a computer; it will sync to this device',
     '已从电脑同步': 'Synced from a computer',
+    '同步存储': 'Sync storage',
+    '请先在电脑上配置对象存储和 AI，再扫描二维码同步到此设备':
+        'Configure object storage and AI on a computer, then scan the QR code to sync them here',
+    '已从电脑同步对象存储': 'Object storage synced from a computer',
+    '已从电脑同步 WebDAV': 'WebDAV synced from a computer',
+    '请先在电脑上配置存储，并同步到此设备。':
+        'Configure storage on a computer and sync it to this device.',
+    '扫码同步': 'Scan to sync',
+    '请先扫描电脑上的二维码，同步存储和 AI 配置':
+        'Scan the QR code on your computer to sync storage and AI settings',
     '对话查询书库、总结、回顾、分析和生成思维导图':
         'Chat with your library, summarize, recap, analyze, and create mind maps',
     'AI Provider、Prompt 与 Tools': 'AI provider, prompts, and tools',
@@ -1198,6 +1208,14 @@ class AppStrings {
     '尚未配置': '未設定',
     '在电脑上配置后会自动同步到此设备': 'パソコンで設定すると、このデバイスに自動同期されます',
     '已从电脑同步': 'パソコンから同期済み',
+    '同步存储': '同期ストレージ',
+    '请先在电脑上配置对象存储和 AI，再扫描二维码同步到此设备':
+        'パソコンでオブジェクトストレージと AI を設定し、QR コードを読み取ってこのデバイスに同期してください',
+    '已从电脑同步对象存储': 'パソコンからオブジェクトストレージを同期済み',
+    '已从电脑同步 WebDAV': 'パソコンから WebDAV を同期済み',
+    '请先在电脑上配置存储，并同步到此设备。': '先にパソコンでストレージを設定し、このデバイスに同期してください。',
+    '扫码同步': 'スキャンして同期',
+    '请先扫描电脑上的二维码，同步存储和 AI 配置': 'パソコンの QR コードを読み取り、ストレージと AI 設定を同期してください',
     '对话查询书库、总结、回顾、分析和生成思维导图': 'ライブラリと対話し、要約・振り返り・分析・マインドマップ作成',
     'AI Provider、Prompt 与 Tools': 'AI プロバイダー、プロンプト、ツール',
     'Claude/Gemini 原生协议、推理强度、助手 Prompt 和上下文工具开关':

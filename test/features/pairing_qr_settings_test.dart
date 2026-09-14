@@ -42,6 +42,12 @@ void main() {
       await tester.tap(find.text('设置'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
+        find.text('AI Prompt 管理'),
+        300,
+        scrollable: find.byType(Scrollable).last,
+      );
+      expect(find.text('AI Prompt 管理'), findsOneWidget);
+      await tester.scrollUntilVisible(
         find.text('生成配对二维码'),
         300,
         scrollable: find.byType(Scrollable).last,
@@ -49,6 +55,9 @@ void main() {
       expect(find.text('生成配对二维码'), findsOneWidget);
       expect(find.text('扫描配对二维码'), findsNothing);
       expect(find.text('手机扫描后即可同步这台电脑上的存储、AI 和阅读配置'), findsOneWidget);
+      expect(find.text('同步方式'), findsOneWidget);
+      expect(find.text('对象存储'), findsWidgets);
+      expect(find.text('同步存储'), findsNothing);
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }

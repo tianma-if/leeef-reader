@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:leeef_reader/src/platform/app_secure_storage.dart';
+import 'package:leeef_reader/src/platform/external_service_configuration.dart';
 import 'package:leeef_reader/src/sync/directory_sync_backend.dart';
 import 'package:leeef_reader/src/sync/s3_sync_backend.dart';
 import 'package:leeef_reader/src/sync/sync_backend.dart';
@@ -16,11 +17,19 @@ Future<SyncBackend> loadConfiguredSyncBackend() async {
   switch (kind) {
     case 'directory':
       final path = preferences.getString('leeef.sync.directory');
-      if (path == null) throw StateError('请先在设置中选择同步目录。');
+      if (path == null) {
+        throw StateError(
+          missingSyncBackendConfigurationMessage('请先在设置中选择同步目录。'),
+        );
+      }
       return DirectorySyncBackend(Directory(path));
     case 'webDav':
       final url = preferences.getString('leeef.sync.webdav.url');
-      if (url == null) throw StateError('请先在设置中配置 WebDAV。');
+      if (url == null) {
+        throw StateError(
+          missingSyncBackendConfigurationMessage('请先在设置中配置 WebDAV。'),
+        );
+      }
       return WebDavSyncBackend(
         root: Uri.parse(url),
         username: preferences.getString('leeef.sync.webdav.username'),
@@ -30,7 +39,9 @@ Future<SyncBackend> loadConfiguredSyncBackend() async {
       final endpoint = preferences.getString('leeef.sync.s3.endpoint');
       final bucket = preferences.getString('leeef.sync.s3.bucket');
       if (endpoint == null || bucket == null) {
-        throw StateError('请先在设置中配置对象存储。');
+        throw StateError(
+          missingSyncBackendConfigurationMessage('请先在设置中配置对象存储。'),
+        );
       }
       return S3SyncBackend(
         endpoint: Uri.parse(endpoint),
