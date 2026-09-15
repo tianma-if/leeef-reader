@@ -270,6 +270,11 @@ Future<TxtReaderDocument> parseTxtDocumentInBackground(
   ),
 );
 
+double txtReadingProgress({required int offset, required int length}) {
+  if (length <= 0) return 0;
+  return (offset.clamp(0, length) / length).clamp(0.0, 1.0);
+}
+
 int txtPageIndexForOffset(List<TxtPage> pages, int offset) {
   if (pages.isEmpty) return 0;
   var lo = 0;

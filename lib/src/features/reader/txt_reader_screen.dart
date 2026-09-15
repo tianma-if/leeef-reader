@@ -81,6 +81,8 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
   bool _paginationRefreshScheduled = false;
   int _paginationGeneration = 0;
   bool _txtFullyLoaded = false;
+  double? _pendingSeekFraction;
+  int _estimatedCharCount = 0;
   int? _pendingPaginationOffset;
   bool _controlsVisible = readerChromeStartsVisible();
   bool _sidebarVisible = readerSidebarStartsVisible();
@@ -148,6 +150,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
         ),
       );
     }
+    unawaited(_persistProgress());
     _ttsController.dispose();
     _textScrollController.dispose();
     unawaited(WakelockPlus.disable());
@@ -226,7 +229,6 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     try {
       final path = widget.book.filePath;
       if (path == null) throw StateError('这本书尚未下载到本机。');
-      final openedAt = Stopwatch()..start();
       final preferencesFuture = ReaderPreferences.load();
       final bytesFuture = File(path).readAsBytes();
       final repositoryFuture = ref.read(libraryRepositoryProvider.future);
@@ -234,9 +236,6 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       unawaited(_loadImportedFont(preferences));
       unawaited(_applyReadingState(preferences));
       final bytes = await bytesFuture;
-      debugPrint(
-        'txt-open read ${openedAt.elapsedMilliseconds}ms bytes=${bytes.length}',
-      );
       if (!mounted) return;
       final repository = await repositoryFuture;
       _repository = repository;
@@ -245,11 +244,9 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       final offset = parseTxtLocator(
         progress?.locator,
       ).clamp(0, estimatedChars);
+      _estimatedCharCount = _estimateTxtLength(bytes);
       final prefixChars = (offset + 3500).clamp(1, 1 << 30);
       final prefix = decodeTxtPrefix(bytes, prefixChars);
-      debugPrint(
-        'txt-open prefix ${openedAt.elapsedMilliseconds}ms chars=${prefix.length}',
-      );
       final safeOffset = offset.clamp(0, prefix.length);
       _lastPersistedLocator = progress?.locator;
       if (!mounted) return;
@@ -271,10 +268,6 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
           extraBreaks: preferences.paragraphSpacing.round(),
         ),
       );
-      debugPrint(
-        'txt-open provisional ${openedAt.elapsedMilliseconds}ms '
-        'pages=${provisional.length} offset=$safeOffset',
-      );
       final document = TxtReaderDocument.fromText(
         prefix,
         includeCharacterPages: false,
@@ -291,13 +284,12 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
           _txtFullyLoaded = false;
         });
       }
-      debugPrint('txt-open first-paint ${openedAt.elapsedMilliseconds}ms');
       unawaited(
         _finishTxtOpen(
           bytes: bytes,
           prefix: prefix,
           chapterPattern: preferences.txtChapterPattern,
-          offset: safeOffset,
+          offset: offset,
         ),
       );
     } on Object catch (error) {
@@ -311,14 +303,30 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     required String chapterPattern,
     required int offset,
   }) async {
-    final full = await Isolate.run(() {
+    late final ({String text, List<TxtChapter> chapters}) full;
+    try {
+      full = await Isolate.run(() {
+        final text = decodeTxtBytes(bytes);
+        final chapters = extractTxtChapters(
+          text,
+          chapterPattern: chapterPattern,
+        );
+        return (text: text, chapters: chapters);
+      });
+    } on Object {
+      if (!mounted) return;
       final text = decodeTxtBytes(bytes);
-      final chapters = extractTxtChapters(text, chapterPattern: chapterPattern);
-      return (text: text, chapters: chapters);
-    });
+      full = (
+        text: text,
+        chapters: extractTxtChapters(text, chapterPattern: chapterPattern),
+      );
+    }
     if (!mounted) return;
     final document = _document;
-    if (document == null || document.text != prefix) return;
+    if (document == null) return;
+    final seekOffset = _pendingSeekFraction == null
+        ? (_pendingPaginationOffset ?? offset)
+        : (_pendingSeekFraction! * full.text.length).round();
     setState(() {
       _paginationGeneration++;
       _paginatedPages = null;
@@ -329,9 +337,46 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
         pages: [TxtPage(start: 0, end: full.text.length, text: '')],
         chapters: full.chapters,
       );
-      _pendingPaginationOffset = offset.clamp(0, full.text.length);
+      _pendingPaginationOffset = seekOffset.clamp(0, full.text.length);
+      _pendingSeekFraction = null;
       _cachedToc = const [];
       _txtFullyLoaded = true;
+      _estimatedCharCount = full.text.length;
+    });
+  }
+
+  int _estimateTxtLength(Uint8List bytes) {
+    if (bytes.isEmpty) return 1;
+    final sampleEnd = bytes.length < 4096 ? bytes.length : 4096;
+    try {
+      utf8.decode(bytes.sublist(0, sampleEnd));
+      return bytes.length;
+    } on FormatException {
+      return (bytes.length / 2).round().clamp(1, 1 << 30);
+    }
+  }
+
+  int get _bookCharCount {
+    final document = _document;
+    if (_txtFullyLoaded && document != null && document.text.isNotEmpty) {
+      return document.text.length;
+    }
+    return _estimatedCharCount <= 0 ? 1 : _estimatedCharCount;
+  }
+
+  void _seekWholeBook(double value) {
+    final fraction = value.clamp(0.0, 1.0);
+    final document = _document;
+    if (document == null) return;
+    final total = _bookCharCount;
+    final offset = (fraction * total).round().clamp(0, total);
+    if (_txtFullyLoaded || offset <= document.text.length) {
+      _pendingSeekFraction = null;
+      _goToOffset(offset);
+      return;
+    }
+    setState(() {
+      _pendingSeekFraction = fraction;
     });
   }
 
@@ -346,6 +391,50 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     if (Platform.isAndroid || Platform.isIOS) {
       unawaited(HapticFeedback.selectionClick());
     }
+    _scheduleProgressSave();
+  }
+
+  int _readingOffset(TxtReaderDocument document) {
+    final pages = _pagesFor(document);
+    if (pages.isNotEmpty) {
+      return pages[_pageIndex.clamp(0, pages.length - 1)].start;
+    }
+    return (_pendingPaginationOffset ?? 0).clamp(0, document.text.length);
+  }
+
+  void _goToOffset(int offset) {
+    final document = _document;
+    if (document == null) return;
+    final safe = offset.clamp(0, document.text.length);
+    final laidOut = _paginatedPages;
+    if (laidOut != null && laidOut.isNotEmpty && safe < laidOut.last.end) {
+      _pendingPaginationOffset = safe;
+      _goToPage(txtPageIndexForOffset(laidOut, safe));
+      return;
+    }
+    final media = MediaQuery.sizeOf(context);
+    final contentSize = _pageLayout.contentSize(media);
+    final provisional = paginateTxtWindowForLayout(
+      text: document.text,
+      offset: safe,
+      maxWidth: contentSize.width,
+      maxHeight: contentSize.height,
+      style: _pageTextStyle,
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      textAlign: _pageTextAlign,
+      buildDisplayText: (source) => _buildDisplayTextWithSettings(
+        _chineseConverter.convert(source, _preferences.chineseConversion),
+        indent: _preferences.textIndent.round(),
+        extraBreaks: _preferences.paragraphSpacing.round(),
+      ),
+    );
+    setState(() {
+      _pendingPaginationOffset = safe;
+      _provisionalPages = provisional;
+      _pageIndex = txtPageIndexForOffset(provisional, safe);
+      _selection = null;
+    });
     _scheduleProgressSave();
   }
 
@@ -424,14 +513,17 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
     final document = _document;
     final repository = _repository;
     if (document == null || repository == null || !_txtFullyLoaded) return;
-    final page = _pagesFor(document)[_pageIndex];
-    final locator = txtLocator(page.start);
+    final offset = _readingOffset(document);
+    final locator = txtLocator(offset);
     if (locator == _lastPersistedLocator) return;
     await repository.updateReadingProgress(
       bookId: widget.book.id,
       location: ReadingLocation(
         locator: locator,
-        progress: document.text.isEmpty ? 0 : page.start / document.text.length,
+        progress: txtReadingProgress(
+          offset: offset,
+          length: document.text.length,
+        ),
         page: _pageIndex + 1,
       ),
     );
@@ -1644,11 +1736,14 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
         publishWhenCoveringOffset: currentOffset,
         onPartial: (partial) {
           if (!mounted || generation != _paginationGeneration) return;
+          final liveOffset = _pendingPaginationOffset ?? currentOffset;
           setState(() {
             _paginatedPages = partial;
-            _provisionalPages = null;
+            if (partial.isNotEmpty && liveOffset < partial.last.end) {
+              _provisionalPages = null;
+              _pageIndex = txtPageIndexForOffset(partial, liveOffset);
+            }
             _cachedToc = const [];
-            _pageIndex = txtPageIndexForOffset(partial, currentOffset);
           });
         },
         buildDisplayText: buildDisplay,
@@ -1676,7 +1771,10 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       _paginationBodySize = bodySize;
       _displayTextCache.clear();
       _convertedPageCache.clear();
-      _pageIndex = txtPageIndexForOffset(completedPages, currentOffset);
+      _pageIndex = txtPageIndexForOffset(
+        completedPages,
+        _pendingPaginationOffset ?? currentOffset,
+      );
       _pendingPaginationOffset = null;
       _history.reset(_pageIndex);
     });
@@ -1717,16 +1815,22 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
         : pages.isEmpty
         ? null
         : pages[_pageIndex.clamp(0, pages.length - 1)];
+    final readingOffset = document == null ? 0 : _readingOffset(document);
     final chapter = document == null
         ? null
-        : _chapterAt(
-            document,
-            pages[_pageIndex].start,
-            defaultLabel: strings.text('正文'),
-          );
-    final progress = document == null || pages.isEmpty
+        : _chapterAt(document, readingOffset, defaultLabel: strings.text('正文'));
+    final wholeBookPages =
+        document != null &&
+        _paginatedPages != null &&
+        _paginatedPages!.isNotEmpty &&
+        _paginatedPages!.last.end >= document.text.length;
+    final progress = document == null
         ? 0.0
-        : (_pageIndex + 1) / pages.length;
+        : (_pendingSeekFraction ??
+              txtReadingProgress(
+                offset: readingOffset,
+                length: _bookCharCount,
+              ));
     final headerText = switch (_preferences.headerContent) {
       'chapter' => chapter ?? widget.book.title,
       'progress' => '${(progress * 100).round()}%',
@@ -1736,16 +1840,23 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       'progress' => '${(progress * 100).round()}%',
       'chapter' => chapter ?? widget.book.title,
       'time' => _txtReaderClock(),
-      _ => document == null ? '—' : '${_pageIndex + 1} / ${pages.length}',
+      _ =>
+        wholeBookPages
+            ? '${_pageIndex + 1} / ${pages.length}'
+            : document == null
+            ? '—'
+            : '${(progress * 100).round()}%',
     };
     final toc = document == null
         ? const <ReaderSidebarTocItem>[]
         : _txtTocItems(document);
-    final pageLabel = readerPageFractionLabel(
-      current: document == null ? null : _pageIndex + 1,
-      total: pages.isEmpty ? null : pages.length,
-      progress: progress,
-    );
+    final pageLabel = wholeBookPages
+        ? readerPageFractionLabel(
+            current: _pageIndex + 1,
+            total: pages.length,
+            progress: progress,
+          )
+        : readerPageFractionLabel(progress: progress);
     final PreferredSizeWidget appBar = isDesktopReaderPlatform()
         ? AppBar(
             primary: false,
@@ -1862,10 +1973,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
             ? null
             : () => unawaited(_prepareTurn(_pageIndex + 1)),
         onToc: document == null ? null : () => _openSidebar(),
-        onSeekProgress: (value) {
-          if (pages.isEmpty) return;
-          _goToPage((value.clamp(0.0, 1.0) * (pages.length - 1)).round());
-        },
+        onSeekProgress: document == null ? null : _seekWholeBook,
         onOpenFullSettings: () => unawaited(_showReadingSettings()),
         onTts: Platform.isIOS || document == null ? null : _showTts,
         onHistoryBack: _history.canGoBack

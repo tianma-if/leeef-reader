@@ -115,6 +115,13 @@ void main() {
     ]);
   });
 
+  test('txtReadingProgress is whole-book offset, not page count', () {
+    expect(txtReadingProgress(offset: 0, length: 1000), 0);
+    expect(txtReadingProgress(offset: 250, length: 1000), 0.25);
+    expect(txtReadingProgress(offset: 1000, length: 1000), 1);
+    expect(txtReadingProgress(offset: 50, length: 0), 0);
+  });
+
   test('txtPageIndexForOffset binary-searches ordered pages', () {
     const pages = [
       TxtPage(start: 0, end: 10, text: '0123456789'),
