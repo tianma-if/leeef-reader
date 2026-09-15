@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
 class AppLog {
@@ -11,7 +12,18 @@ class AppLog {
     final directory = Directory('${support.path}/leeef/logs');
     await directory.create(recursive: true);
     _file = File('${directory.path}/leeef.log');
-    await info('application started');
+    await info('application started ${await installedVersionLabel()}');
+  }
+
+  static Future<String> installedVersionLabel() async {
+    try {
+      final package = await PackageInfo.fromPlatform();
+      if (package.version.isEmpty) return 'unknown';
+      if (package.buildNumber.isEmpty) return package.version;
+      return '${package.version}+${package.buildNumber}';
+    } on Object {
+      return 'unknown';
+    }
   }
 
   static Future<void> info(String message) => _write('INFO', message);

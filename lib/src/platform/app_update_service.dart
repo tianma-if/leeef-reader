@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 class AppUpdateInfo {
@@ -43,7 +44,24 @@ class AppUpdateInfo {
 class AppUpdateService {
   const AppUpdateService();
 
+  @visibleForTesting
+  static Future<AppUpdateInfo> Function()? debugCheck;
+
+  Future<AppUpdateInfo?> peekLatest() async {
+    if (debugCheck == null &&
+        Platform.environment.containsKey('FLUTTER_TEST')) {
+      return null;
+    }
+    try {
+      return await check();
+    } on Object {
+      return null;
+    }
+  }
+
   Future<AppUpdateInfo> check() async {
+    final override = debugCheck;
+    if (override != null) return override();
     final package = await PackageInfo.fromPlatform();
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 12);

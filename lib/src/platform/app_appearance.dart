@@ -901,8 +901,7 @@ class AppStrings {
     '解散目录': 'フォルダを解散',
     '整理目录': 'フォルダを整理',
     '请先新建一个目录。': '先にフォルダを作成してください。',
-    '书籍不会被删除，只会移出这个目录。':
-        '本は削除されず、このフォルダから外されるだけです。',
+    '书籍不会被删除，只会移出这个目录。': '本は削除されず、このフォルダから外されるだけです。',
     '所有标签': 'すべてのタグ',
     '管理标签': 'タグを管理',
     '全部状态': 'すべての状態',
@@ -1728,6 +1727,17 @@ class AppStrings {
       : available
       ? '发现新版本 $version'
       : '已是最新版本';
+
+  String currentAppVersion(String version, [String? buildNumber]) {
+    final label = buildNumber == null || buildNumber.isEmpty
+        ? version
+        : _english
+        ? '$version ($buildNumber)'
+        : '$version（$buildNumber）';
+    if (_english) return 'Current version $label';
+    if (_japanese) return '現在のバージョン $label';
+    return '当前版本 $label';
+  }
 
   String updateDetails(String current, String latest, String notes) => _english
       ? 'Current version: $current\nLatest version: $latest\n\n$notes'

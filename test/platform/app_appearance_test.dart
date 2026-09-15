@@ -25,7 +25,16 @@ void main() {
     expect(english.text('同步存储'), 'Sync storage');
     expect(english.text('扫码同步'), 'Scan to sync');
     expect(english.failure('读取书库', 'offline'), 'Load library failed: offline');
+    expect(
+      english.currentAppVersion('1.6.0', '23'),
+      'Current version 1.6.0 (23)',
+    );
     expect(english.deleteExcerpts(3), 'Delete 3 excerpts?');
+    expect(
+      AppStrings(const Locale('zh')).currentAppVersion('1.6.0', '23'),
+      '当前版本 1.6.0（23）',
+    );
+    expect(japanese.currentAppVersion('1.6.0', '23'), '現在のバージョン 1.6.0（23）');
     expect(japanese.settings, '設定');
     expect(japanese.text('AI 阅读助手'), 'AI 読書アシスタント');
     expect(japanese.text('界面语言'), '表示言語');

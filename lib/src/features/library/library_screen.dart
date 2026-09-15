@@ -44,6 +44,7 @@ import 'package:leeef_reader/src/platform/app_notifications.dart';
 import 'package:leeef_reader/src/platform/app_proxy.dart';
 import 'package:leeef_reader/src/platform/app_update_service.dart';
 import 'package:leeef_reader/src/platform/desktop_auto_update_service.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
@@ -2498,12 +2499,36 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
   int? _proxyPort;
   bool _developerMode = false;
   bool _epubJavaScript = false;
+  String? _appVersion;
+  String? _appBuildNumber;
+  AppUpdateInfo? _latestUpdate;
 
   @override
   void initState() {
     super.initState();
     unawaited(_loadSettingsPreferences());
     unawaited(_refreshStorage());
+    unawaited(_loadAppVersion());
+    unawaited(_refreshLatestVersion());
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final package = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() {
+        _appVersion = package.version;
+        _appBuildNumber = package.buildNumber;
+      });
+    } on Object {
+      // Keep the update row usable if package metadata is unavailable.
+    }
+  }
+
+  Future<void> _refreshLatestVersion() async {
+    final update = await const AppUpdateService().peekLatest();
+    if (!mounted || update == null) return;
+    setState(() => _latestUpdate = update);
   }
 
   Future<void> _loadSettingsPreferences() async {
@@ -2938,6 +2963,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
       }
       final update = await const AppUpdateService().check();
       if (!mounted) return;
+      setState(() => _latestUpdate = update);
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
@@ -3981,6 +4007,29 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         : strings.text('已从电脑同步');
   }
 
+  String? _latestReleaseStatus(AppStrings strings) {
+    final latest = _latestUpdate;
+    if (latest == null) return null;
+    return strings.updateTitle(latest.updateAvailable, latest.latestVersion);
+  }
+
+  Widget _updateSettingsTile({
+    required AppStrings strings,
+    required String status,
+    required Widget trailing,
+  }) {
+    final version = _appVersion;
+    final versionTitle = version == null || version.isEmpty
+        ? null
+        : strings.currentAppVersion(version, _appBuildNumber);
+    return ListTile(
+      leading: const Icon(Icons.system_update_outlined),
+      title: Text(versionTitle ?? strings.text('检查更新与变更日志')),
+      subtitle: Text(strings.text(status)),
+      trailing: trailing,
+    );
+  }
+
   String _mobileSyncStorageStatus(AppStrings strings) {
     if (!_hasConfiguredSyncBackend) {
       return strings.text('请先在电脑上配置对象存储和 AI，再扫描二维码同步到此设备');
@@ -4204,7 +4253,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
                 AndroidUpdateStage.downloading => '新版本正在后台下载',
                 AndroidUpdateStage.ready => '新版本已下载，重启即可安装',
                 AndroidUpdateStage.installing => '正在安装更新',
-                _ => '通过 Google Play 获取应用更新',
+                _ => _latestReleaseStatus(strings) ?? '通过 Google Play 获取应用更新',
               };
               final Widget trailing = switch (updateState.stage) {
                 AndroidUpdateStage.available => FilledButton.tonalIcon(
@@ -4229,10 +4278,9 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
                   child: Text(strings.text('检查')),
                 ),
               };
-              return ListTile(
-                leading: const Icon(Icons.system_update_outlined),
-                title: Text(strings.text('检查更新与变更日志')),
-                subtitle: Text(strings.text(subtitle)),
+              return _updateSettingsTile(
+                strings: strings,
+                status: subtitle,
                 trailing: trailing,
               );
             }
@@ -4241,12 +4289,13 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
               DesktopUpdateStage.checking => '正在后台检查更新',
               DesktopUpdateStage.downloading => '新版本正在后台下载',
               DesktopUpdateStage.ready => '新版本已下载，重启即可安装',
-              _ => '从 GitHub Releases 获取最新版本和发布说明',
+              _ =>
+                _latestReleaseStatus(strings) ??
+                    '从 GitHub Releases 获取最新版本和发布说明',
             };
-            return ListTile(
-              leading: const Icon(Icons.system_update_outlined),
-              title: Text(strings.text('检查更新与变更日志')),
-              subtitle: Text(strings.text(subtitle)),
+            return _updateSettingsTile(
+              strings: strings,
+              status: subtitle,
               trailing: updateState.isReady
                   ? FilledButton.tonalIcon(
                       onPressed: DesktopAutoUpdateService
