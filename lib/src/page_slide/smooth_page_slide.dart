@@ -25,6 +25,7 @@ class SmoothPageSlide extends StatefulWidget {
     this.swapTapZones = false,
     this.leftZoneKey,
     this.rightZoneKey,
+    this.pageCacheKey,
   });
 
   final int pageIndex;
@@ -37,6 +38,12 @@ class SmoothPageSlide extends StatefulWidget {
   final bool swapTapZones;
   final Key? leftZoneKey;
   final Key? rightZoneKey;
+
+  /// When this identity changes, frozen page widgets are rebuilt.
+  ///
+  /// Unrelated parent rebuilds (insets, clocks, pagination) must keep the
+  /// same key so already-rasterized pages are not laid out again mid-swipe.
+  final Object? pageCacheKey;
 
   @override
   State<SmoothPageSlide> createState() => _SmoothPageSlideState();
@@ -53,6 +60,8 @@ class _SmoothPageSlideState extends State<SmoothPageSlide>
   double _dragAccumulated = 0;
   bool _settling = false;
   int _activeIndex = 0;
+  Object? _cachedKey;
+  final Map<int, Widget> _pages = {};
   Widget? _cachedPrev;
   Widget? _cachedCurrent;
   Widget? _cachedNext;
@@ -82,10 +91,7 @@ class _SmoothPageSlideState extends State<SmoothPageSlide>
       _activeIndex = widget.pageIndex;
       _offset.value = 0;
     }
-    // Recache on every rebuild so paint-only changes (night/day paper)
-    // replace the frozen page widgets. Skipping this leaves the old
-    // colors on screen until the user turns the page.
-    _cachePages();
+    _cachePages(force: oldWidget.pageCacheKey != widget.pageCacheKey);
   }
 
   @override
@@ -189,12 +195,26 @@ class _SmoothPageSlideState extends State<SmoothPageSlide>
     child: RepaintBoundary(child: widget.pageBuilder(context, index)),
   );
 
-  void _cachePages() {
-    _cachedPrev = _activeIndex > 0 ? _page(_activeIndex - 1) : null;
-    _cachedCurrent = widget.pageCount > 0 ? _page(_activeIndex) : null;
-    _cachedNext = _activeIndex + 1 < widget.pageCount
-        ? _page(_activeIndex + 1)
-        : null;
+  void _cachePages({bool force = false}) {
+    if (force || _cachedKey != widget.pageCacheKey) {
+      _pages.clear();
+      _cachedKey = widget.pageCacheKey;
+    }
+    final needed = <int>{};
+    if (_activeIndex > 0) needed.add(_activeIndex - 1);
+    if (widget.pageCount > 0 &&
+        _activeIndex >= 0 &&
+        _activeIndex < widget.pageCount) {
+      needed.add(_activeIndex);
+    }
+    if (_activeIndex + 1 < widget.pageCount) needed.add(_activeIndex + 1);
+    _pages.removeWhere((index, _) => !needed.contains(index));
+    for (final index in needed) {
+      _pages.putIfAbsent(index, () => _page(index));
+    }
+    _cachedPrev = _pages[_activeIndex - 1];
+    _cachedCurrent = _pages[_activeIndex];
+    _cachedNext = _pages[_activeIndex + 1];
   }
 
   void _handleTap(Offset origin, double width) {

@@ -106,6 +106,20 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
       ) &&
       (widget.interactiveSlideEnabled ?? true);
 
+  Object get _slidePageCacheKey => (
+    _preferences.txtLayoutFingerprint,
+    _preferences.background,
+    _preferences.foreground,
+    _preferences.eInkMode,
+    _preferences.backgroundImage,
+    _preferences.darkBackgroundImage,
+    _preferences.backgroundOpacity,
+    _preferences.backgroundBlur,
+    _preferences.backgroundFit,
+    Theme.of(context).brightness,
+    _ttsController.isPlaying ? _ttsController.currentSentence : '',
+  );
+
   bool get _usesPageSlide =>
       _preferences.flow == 'paginated' &&
       effectivePageTurnEffect(
@@ -2043,6 +2057,7 @@ class _TxtReaderScreenState extends ConsumerState<TxtReaderScreen> {
                           controller: _smoothSlideController,
                           pageIndex: _pageIndex,
                           pageCount: pages.length,
+                          pageCacheKey: _slidePageCacheKey,
                           onPageChanged: _onTxtPageViewChanged,
                           onCenterTap: () => setState(
                             () => _controlsVisible = !_controlsVisible,

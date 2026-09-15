@@ -70,6 +70,7 @@ void main() {
           child: SmoothPageSlide(
             pageIndex: 0,
             pageCount: 3,
+            pageCacheKey: color,
             onPageChanged: (_) {},
             pageBuilder: (context, index) =>
                 ColoredBox(color: color, child: Text('page-$index')),
@@ -91,6 +92,77 @@ void main() {
       tester.widget<ColoredBox>(find.byType(ColoredBox).last).color,
       Colors.black,
     );
+  });
+
+  testWidgets('a stable pageCacheKey keeps rasterized pages across rebuilds', (
+    tester,
+  ) async {
+    var builds = 0;
+    Widget frame() => MaterialApp(
+      home: Center(
+        child: SizedBox(
+          width: 320,
+          height: 480,
+          child: SmoothPageSlide(
+            pageIndex: 0,
+            pageCount: 3,
+            pageCacheKey: 'paper',
+            onPageChanged: (_) {},
+            pageBuilder: (context, index) {
+              builds++;
+              return Text('page-$index');
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(frame());
+    final afterFirst = builds;
+    expect(afterFirst, greaterThan(0));
+    await tester.pumpWidget(frame());
+    await tester.pump();
+    expect(builds, afterFirst);
+  });
+
+  testWidgets('turning the page only builds the incoming neighbor', (
+    tester,
+  ) async {
+    var page = 0;
+    final built = <int>[];
+    Widget frame() => MaterialApp(
+      home: Center(
+        child: SizedBox(
+          width: 320,
+          height: 480,
+          child: SmoothPageSlide(
+            pageIndex: page,
+            pageCount: 4,
+            pageCacheKey: 'paper',
+            onPageChanged: (index) => page = index,
+            pageBuilder: (context, index) {
+              built.add(index);
+              return Text('page-$index');
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(frame());
+    expect(built, [0, 1]);
+    built.clear();
+
+    final rect = tester.getRect(find.byType(SmoothPageSlide));
+    await tester.timedDragFrom(
+      Offset(rect.right - 24, rect.center.dy),
+      Offset(-rect.width * 0.7, 0),
+      const Duration(milliseconds: 280),
+    );
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(frame());
+    expect(page, 1);
+    expect(built, [2]);
   });
 
   testWidgets('right-edge tap turns the page', (tester) async {
