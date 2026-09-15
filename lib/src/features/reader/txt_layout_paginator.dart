@@ -57,6 +57,49 @@ List<TxtPage> paginateTxtForLayout({
 /// Text measurement must run on the UI isolate, but yielding between small
 /// batches lets pointer events and frames continue while a long novel is being
 /// prepared. A cancelled run returns `null` at the next page boundary.
+List<TxtPage> paginateTxtWindowForLayout({
+  required String text,
+  required int offset,
+  required double maxWidth,
+  required double maxHeight,
+  required TextStyle style,
+  required TextDirection textDirection,
+  required TxtDisplayTextBuilder buildDisplayText,
+  TextScaler textScaler = TextScaler.noScaling,
+  TextAlign textAlign = TextAlign.start,
+  int window = 3200,
+}) {
+  if (text.isEmpty) {
+    return const [TxtPage(start: 0, end: 0, text: '')];
+  }
+  final safeOffset = offset.clamp(0, text.length);
+  var start = safeOffset;
+  if (start > 0) {
+    final newline = text.lastIndexOf('\n', start - 1);
+    if (newline >= start - 240) start = newline + 1;
+  }
+  final end = (start + window).clamp(0, text.length);
+  final slice = text.substring(start, end);
+  final pages = paginateTxtForLayout(
+    text: slice,
+    maxWidth: maxWidth,
+    maxHeight: maxHeight,
+    style: style,
+    textDirection: textDirection,
+    buildDisplayText: buildDisplayText,
+    textScaler: textScaler,
+    textAlign: textAlign,
+  );
+  return [
+    for (final page in pages)
+      TxtPage(
+        start: start + page.start,
+        end: start + page.end,
+        text: page.text,
+      ),
+  ];
+}
+
 Future<List<TxtPage>?> paginateTxtForLayoutCooperatively({
   required String text,
   required double maxWidth,
@@ -68,6 +111,8 @@ Future<List<TxtPage>?> paginateTxtForLayoutCooperatively({
   TextAlign textAlign = TextAlign.start,
   int pagesPerBatch = 8,
   bool Function()? isCancelled,
+  int? publishWhenCoveringOffset,
+  void Function(List<TxtPage> pages)? onPartial,
 }) async {
   if (pagesPerBatch < 1) {
     throw ArgumentError.value(pagesPerBatch, 'pagesPerBatch');
@@ -76,6 +121,18 @@ Future<List<TxtPage>?> paginateTxtForLayoutCooperatively({
     return const [TxtPage(start: 0, end: 0, text: '')];
   }
   final pages = <TxtPage>[];
+  var published = false;
+  void maybePublish() {
+    if (published || onPartial == null || pages.isEmpty) return;
+    final offset = publishWhenCoveringOffset ?? 0;
+    final last = pages.last;
+    final covers =
+        offset < last.end || (offset >= text.length && last.end >= text.length);
+    if (!covers) return;
+    published = true;
+    onPartial(List<TxtPage>.from(pages));
+  }
+
   final paginator = _TxtLayoutPaginator(
     text: text,
     maxWidth: maxWidth,
@@ -92,6 +149,7 @@ Future<List<TxtPage>?> paginateTxtForLayoutCooperatively({
         if (isCancelled?.call() ?? false) return null;
         pages.add(paginator.nextPage());
       }
+      maybePublish();
       if (!paginator.isDone) {
         await Future<void>.delayed(Duration.zero);
       }

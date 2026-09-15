@@ -74,6 +74,60 @@ void main() {
     },
   );
 
+  test('utf-8 prefix decode matches the leading full-text characters', () {
+    final source = '第一章 开始\n${'正文内容。' * 200}';
+    final bytes = Uint8List.fromList(utf8.encode(source));
+    expect(decodeTxtPrefix(bytes, 7), source.substring(0, 7));
+    expect(decodeTxtPrefix(bytes, source.length), source);
+  });
+
+  test('gbk prefix decode keeps readable Chinese', () {
+    const source = '第一章 开始\n赵玉台手持白马尾拂尘走下钟楼。';
+    final bytes = Uint8List.fromList(const charset.GbkCodec().encode(source));
+    expect(decodeTxtPrefix(bytes, 6), '第一章 开始');
+    expect(decodeTxtPrefix(bytes, source.length), source);
+  });
+
+  test('text can be shown before chapters are extracted', () {
+    final document = TxtReaderDocument.fromText(
+      '第一章 开始\n正文内容。',
+      includeCharacterPages: false,
+      includeChapters: false,
+    );
+    expect(document.chapters, isEmpty);
+    expect(document.text, contains('正文内容'));
+    final withChapters = document.withChapters(
+      extractTxtChapters(document.text),
+    );
+    expect(withChapters.chapters.single.title, '第一章 开始');
+  });
+
+  test('skipping character pages still keeps chapter offsets', () {
+    final document = TxtReaderDocument.fromText(
+      '第一章 开始\n${'正文内容。' * 400}\n第二章 继续\n结尾',
+      includeCharacterPages: false,
+    );
+    expect(document.pages, hasLength(1));
+    expect(document.pages.single.text, isEmpty);
+    expect(document.chapters.map((chapter) => chapter.title), [
+      '第一章 开始',
+      '第二章 继续',
+    ]);
+  });
+
+  test('txtPageIndexForOffset binary-searches ordered pages', () {
+    const pages = [
+      TxtPage(start: 0, end: 10, text: '0123456789'),
+      TxtPage(start: 10, end: 20, text: 'abcdefghij'),
+      TxtPage(start: 20, end: 25, text: 'klmno'),
+    ];
+    expect(txtPageIndexForOffset(pages, 0), 0);
+    expect(txtPageIndexForOffset(pages, 9), 0);
+    expect(txtPageIndexForOffset(pages, 10), 1);
+    expect(txtPageIndexForOffset(pages, 24), 2);
+    expect(txtPageIndexForOffset(pages, 25), 2);
+  });
+
   test('stable offset locator restores the page and never splits emoji', () {
     final document = TxtReaderDocument.fromText(
       'abcd😀efghijkl',

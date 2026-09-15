@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leeef_reader/src/features/reader/txt_layout_paginator.dart';
+import 'package:leeef_reader/src/features/reader/txt_reader_document.dart';
 
 void main() {
   test('cooperative pagination yields to UI work between batches', () async {
@@ -22,6 +23,48 @@ void main() {
     expect(uiWorkRan, isTrue);
     expect(pages, isNotNull);
     expect(pages!.map((page) => page.text).join(), source);
+  });
+
+  test(
+    'cooperative pagination publishes pages as soon as the offset is covered',
+    () async {
+      final source = '当前页内容。' * 400 + '后面还有很多。' * 8000;
+      List<TxtPage>? early;
+      final full = await paginateTxtForLayoutCooperatively(
+        text: source,
+        maxWidth: 360,
+        maxHeight: 240,
+        style: const TextStyle(fontSize: 18, height: 1.6),
+        textDirection: TextDirection.ltr,
+        pagesPerBatch: 2,
+        publishWhenCoveringOffset: 0,
+        onPartial: (pages) => early ??= pages,
+        buildDisplayText: _identityDisplay,
+      );
+      expect(early, isNotNull);
+      expect(early, isNotEmpty);
+      expect(early!.first.start, 0);
+      expect(early!.length, lessThan(full!.length));
+      expect(full.map((page) => page.text).join(), source);
+    },
+  );
+
+  test('window pagination lays out only the current slice', () {
+    final source = '开头。' * 20000 + '当前位置正文。' * 80;
+    final offset = source.indexOf('当前位置正文。');
+    final pages = paginateTxtWindowForLayout(
+      text: source,
+      offset: offset,
+      maxWidth: 360,
+      maxHeight: 240,
+      style: const TextStyle(fontSize: 18, height: 1.6),
+      textDirection: TextDirection.ltr,
+      buildDisplayText: _identityDisplay,
+    );
+    expect(pages, isNotEmpty);
+    expect(pages.first.start, lessThanOrEqualTo(offset));
+    expect(pages.last.end, greaterThan(offset));
+    expect(pages.map((page) => page.text).join().length, lessThan(9000));
   });
 
   test('long novels are measured in bounded page-sized slices', () {
