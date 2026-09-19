@@ -14,19 +14,16 @@ export type LibraryBook = {
 }
 
 const DB_NAME = 'leeef-library'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 const openDb = () =>
   new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
     request.onupgradeneeded = () => {
       const db = request.result
-      if (!db.objectStoreNames.contains('meta')) {
-        db.createObjectStore('meta', { keyPath: 'id' })
-      }
-      if (!db.objectStoreNames.contains('files')) {
-        db.createObjectStore('files')
-      }
+      for (const name of [...db.objectStoreNames]) db.deleteObjectStore(name)
+      db.createObjectStore('meta', { keyPath: 'id' })
+      db.createObjectStore('files')
     }
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)

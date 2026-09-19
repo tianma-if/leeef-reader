@@ -794,7 +794,7 @@ export class Paginator extends HTMLElement {
         const delta = this.#vertical ? dy : dx
         const element = this.#container
         const { scrollProp } = this
-        const [offset, a, b] = this.#scrollBounds
+        const [offset, a, b] = this.#scrollBounds ?? [this.start, this.size, this.size]
         const rtl = this.#rtl
         const min = rtl ? offset - b : offset - a
         const max = rtl ? offset + a : offset + b
@@ -803,8 +803,9 @@ export class Paginator extends HTMLElement {
     }
     snap(vx, vy) {
         const velocity = this.#vertical ? vy : vx
-        const [offset, a, b] = this.#scrollBounds
+        const [offset, a, b] = this.#scrollBounds ?? [this.start, this.size, this.size]
         const { start, end, pages, size } = this
+        if (!pages || !size) return
         const min = Math.abs(offset) - a
         const max = Math.abs(offset) + b
         const d = velocity * (this.#rtl ? -size : size)

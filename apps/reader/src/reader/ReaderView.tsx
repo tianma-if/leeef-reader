@@ -22,12 +22,28 @@ const loadFoliate = () =>
     document.head.append(script)
   })
 
+const waitForSize = (element: HTMLElement) =>
+  new Promise<void>((resolve) => {
+    if (element.clientWidth > 0 && element.clientHeight > 0) {
+      resolve()
+      return
+    }
+    const observer = new ResizeObserver(() => {
+      if (element.clientWidth > 0 && element.clientHeight > 0) {
+        observer.disconnect()
+        resolve()
+      }
+    })
+    observer.observe(element)
+  })
+
 export function ReaderView({ book, onClose }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<FoliateViewElement | null>(null)
   const [title, setTitle] = useState(book.title)
   const [progress, setProgress] = useState(book.progress)
   const [error, setError] = useState<string | null>(null)
+  const [status, setStatus] = useState('正在打开…')
   const mobile = isMobileShell()
 
   useEffect(() => {
@@ -40,6 +56,8 @@ export function ReaderView({ book, onClose }: Props) {
       const bytes = await getBookFile(book.id)
       if (!bytes) throw new Error('找不到书籍文件')
       await loadFoliate()
+      if (cancelled) return
+      await waitForSize(host)
       if (cancelled) return
       view = document.createElement('foliate-view')
       view.setAttribute('flow', 'paginated')
@@ -60,17 +78,26 @@ export function ReaderView({ book, onClose }: Props) {
       }) as EventListener)
       const copy = new Uint8Array(bytes.byteLength)
       copy.set(bytes)
-      await view.open(new File([new Blob([copy])], book.fileName))
+      await view.open(
+        new File([new Blob([copy])], book.fileName, {
+          type: 'application/epub+zip',
+        }),
+      )
+      if (cancelled) return
       const metaTitle = view.book?.metadata?.title
       if (typeof metaTitle === 'string' && metaTitle.trim()) setTitle(metaTitle)
       await view.init({
         lastLocation: book.locator,
         showTextStart: !book.locator,
       })
+      if (!cancelled) setStatus('')
     }
 
     start().catch((cause) => {
-      if (!cancelled) setError(String(cause))
+      if (!cancelled) {
+        setStatus('')
+        setError(String(cause))
+      }
     })
 
     return () => {
@@ -109,7 +136,9 @@ export function ReaderView({ book, onClose }: Props) {
         className="reader-stage"
         ref={hostRef}
         onPointerUp={onTap}
-      />
+      >
+        {status ? <p className="reader-status">{status}</p> : null}
+      </div>
       {error ? <p className="reader-error">{error}</p> : null}
     </div>
   )

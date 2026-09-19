@@ -3,12 +3,26 @@ import { strToU8, zipSync } from 'fflate'
 const CHAPTER_RE =
   /^(第[零〇一二三四五六七八九十百千万0-9]+[章节回部卷]|Chapter\s+\d+)(.*)$/u
 
+const INVALID_XML = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u0084\u0086-\u009F\uD800-\uDFFF\uFDD0-\uFDEF\uFFFE\uFFFF]/g
+
+const stripInvalidXml = (value: string) => value.replace(INVALID_XML, '')
+
 const escapeXml = (value: string) =>
-  value
+  stripInvalidXml(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+
+const replacementCount = (text: string) => text.split('\uFFFD').length - 1
+
+const decodeWith = (bytes: Uint8Array, encoding: string) => {
+  try {
+    return new TextDecoder(encoding).decode(bytes)
+  } catch {
+    return null
+  }
+}
 
 const decodeText = (bytes: Uint8Array) => {
   if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
@@ -20,7 +34,14 @@ const decodeText = (bytes: Uint8Array) => {
   if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
     return new TextDecoder('utf-8').decode(bytes.slice(3))
   }
-  return new TextDecoder('utf-8').decode(bytes)
+  const utf8 = new TextDecoder('utf-8').decode(bytes)
+  const utf8Bad = replacementCount(utf8)
+  if (utf8Bad === 0) return utf8
+  for (const encoding of ['gb18030', 'gbk']) {
+    const decoded = decodeWith(bytes, encoding)
+    if (decoded && replacementCount(decoded) < utf8Bad) return decoded
+  }
+  return utf8
 }
 
 const splitChapters = (text: string, fallbackTitle: string) => {
@@ -43,7 +64,24 @@ const splitChapters = (text: string, fallbackTitle: string) => {
     if (line) current.paragraphs.push(line)
   }
   flush()
-  return chapters.length ? chapters : [{ title: fallbackTitle, paragraphs: [text] }]
+  if (!chapters.length) {
+    const chunks: { title: string; paragraphs: string[] }[] = []
+    const lines = text
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+    const size = 80
+    for (let index = 0; index < lines.length; index += size) {
+      chunks.push({
+        title: `${fallbackTitle} ${chunks.length + 1}`,
+        paragraphs: lines.slice(index, index + size),
+      })
+    }
+    return chunks.length ? chunks : [{ title: fallbackTitle, paragraphs: [text] }]
+  }
+  return chapters
 }
 
 const chapterXhtml = (title: string, paragraphs: string[]) => `<?xml version="1.0" encoding="utf-8"?>

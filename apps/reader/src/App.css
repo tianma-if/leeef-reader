@@ -157,3 +157,8 @@ body,
   color: #9b2c2c;
   padding: 0 1rem 1rem;
 }
+
+.reader-status {
+  margin: 2rem 1rem;
+  color: #6b645a;
+}
