@@ -1,0 +1,179 @@
+name: Tauri signed release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub Release tag to attach signed installers
+        required: true
+        type: string
+        default: v2.0.0
+      upload_play:
+        description: Upload the signed AAB to Google Play production
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tauri-release-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    if: github.repository == 'tianma-if/leeef-reader'
+    name: Signed macOS DMG
+    runs-on: macos-15
+    timeout-minutes: 90
+    environment: macos-distribution
+    defaults:
+      run:
+        working-directory: apps/reader
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/reader/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/reader/src-tauri
+      - run: npm ci
+      - name: Write App Store Connect API key
+        env:
+          APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          APPSTORE_API_KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+        run: |
+          test -n "$APPSTORE_API_PRIVATE_KEY"
+          test -n "$APPSTORE_API_KEY_ID"
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          key_path="$HOME/.appstoreconnect/private_keys/AuthKey_${APPSTORE_API_KEY_ID}.p8"
+          printf '%s\n' "$APPSTORE_API_PRIVATE_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+      - name: Build signed and notarized app
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATES_FILE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATES_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.MACOS_CERTIFICATE_NAME }}
+          APPLE_API_KEY: ${{ vars.APPSTORE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ vars.APPSTORE_ISSUER_ID }}
+          CI: true
+        run: npx tauri build --target universal-apple-darwin --bundles dmg,app
+      - name: Stage GitHub Release assets
+        run: |
+          mkdir -p "$RUNNER_TEMP/macos-dist"
+          dmg="$(find src-tauri/target/universal-apple-darwin/release/bundle/dmg -name '*.dmg' | head -n 1)"
+          app="$(find src-tauri/target/universal-apple-darwin/release/bundle/macos -name '*.app' | head -n 1)"
+          test -n "$dmg"
+          test -n "$app"
+          cp "$dmg" "$RUNNER_TEMP/macos-dist/Leeef-Reader-2.0.0-macos-universal.dmg"
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/macos-dist/Leeef-Reader-2.0.0-macos-universal.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: leeef-macos
+          path: ${{ runner.temp }}/macos-dist/*
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          gh release upload "$RELEASE_TAG" \
+            "$RUNNER_TEMP/macos-dist/"* \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+  android:
+    if: github.repository == 'tianma-if/leeef-reader'
+    name: Signed Android APK and AAB
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: google-play
+    defaults:
+      run:
+        working-directory: apps/reader
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r28c
+          link-to-sdk: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/reader/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/reader/src-tauri
+      - run: npm ci
+      - name: Restore upload keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/leeef-upload.jks"
+          chmod 600 "$RUNNER_TEMP/leeef-upload.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/leeef-upload.jks"
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyPassword=$ANDROID_KEY_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+          } > src-tauri/gen/android/keystore.properties
+      - name: Build signed Android packages
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: npx tauri android build --apk --aab --target aarch64
+      - name: Stage GitHub Release assets
+        run: |
+          mkdir -p "$RUNNER_TEMP/android-dist"
+          apk="$(find src-tauri/gen/android/app/build/outputs/apk -name '*release*.apk' | head -n 1)"
+          aab="$(find src-tauri/gen/android/app/build/outputs/bundle -name '*release*.aab' | head -n 1)"
+          test -n "$apk"
+          test -n "$aab"
+          cp "$apk" "$RUNNER_TEMP/android-dist/Leeef-Reader-2.0.0-android-arm64.apk"
+          cp "$aab" "$RUNNER_TEMP/android-dist/Leeef-Reader-2.0.0-android.aab"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: leeef-android
+          path: ${{ runner.temp }}/android-dist/*
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          gh release upload "$RELEASE_TAG" \
+            "$RUNNER_TEMP/android-dist/"* \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+      - name: Publish AAB to Google Play production
+        if: inputs.upload_play
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: dev.leeef.leeef_reader
+          releaseFiles: ${{ runner.temp }}/android-dist/Leeef-Reader-2.0.0-android.aab
+          tracks: production
+          status: completed
+      - name: Remove signing material
+        if: always()
+        run: rm -f src-tauri/gen/android/keystore.properties "$RUNNER_TEMP/leeef-upload.jks"
