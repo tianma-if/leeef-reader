@@ -19,7 +19,11 @@ const desktop = !/Android|iPhone|iPad/i.test(navigator.userAgent)
 export function SettingsScreen() {
   const [value, setValue] = useState<Settings>({})
   const [dbPath, setDbPath] = useState('')
-  const [mcp, setMcp] = useState<{ running: boolean; endpoint?: string }>({ running: false })
+  const [mcp, setMcp] = useState<{
+    running: boolean
+    endpoint?: string
+    token?: string
+  }>({ running: false })
   const [pair, setPair] = useState('')
 
   useEffect(() => {
@@ -230,13 +234,16 @@ export function SettingsScreen() {
         <p className="text-muted-foreground text-sm">
           {mcp.running ? `已运行 ${mcp.endpoint}` : '未运行'}
         </p>
+        {mcp.running && mcp.token ? (
+          <p className="text-muted-foreground break-all font-mono text-xs">Bearer {mcp.token}</p>
+        ) : null}
         <div className="flex gap-2">
           <Button
             onClick={() =>
               void api.mcpStart().then(setMcp).catch((cause) => toast.error(String(cause)))
             }
           >
-            启动 sidecar
+            启动 MCP
           </Button>
           <Button variant="outline" onClick={() => void api.mcpStop().then(setMcp)}>
             停止

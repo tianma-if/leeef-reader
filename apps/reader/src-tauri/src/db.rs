@@ -3,11 +3,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
+#[derive(Clone)]
 pub struct AppState {
-    pub db: Mutex<Connection>,
+    pub db: Arc<Mutex<Connection>>,
     pub root: PathBuf,
     pub device_id: String,
 }
@@ -241,11 +242,9 @@ pub fn open(root: PathBuf) -> Result<AppState, String> {
 
     let device_id = {
         let existing: Option<String> = db
-            .query_row(
-                "SELECT value FROM kv WHERE key = 'device_id'",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT value FROM kv WHERE key = 'device_id'", [], |row| {
+                row.get(0)
+            })
             .optional()
             .map_err(|e| e.to_string())?;
         if let Some(id) = existing {
@@ -262,13 +261,20 @@ pub fn open(root: PathBuf) -> Result<AppState, String> {
     };
 
     Ok(AppState {
-        db: Mutex::new(db),
+        db: Arc::new(Mutex::new(db)),
         root,
         device_id,
     })
 }
 
-fn log_op(db: &Connection, device_id: &str, entity_type: &str, entity_id: &str, kind: &str, payload: &str) {
+fn log_op(
+    db: &Connection,
+    device_id: &str,
+    entity_type: &str,
+    entity_id: &str,
+    kind: &str,
+    payload: &str,
+) {
     let _ = db.execute(
         "INSERT INTO sync_operations(operation_id, device_id, entity_type, entity_id, kind, payload_json, occurred_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -439,18 +445,39 @@ pub fn update_book(
     title: Option<&str>,
     author: Option<&str>,
     rating: Option<f64>,
+    description: Option<&str>,
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.execute(
-        "UPDATE books SET
-            title = COALESCE(?2, title),
-            author = COALESCE(?3, author),
-            rating = COALESCE(?4, rating),
-            updated_at = ?5
-         WHERE id = ?1",
-        params![id, title, author, rating, now()],
-    )
-    .map_err(|e| e.to_string())?;
+    let ts = now();
+    let changed = db
+        .execute(
+            "UPDATE books SET
+                title = COALESCE(?2, title),
+                author = COALESCE(?3, author),
+                rating = COALESCE(?4, rating),
+                description = COALESCE(?5, description),
+                updated_at = ?6
+             WHERE id = ?1 AND is_deleted = 0",
+            params![id, title, author, rating, description, ts],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("book does not exist".into());
+    }
+    log_op(
+        &db,
+        &state.device_id,
+        "book",
+        id,
+        "upsert",
+        &serde_json::json!({
+            "title": title,
+            "author": author,
+            "rating": rating,
+            "description": description
+        })
+        .to_string(),
+    );
     Ok(())
 }
 
@@ -473,19 +500,37 @@ pub fn save_progress(
     locator: &str,
     progress: f64,
     chapter_title: Option<&str>,
+    page: Option<i64>,
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    let ts = now();
     db.execute(
-        "INSERT INTO reading_progresses(book_id, locator, progress, chapter_title, device_id, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "INSERT INTO reading_progresses(book_id, locator, progress, chapter_title, page, device_id, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
          ON CONFLICT(book_id) DO UPDATE SET
            locator = excluded.locator,
            progress = excluded.progress,
            chapter_title = excluded.chapter_title,
+           page = excluded.page,
+           device_id = excluded.device_id,
            updated_at = excluded.updated_at",
-        params![book_id, locator, progress, chapter_title, state.device_id, now()],
+        params![book_id, locator, progress, chapter_title, page, state.device_id, ts],
     )
     .map_err(|e| e.to_string())?;
+    log_op(
+        &db,
+        &state.device_id,
+        "readingProgress",
+        book_id,
+        "upsert",
+        &serde_json::json!({
+            "locator": locator,
+            "progress": progress,
+            "chapterTitle": chapter_title,
+            "page": page
+        })
+        .to_string(),
+    );
     Ok(())
 }
 
@@ -530,7 +575,7 @@ pub fn upsert_excerpt(
     quote: &str,
     note: Option<&str>,
     color: &str,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let id = Uuid::new_v4().to_string();
     let ts = now();
@@ -540,39 +585,82 @@ pub fn upsert_excerpt(
         params![id, book_id, locator, quote, note, color, ts],
     )
     .map_err(|e| e.to_string())?;
+    log_op(
+        &db,
+        &state.device_id,
+        "excerpt",
+        &id,
+        "upsert",
+        &serde_json::json!({
+            "id": id, "bookId": book_id, "locator": locator,
+            "quote": quote, "note": note, "color": color
+        })
+        .to_string(),
+    );
+    Ok(id)
+}
+
+pub fn update_excerpt(
+    state: &AppState,
+    id: &str,
+    note: Option<&str>,
+    color: &str,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let changed = db
+        .execute(
+            "UPDATE excerpts SET note = ?2, color = ?3, updated_at = ?4 WHERE id = ?1 AND is_deleted = 0",
+            params![id, note, color, now()],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("excerpt does not exist".into());
+    }
+    log_op(&db, &state.device_id, "excerpt", id, "upsert", "{}");
     Ok(())
 }
 
 pub fn delete_excerpt(state: &AppState, id: &str) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.execute(
-        "UPDATE excerpts SET is_deleted = 1, updated_at = ?2 WHERE id = ?1",
-        params![id, now()],
-    )
-    .map_err(|e| e.to_string())?;
+    let changed = db
+        .execute(
+            "UPDATE excerpts SET is_deleted = 1, updated_at = ?2 WHERE id = ?1 AND is_deleted = 0",
+            params![id, now()],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("excerpt does not exist".into());
+    }
+    log_op(&db, &state.device_id, "excerpt", id, "delete", "{}");
     Ok(())
 }
 
-pub fn list_bookmarks(state: &AppState, book_id: &str) -> Result<Vec<Bookmark>, String> {
+pub fn list_bookmarks(state: &AppState, book_id: Option<&str>) -> Result<Vec<Bookmark>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = db
-        .prepare(
-            "SELECT id, book_id, locator, title, note, created_at FROM bookmarks
-             WHERE is_deleted = 0 AND book_id = ?1 ORDER BY created_at DESC",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![book_id], |row| {
-            Ok(Bookmark {
-                id: row.get(0)?,
-                book_id: row.get(1)?,
-                locator: row.get(2)?,
-                title: row.get(3)?,
-                note: row.get(4)?,
-                created_at: row.get(5)?,
-            })
+    let sql = if book_id.is_some() {
+        "SELECT id, book_id, locator, title, note, created_at FROM bookmarks
+         WHERE is_deleted = 0 AND book_id = ?1 ORDER BY created_at DESC"
+    } else {
+        "SELECT id, book_id, locator, title, note, created_at FROM bookmarks
+         WHERE is_deleted = 0 ORDER BY created_at DESC"
+    };
+    let mut stmt = db.prepare(sql).map_err(|e| e.to_string())?;
+    let map_row = |row: &rusqlite::Row| {
+        Ok(Bookmark {
+            id: row.get(0)?,
+            book_id: row.get(1)?,
+            locator: row.get(2)?,
+            title: row.get(3)?,
+            note: row.get(4)?,
+            created_at: row.get(5)?,
         })
-        .map_err(|e| e.to_string())?;
+    };
+    let rows = if let Some(id) = book_id {
+        stmt.query_map(params![id], map_row)
+    } else {
+        stmt.query_map([], map_row)
+    }
+    .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
 }
@@ -582,24 +670,64 @@ pub fn add_bookmark(
     book_id: &str,
     locator: &str,
     title: Option<&str>,
-) -> Result<(), String> {
+    note: Option<&str>,
+) -> Result<String, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    let id = Uuid::new_v4().to_string();
+    let ts = now();
     db.execute(
-        "INSERT INTO bookmarks(id, book_id, locator, title, is_deleted, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5)",
-        params![Uuid::new_v4().to_string(), book_id, locator, title, now()],
+        "INSERT INTO bookmarks(id, book_id, locator, title, note, is_deleted, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?6)",
+        params![id, book_id, locator, title, note, ts],
     )
     .map_err(|e| e.to_string())?;
+    log_op(
+        &db,
+        &state.device_id,
+        "bookmark",
+        &id,
+        "upsert",
+        &serde_json::json!({
+            "id": id, "bookId": book_id, "locator": locator, "title": title, "note": note
+        })
+        .to_string(),
+    );
+    Ok(id)
+}
+
+pub fn update_bookmark(
+    state: &AppState,
+    id: &str,
+    title: Option<&str>,
+    note: Option<&str>,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let changed = db
+        .execute(
+            "UPDATE bookmarks SET title = COALESCE(?2, title), note = COALESCE(?3, note), updated_at = ?4
+             WHERE id = ?1 AND is_deleted = 0",
+            params![id, title, note, now()],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("bookmark does not exist".into());
+    }
+    log_op(&db, &state.device_id, "bookmark", id, "upsert", "{}");
     Ok(())
 }
 
 pub fn delete_bookmark(state: &AppState, id: &str) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.execute(
-        "UPDATE bookmarks SET is_deleted = 1, updated_at = ?2 WHERE id = ?1",
-        params![id, now()],
-    )
-    .map_err(|e| e.to_string())?;
+    let changed = db
+        .execute(
+            "UPDATE bookmarks SET is_deleted = 1, updated_at = ?2 WHERE id = ?1 AND is_deleted = 0",
+            params![id, now()],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("bookmark does not exist".into());
+    }
+    log_op(&db, &state.device_id, "bookmark", id, "delete", "{}");
     Ok(())
 }
 
@@ -625,36 +753,186 @@ pub fn list_shelves(state: &AppState) -> Result<Vec<Shelf>, String> {
         .map_err(|e| e.to_string())
 }
 
-pub fn add_book_to_shelf(state: &AppState, shelf_id: &str, book_id: &str) -> Result<(), String> {
+pub fn add_book_to_shelf(
+    state: &AppState,
+    shelf_id: &str,
+    book_id: &str,
+    sort_order: i64,
+) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.execute(
-        "INSERT OR REPLACE INTO bookshelf_entries(bookshelf_id, book_id, sort_order, updated_at)
-         VALUES (?1, ?2, 0, ?3)",
-        params![shelf_id, book_id, now()],
+        "INSERT INTO bookshelf_entries(bookshelf_id, book_id, sort_order, updated_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(bookshelf_id, book_id) DO UPDATE SET
+           sort_order = excluded.sort_order,
+           updated_at = excluded.updated_at",
+        params![shelf_id, book_id, sort_order, now()],
     )
     .map_err(|e| e.to_string())?;
+    log_op(
+        &db,
+        &state.device_id,
+        "bookshelfEntry",
+        &format!("{shelf_id}--{book_id}"),
+        "upsert",
+        &serde_json::json!({"bookshelfId": shelf_id, "bookId": book_id, "sortOrder": sort_order})
+            .to_string(),
+    );
     Ok(())
 }
 
-pub fn remove_book_from_shelf(state: &AppState, shelf_id: &str, book_id: &str) -> Result<(), String> {
+pub fn remove_book_from_shelf(
+    state: &AppState,
+    shelf_id: &str,
+    book_id: &str,
+) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.execute(
         "DELETE FROM bookshelf_entries WHERE bookshelf_id = ?1 AND book_id = ?2",
         params![shelf_id, book_id],
     )
     .map_err(|e| e.to_string())?;
+    log_op(
+        &db,
+        &state.device_id,
+        "bookshelfEntry",
+        &format!("{shelf_id}--{book_id}"),
+        "delete",
+        &serde_json::json!({"bookshelfId": shelf_id, "bookId": book_id}).to_string(),
+    );
     Ok(())
 }
 
-pub fn create_shelf(state: &AppState, name: &str, parent_id: Option<&str>) -> Result<(), String> {
+pub fn create_shelf(
+    state: &AppState,
+    name: &str,
+    parent_id: Option<&str>,
+    sort_order: i64,
+) -> Result<String, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    let id = Uuid::new_v4().to_string();
+    let ts = now();
     db.execute(
         "INSERT INTO bookshelves(id, parent_id, name, sort_order, is_deleted, created_at, updated_at)
-         VALUES (?1, ?2, ?3, 0, 0, ?4, ?4)",
-        params![Uuid::new_v4().to_string(), parent_id, name, now()],
+         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5)",
+        params![id, parent_id, name, sort_order, ts],
     )
     .map_err(|e| e.to_string())?;
+    log_op(
+        &db,
+        &state.device_id,
+        "bookshelf",
+        &id,
+        "upsert",
+        &serde_json::json!({"id": id, "name": name, "parentId": parent_id, "sortOrder": sort_order})
+            .to_string(),
+    );
+    Ok(id)
+}
+
+pub fn rename_shelf(state: &AppState, id: &str, name: &str) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let changed = db
+        .execute(
+            "UPDATE bookshelves SET name = ?2, updated_at = ?3 WHERE id = ?1 AND is_deleted = 0",
+            params![id, name, now()],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("bookshelf does not exist".into());
+    }
+    log_op(&db, &state.device_id, "bookshelf", id, "upsert", name);
     Ok(())
+}
+
+pub fn move_shelf(
+    state: &AppState,
+    id: &str,
+    parent_id: Option<&str>,
+    sort_order: i64,
+) -> Result<(), String> {
+    if parent_id == Some(id) {
+        return Err("a bookshelf cannot contain itself".into());
+    }
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(parent) = parent_id {
+        let mut cursor = parent.to_string();
+        loop {
+            if cursor == id {
+                return Err("moving the bookshelf would create a cycle".into());
+            }
+            let next: Option<String> = db
+                .query_row(
+                    "SELECT parent_id FROM bookshelves WHERE id = ?1 AND is_deleted = 0",
+                    params![cursor],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?
+                .flatten();
+            match next {
+                Some(value) => cursor = value,
+                None => break,
+            }
+        }
+    }
+    let changed = db
+        .execute(
+            "UPDATE bookshelves SET parent_id = ?2, sort_order = ?3, updated_at = ?4
+             WHERE id = ?1 AND is_deleted = 0",
+            params![id, parent_id, sort_order, now()],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("bookshelf does not exist".into());
+    }
+    log_op(&db, &state.device_id, "bookshelf", id, "upsert", "{}");
+    Ok(())
+}
+
+pub fn delete_shelf(state: &AppState, id: &str) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let ts = now();
+    let changed = db
+        .execute(
+            "UPDATE bookshelves SET is_deleted = 1, updated_at = ?2 WHERE id = ?1 AND is_deleted = 0",
+            params![id, ts],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("bookshelf does not exist".into());
+    }
+    db.execute(
+        "UPDATE bookshelves SET parent_id = NULL, updated_at = ?2 WHERE parent_id = ?1",
+        params![id, ts],
+    )
+    .map_err(|e| e.to_string())?;
+    log_op(&db, &state.device_id, "bookshelf", id, "delete", "{}");
+    Ok(())
+}
+
+pub fn move_book_to_shelf(
+    state: &AppState,
+    book_id: &str,
+    shelf_id: &str,
+    sort_order: i64,
+) -> Result<(), String> {
+    let previous = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let mut stmt = db
+            .prepare("SELECT bookshelf_id FROM bookshelf_entries WHERE book_id = ?1 AND bookshelf_id <> ?2")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![book_id, shelf_id], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+    for previous_id in previous {
+        remove_book_from_shelf(state, &previous_id, book_id)?;
+    }
+    add_book_to_shelf(state, shelf_id, book_id, sort_order)
 }
 
 pub fn list_tags(state: &AppState) -> Result<Vec<Tag>, String> {
@@ -760,5 +1038,106 @@ pub fn kv_set(state: &AppState, key: &str, value: &str) -> Result<(), String> {
 }
 
 pub fn database_path(state: &AppState) -> String {
-    state.root.join("leeef.sqlite").to_string_lossy().into_owned()
+    state
+        .root
+        .join("leeef.sqlite")
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryStats {
+    pub books: i64,
+    pub excerpts: i64,
+    pub bookmarks: i64,
+    pub pending_sync_operations: i64,
+}
+
+pub fn library_stats(state: &AppState) -> Result<LibraryStats, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let count = |sql: &str| -> Result<i64, String> {
+        db.query_row(sql, [], |row| row.get(0))
+            .map_err(|e| e.to_string())
+    };
+    Ok(LibraryStats {
+        books: count("SELECT count(*) FROM books WHERE is_deleted = 0")?,
+        excerpts: count("SELECT count(*) FROM excerpts WHERE is_deleted = 0")?,
+        bookmarks: count("SELECT count(*) FROM bookmarks WHERE is_deleted = 0")?,
+        pending_sync_operations: count(
+            "SELECT count(*) FROM sync_operations WHERE applied_at IS NULL",
+        )?,
+    })
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadingProgress {
+    pub book_id: String,
+    pub locator: String,
+    pub progress: f64,
+    pub chapter_title: Option<String>,
+    pub page: Option<i64>,
+    pub device_id: String,
+    pub updated_at: String,
+}
+
+pub fn get_reading_progress(state: &AppState, book_id: &str) -> Result<ReadingProgress, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.query_row(
+        "SELECT book_id, locator, progress, chapter_title, page, device_id, updated_at
+         FROM reading_progresses WHERE book_id = ?1",
+        params![book_id],
+        |row| {
+            Ok(ReadingProgress {
+                book_id: row.get(0)?,
+                locator: row.get(1)?,
+                progress: row.get(2)?,
+                chapter_title: row.get(3)?,
+                page: row.get(4)?,
+                device_id: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "reading progress does not exist".into())
+}
+
+pub fn shelf_book_ids(state: &AppState, shelf_id: &str) -> Result<Vec<String>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = db
+        .prepare(
+            "SELECT book_id FROM bookshelf_entries WHERE bookshelf_id = ?1 ORDER BY sort_order",
+        )
+        .map_err(|e| e.to_string())?;
+    let ids = stmt
+        .query_map(params![shelf_id], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(ids)
+}
+
+pub fn audit(
+    state: &AppState,
+    action: &str,
+    parameters: &serde_json::Value,
+    result: &str,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.execute(
+        "INSERT INTO audit_events(id, caller, action, parameters_json, result, occurred_at)
+         VALUES (?1, 'mcp', ?2, ?3, ?4, ?5)",
+        params![
+            Uuid::new_v4().to_string(),
+            action,
+            parameters.to_string(),
+            result,
+            now()
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }

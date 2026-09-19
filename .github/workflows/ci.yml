@@ -8,7 +8,6 @@ on:
     paths:
       - ".github/workflows/ci.yml"
       - "apps/reader/**"
-      - "sidecars/leeef-mcp/**"
 
 concurrency:
   group: leeef-ci-${{ github.ref }}
@@ -34,14 +33,17 @@ jobs:
 
   mcp:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     defaults:
       run:
-        working-directory: sidecars/leeef-mcp
+        working-directory: apps/reader/src-tauri
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
-          go-version-file: sidecars/leeef-mcp/go.mod
-          cache-dependency-path: sidecars/leeef-mcp/go.sum
-      - run: go test ./...
+          workspaces: apps/reader/src-tauri
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - run: cargo test --lib

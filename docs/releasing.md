@@ -131,7 +131,7 @@ gh secret set MACOS_SPARKLE_PRIVATE_KEY \
 
 1. 确认 `main` 与 `origin/main` 一致且工作区干净；以上一个正式 Release 为基线整理中英文用户变更。
 2. 显式选择 SemVer 级别，更新 `pubspec.yaml` 的 `version: X.Y.Z+N`；`N` 必须严格递增。
-3. 等待当前源码提交的跨平台 CI 全部通过；该工作流统一执行 Flutter 分析与测试、MCP `go test ./...` 以及 Android、iOS、macOS、Windows 构建。发布规划器会直接复用这一结果，不重复执行同一套门禁。
+3. 等待当前源码提交的跨平台 CI 全部通过；该工作流执行 `apps/reader` 的 npm 测试/构建，以及 `apps/reader/src-tauri` 的 `cargo test --lib`。发布规划器会直接复用这一结果，不重复执行同一套门禁。
 4. 创建 `vX.Y.Z` Draft Release，使用同一 Tag 运行 `Build macOS DMG`，确认 DMG、ZIP、`appcast.xml` 已上传且工作流成功。
 5. 立即公开 GitHub Release。Google Play production 与 App Store Connect 上传由 `published` 事件自动触发，无需先经过测试渠道，也不得为此询问用户。建议检查真机导入、阅读、分享导入、后台音频、同步和 Android 更新流程；如未执行，如实记录，不阻塞正式上架或送审，也不得将其标记为通过。
 6. 在 Intel 与 Apple Silicon Mac 上验证 DMG 可挂载、拖入 Applications，并运行 `spctl --assess --type execute --verbose "Leeef Reader.app"`；从前一正式版本启动应用，确认新版 ZIP 静默下载后出现“重启以更新”，重启后版本号已更新。该 macOS 验收仍按发布后行为执行，默认不覆盖安装开发者机器上的现有应用。

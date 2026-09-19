@@ -60,7 +60,14 @@ fn update_book(
     author: Option<String>,
     rating: Option<f64>,
 ) -> Result<(), String> {
-    db::update_book(&state, &id, title.as_deref(), author.as_deref(), rating)
+    db::update_book(
+        &state,
+        &id,
+        title.as_deref(),
+        author.as_deref(),
+        rating,
+        None,
+    )
 }
 
 #[tauri::command]
@@ -87,6 +94,7 @@ fn save_progress(
         &locator,
         progress,
         chapter_title.as_deref(),
+        None,
     )
 }
 
@@ -107,14 +115,8 @@ fn create_excerpt(
     note: Option<String>,
     color: String,
 ) -> Result<(), String> {
-    db::upsert_excerpt(
-        &state,
-        &book_id,
-        &locator,
-        &quote,
-        note.as_deref(),
-        &color,
-    )
+    db::upsert_excerpt(&state, &book_id, &locator, &quote, note.as_deref(), &color)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -124,7 +126,7 @@ fn delete_excerpt(state: State<AppState>, id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn list_bookmarks(state: State<AppState>, book_id: String) -> Result<Vec<db::Bookmark>, String> {
-    db::list_bookmarks(&state, &book_id)
+    db::list_bookmarks(&state, Some(&book_id))
 }
 
 #[tauri::command]
@@ -134,7 +136,8 @@ fn add_bookmark(
     locator: String,
     title: Option<String>,
 ) -> Result<(), String> {
-    db::add_bookmark(&state, &book_id, &locator, title.as_deref())
+    db::add_bookmark(&state, &book_id, &locator, title.as_deref(), None)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -153,7 +156,8 @@ fn create_shelf(
     name: String,
     parent_id: Option<String>,
 ) -> Result<(), String> {
-    db::create_shelf(&state, &name, parent_id.as_deref())
+    db::create_shelf(&state, &name, parent_id.as_deref(), 0)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -162,7 +166,7 @@ fn add_book_to_shelf(
     shelf_id: String,
     book_id: String,
 ) -> Result<(), String> {
-    db::add_book_to_shelf(&state, &shelf_id, &book_id)
+    db::add_book_to_shelf(&state, &shelf_id, &book_id, 0)
 }
 
 #[tauri::command]
@@ -250,10 +254,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_native_bridge::init())
         .setup(|app| {
-            let root = app
-                .path()
-                .app_data_dir()
-                .map_err(|e| e.to_string())?;
+            let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
             std::fs::create_dir_all(&root)?;
             let state = db::open(root)?;
             app.manage(state);

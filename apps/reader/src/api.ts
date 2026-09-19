@@ -146,11 +146,17 @@ export const api = {
   saveSettings: (value: Settings) => invoke('save_settings', { value }),
   mcpDatabasePath: () => invoke<string>('mcp_database_path'),
   mcpStart: () =>
-    invoke<{ running: boolean; endpoint?: string; databasePath: string }>('mcp_start'),
+    invoke<{ running: boolean; endpoint?: string; token?: string; databasePath: string }>(
+      'mcp_start',
+    ),
   mcpStop: () =>
-    invoke<{ running: boolean; endpoint?: string; databasePath: string }>('mcp_stop'),
+    invoke<{ running: boolean; endpoint?: string; token?: string; databasePath: string }>(
+      'mcp_stop',
+    ),
   mcpStatus: () =>
-    invoke<{ running: boolean; endpoint?: string; databasePath: string }>('mcp_status'),
+    invoke<{ running: boolean; endpoint?: string; token?: string; databasePath: string }>(
+      'mcp_status',
+    ),
   pairingCode: () => invoke<string>('pairing_code'),
 }
 

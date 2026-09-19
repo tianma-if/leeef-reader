@@ -10,7 +10,7 @@
 
 > **Leeef Reader：开源、离线优先、MCP 原生、手机跟手翻页的电子书阅读器。**
 
-Leeef Reader 是一款把书库、进度和笔记留在你自己设备上的电子书应用。导入即可阅读，不需要 Leeef 账号。需要 AI 或 Agent 时，用你自己的接口；也可以在设置里启动 MCP sidecar，让 Claude Code、Codex 等工具直接查询应用正在使用的那份 SQLite 书库。
+Leeef Reader 是一款把书库、进度和笔记留在你自己设备上的电子书应用。导入即可阅读，不需要 Leeef 账号。需要 AI 或 Agent 时，用你自己的接口；也可以在设置里启动 MCP，让 Claude Code、Codex 等工具直接查询应用正在使用的那份 SQLite 书库。
 
 > 💡 **书在你的设备上**
 > Leeef 不强制云账号，也不提供 Leeef 云。书籍、书架、书摘和进度保存在本地 `leeef.sqlite`，你可以自己打开查看。对象存储和 AI 凭据由你提供，只在桌面端填写。
@@ -29,7 +29,7 @@ Leeef Reader 是一款把书库、进度和笔记留在你自己设备上的电�
 **Leeef 补的就是这块**：系统 WebView 里排版，手机 captured-slide 跟手翻页；MCP 和应用内 AI 都对着同一份 SQLite；不强制注册。
 
 > 💡 **一种好用的用法：**
-> 书库放在电脑上，需要对话时填写 OpenAI 兼容接口；需要 Agent 时启动 MCP sidecar，让它搜书、搜书摘、看进度。手机上导入和阅读即可；密钥不在手机设置里填，之后通过配对带过来。
+> 书库放在电脑上，需要对话时填写 OpenAI 兼容接口；需要 Agent 时启动 MCP，让它搜书、搜书摘、看进度。手机上导入和阅读即可；密钥不在手机设置里填，之后通过配对带过来。
 
 ## 截图
 
@@ -69,18 +69,18 @@ Leeef Reader 是一款把书库、进度和笔记留在你自己设备上的电�
 - **阅读统计**：时长、天数、连续阅读、读完的书，以及周热力图。
 - **OPDS 目录**：浏览并下载你配置的 OPDS 源。
 - **自带 AI 接口**：桌面设置填写 OpenAI 兼容 Endpoint、API Key 和模型（OpenAI、DeepSeek、OpenRouter、xAI 等）。对话在进程内流式输出。模型可查询本地书库；改书库的操作会先请你确认。
-- **原生 MCP sidecar**：在设置里对同一份 `leeef.sqlite` 启动 `leeef-mcp`。Agent 可以列书、抽正文、搜书摘，并在确认后写入。
+- **进程内 MCP**：在设置里启动书库 MCP。它在本机 loopback 上提供 HTTP，读写的就是阅读器正在用的 `leeef.sqlite`。Agent 可以列书、抽正文、搜书摘，并在确认后写入。
 - **桌面填凭据，手机配对**：对象存储、AI 等密钥只在电脑上填写。手机展示配对码，而不是这些表单。
 - **可打开的本地数据**：书库是标准 SQLite。核心写入会在同一事务里记下 `sync_operation`，以后接到你自己的云时有日志，而不是旁路改表。
 
 ## MCP
 
-Leeef 通过本地 Go sidecar 提供 [Model Context Protocol](https://modelcontextprotocol.io/)。在设置里启动 sidecar，把打印出的本机 loopback 地址交给 Agent（stdout 上有 Bearer token）。
+Leeef 在 Tauri 进程内提供 [Model Context Protocol](https://modelcontextprotocol.io/)。在设置里启动 MCP，把打印出的本机 loopback 地址和 Bearer token 交给 Agent。
 
-读工具包括 `list_books`、`search_books`、`get_book`、`get_book_content`，以及书架、书摘、书签和阅读进度。写操作走 `plan_*` → `confirm_write` → `apply_write`，Agent 不能一笔直接改库。
+读工具包括 `list_books`、`search_books`、`get_book`、`get_book_content`，以及书架、书摘、书签和阅读进度。写操作会返回一份 plan，必须再走 `confirm_write` → `apply_write`，Agent 不能一笔直接改库。
 
 > 💡 **和 Agent 一起用：**
-> 问上周在读什么、按主题抽出书摘，或让 Agent 在你确认后把一本书放进某个书架。sidecar 连的就是阅读器正在用的数据库，不是另一套索引。
+> 问上周在读什么、按主题抽出书摘，或让 Agent 在你确认后把一本书放进某个书架。MCP 走的就是阅读器同一套 `db.rs`，不是另开一份 SQLite。
 
 ## 数据、AI 与同步
 
@@ -103,7 +103,7 @@ Leeef 通过本地 Go sidecar 提供 [Model Context Protocol](https://modelconte
 - **应用**：Tauri 2、Vite、React、TypeScript。壳层用 Tailwind CSS 与 shadcn/ui；阅读表面保持自绘（foliate + captured slide）。
 - **阅读**：系统 WebView 中 vendored 的 foliate-js。TXT 先转成 EPUB，再进同一分页器。
 - **原生**：`apps/reader/src-tauri`（Rust、rusqlite）。Android `PixelCopy` / iOS 截图在 `native-bridge` 插件里。
-- **MCP**：`sidecars/leeef-mcp`（Go、modernc SQLite），由应用拉起并带本机 token。
+- **MCP**：官方 Rust SDK（`rmcp`）跑在 `apps/reader/src-tauri` 里，本机 Streamable HTTP 加 Bearer token。
 - **标识**：`dev.leeef.leeef-reader`（Android applicationId 为 `dev.leeef.leeef_reader`）。
 
 ## 快速开始
@@ -114,11 +114,11 @@ npm install
 npm run tauri dev
 ```
 
-MCP sidecar 测试：
+MCP 测试：
 
 ```sh
-cd sidecars/leeef-mcp
-go test ./...
+cd apps/reader/src-tauri
+cargo test --lib
 ```
 
 Android 调试构建只使用 **USB 真机**，不要开模拟器。说明见 [docs/tauri-reader.md](docs/tauri-reader.md)。
@@ -129,10 +129,9 @@ Android 调试构建只使用 **USB 真机**，不要开模拟器。说明见 [d
 apps/reader                 Tauri 2 + Vite + React 客户端
 apps/reader/public/vendor/foliate-js
                             vendored 分页器，EPUB/MOBI/FB2/PDF
-apps/reader/src-tauri       Rust 宿主、rusqlite、MCP 拉起
+apps/reader/src-tauri       Rust 宿主、rusqlite、进程内 MCP
 apps/reader/src-tauri/plugins/native-bridge
                             翻页截图与原生选文件
-sidecars/leeef-mcp          面向 leeef.sqlite 的 Go MCP 服务
 docs                        阅读壳与配对说明
 store-assets                商店文案、隐私与截图
 assets/brand                Logo 与标识

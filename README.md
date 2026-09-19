@@ -10,7 +10,7 @@
 
 > **Leeef Reader: An open-source, offline-first ebook reader with native MCP and finger-following page turns.**
 
-Leeef Reader is a local-first ebook app for people who want their library, progress, and notes on their own machine. Import a book and start reading with no Leeef account. When you want AI or agents in the loop, bring your own endpoint—or start the built-in MCP sidecar so tools such as Claude Code and Codex can query the same SQLite library the app uses.
+Leeef Reader is a local-first ebook app for people who want their library, progress, and notes on their own machine. Import a book and start reading with no Leeef account. When you want AI or agents in the loop, bring your own endpoint—or start the built-in MCP server so tools such as Claude Code and Codex can query the same SQLite library the app uses.
 
 > 💡 **Your books stay on your device**
 > Leeef does not require a Leeef cloud or a Leeef login. Files, shelves, excerpts, and reading progress live in a local `leeef.sqlite` database you can inspect. Optional object storage and AI credentials are yours, filled in on the desktop.
@@ -29,7 +29,7 @@ Most of us already have a folder of EPUBs, PDFs, and Chinese TXT novels. The usu
 **Leeef is built for that gap**: a system WebView reader with captured-slide paging on the phone, a SQLite library that MCP and in-app AI both speak, and no mandatory account.
 
 > 💡 **A practical setup:**
-> Keep the library on the computer, fill in an OpenAI-compatible endpoint when you want chat, and start the MCP sidecar when an agent should search books, excerpts, or progress. On the phone, import and read; credentials stay off the mobile settings form and arrive later through pairing.
+> Keep the library on the computer, fill in an OpenAI-compatible endpoint when you want chat, and start MCP when an agent should search books, excerpts, or progress. On the phone, import and read; credentials stay off the mobile settings form and arrive later through pairing.
 
 ## Screenshots
 
@@ -69,18 +69,18 @@ The previous Flutter client does not auto-update to this app, and libraries are 
 - **Reading stats**: Time spent, days, streak, books finished, and a weekly heatmap.
 - **OPDS catalogs**: Browse and download from OPDS feeds you configure.
 - **Bring-your-own AI**: Desktop settings take an OpenAI-compatible endpoint, API key, and model (OpenAI, DeepSeek, OpenRouter, xAI, and similar). Chat streams in-process. The model can list and search the local library; writes wait for confirmation.
-- **Native MCP sidecar**: Start `leeef-mcp` from Settings against the same `leeef.sqlite`. Agents can list books, extract text, search excerpts, and apply confirmed writes.
+- **In-process MCP**: Start the library MCP server from Settings. It binds loopback HTTP against the same `leeef.sqlite` the reader uses. Agents can list books, extract text, search excerpts, and apply confirmed writes.
 - **Desktop credentials, phone pairing**: Object storage, AI, and similar secrets are filled in on the computer. The phone shows a pairing code instead of those forms.
 - **Open local data**: The library is standard SQLite. Core mutations record a `sync_operation` in the same transaction so a future own-cloud sync has a real log, not a side channel.
 
 ## MCP
 
-Leeef speaks [Model Context Protocol](https://modelcontextprotocol.io/) over a local Go sidecar. In Settings, start the sidecar and point your agent at the printed loopback endpoint (Bearer token on stdout).
+Leeef speaks [Model Context Protocol](https://modelcontextprotocol.io/) from inside the Tauri process. In Settings, start MCP and point your agent at the printed loopback endpoint with the Bearer token.
 
-Read tools include `list_books`, `search_books`, `get_book`, `get_book_content`, shelves, excerpts, bookmarks, and reading progress. Writes go through `plan_*` → `confirm_write` → `apply_write` so an agent cannot mutate the library in one shot.
+Read tools include `list_books`, `search_books`, `get_book`, `get_book_content`, shelves, excerpts, bookmarks, and reading progress. Writes return a plan that must go through `confirm_write` → `apply_write` so an agent cannot mutate the library in one shot.
 
 > 💡 **With an agent:**
-> Ask what you were reading last week, pull quotes for a topic, or have the agent file a book onto a shelf after you confirm. The sidecar talks to the same database the reader uses—not a parallel index.
+> Ask what you were reading last week, pull quotes for a topic, or have the agent file a book onto a shelf after you confirm. MCP uses the same `db.rs` path as the reader—not a second SQLite opener.
 
 ## Data, AI, and sync
 
@@ -103,7 +103,7 @@ These are not in the current GitHub Release:
 - **App**: Tauri 2, Vite, React, TypeScript. Chrome uses Tailwind CSS and shadcn/ui; the reading surface stays custom (foliate + captured slide).
 - **Reader**: Vendored foliate-js in the system WebView. TXT is converted to EPUB before the same paginator.
 - **Native**: `apps/reader/src-tauri` (Rust, rusqlite). Android `PixelCopy` / iOS snapshot live in the `native-bridge` plugin.
-- **MCP**: `sidecars/leeef-mcp` (Go, modernc SQLite), spawned from the app with a loopback token.
+- **MCP**: official Rust SDK (`rmcp`) inside `apps/reader/src-tauri`, loopback Streamable HTTP plus a Bearer token.
 - **Identifier**: `dev.leeef.leeef-reader` (Android applicationId `dev.leeef.leeef_reader`).
 
 ## Quick start
@@ -114,11 +114,11 @@ npm install
 npm run tauri dev
 ```
 
-MCP sidecar tests:
+MCP tests:
 
 ```sh
-cd sidecars/leeef-mcp
-go test ./...
+cd apps/reader/src-tauri
+cargo test --lib
 ```
 
 Android debug builds must use a **USB device**, not an emulator. See [docs/tauri-reader.md](docs/tauri-reader.md).
@@ -129,10 +129,9 @@ Android debug builds must use a **USB device**, not an emulator. See [docs/tauri
 apps/reader                 Tauri 2 + Vite + React client
 apps/reader/public/vendor/foliate-js
                             Vendored paginator, EPUB/MOBI/FB2/PDF
-apps/reader/src-tauri       Rust host, rusqlite, MCP spawn
+apps/reader/src-tauri       Rust host, rusqlite, in-process MCP
 apps/reader/src-tauri/plugins/native-bridge
                             Page capture and native file pick
-sidecars/leeef-mcp          Go MCP server over leeef.sqlite
 docs                        Reader shell and pairing notes
 store-assets                Store listings, privacy, screenshots
 assets/brand                Logo and mark
