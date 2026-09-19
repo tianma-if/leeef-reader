@@ -1,4 +1,4 @@
-name: Leeef cross-platform CI
+name: Leeef CI
 
 on:
   workflow_dispatch:
@@ -7,74 +7,40 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/ci.yml"
-      - "android/**"
-      - "assets/**"
-      - "integration_test/**"
-      - "ios/**"
-      - "lib/**"
-      - "macos/**"
-      - "shaders/**"
+      - "apps/reader/**"
       - "sidecars/leeef-mcp/**"
-      - "test/**"
-      - "tool/release.dart"
-      - "windows/**"
-      - "pubspec.*"
 
 concurrency:
   group: leeef-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  analyze-test-android:
+  reader:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/reader
     steps:
       - uses: actions/checkout@v5
-      - uses: subosito/flutter-action@v2
+      - uses: actions/setup-node@v5
         with:
-          flutter-version: 3.47.1
-          channel: stable
-          cache: true
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/reader/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  mcp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: sidecars/leeef-mcp
+    steps:
+      - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
           go-version-file: sidecars/leeef-mcp/go.mod
           cache-dependency-path: sidecars/leeef-mcp/go.sum
-      - run: flutter pub get
-      - run: flutter analyze
-      - run: flutter test
-      - run: flutter build apk --debug
-      - name: Test MCP sidecar
-        working-directory: sidecars/leeef-mcp
-        run: go test ./...
-
-  apple-builds:
-    # flutter_inappwebview_macos 1.2.0-beta.3 requires the Xcode 27 Swift
-    # compiler, matching the production macOS release workflow.
-    runs-on: xcode-27
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v5
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: 3.47.1
-          channel: stable
-          cache: true
-      - run: flutter pub get
-      - run: flutter test integration_test/foliate_reader_test.dart -d macos
-      - run: flutter build ios --simulator --debug --no-codesign
-      - run: flutter build macos --debug
-      - name: Verify macOS app bundle
-        run: ./tool/verify_macos_bundle.sh "build/macos/Build/Products/Debug/Leeef Reader.app"
-
-  windows-build:
-    runs-on: windows-latest
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@v5
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: 3.47.1
-          channel: stable
-          cache: true
-      - run: flutter pub get
-      - run: flutter build windows --debug
+      - run: go test ./...

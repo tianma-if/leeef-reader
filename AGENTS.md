@@ -1,6 +1,6 @@
 # AGENTS.md
 
-本文件约束参与 Leeef Reader 开发与发布的 AI 代理和协作者。技术栈、产品范围与平台状态优先参考 `README.md`，具体凭据和操作步骤参考 `docs/releasing.md`。
+本文件约束参与 Leeef Reader 开发与发布的 AI 代理和协作者。当前主线是 Tauri（`apps/reader`），不是 Flutter。技术栈与开发入口优先参考 `README.md` 和 `docs/tauri-reader.md`。
 
 ## Android 调测规则
 
@@ -9,10 +9,10 @@
 ## GitHub Actions 与 Release 规则
 
 1. **Fork 工作流边界**：仅官方仓库需要的签名、商店交付、GitHub Release 资产上传和发布审计 Job，必须使用 `github.repository == 'tianma-if/leeef-reader'` 的 Job 级门禁，避免下游 Fork 分配 Runner 或尝试访问官方 Environment。
-2. **版本格式与递增**：正式 Tag 和 GitHub Release 标题使用 `vX.Y.Z`，不得使用 Draft 或 Prerelease 作为最终状态。发版必须显式选择 SemVer 的 `patch`、`minor` 或 `major`；未指定时由发布代理根据变更自行决定并在审计记录中说明依据，不得为此暂停发版询问用户。禁止为了维持发版节奏把用户可感知的新能力或新平台压成 patch。`pubspec.yaml` 使用 `X.Y.Z+N`：`X.Y.Z` 必须与 Tag 一致，构建号 `N` 必须严格递增，并同时作为 Android `versionCode` 与 Apple build number。
+2. **版本格式与递增**：正式 Tag 和 GitHub Release 标题使用 `vX.Y.Z`，不得使用 Draft 或 Prerelease 作为最终状态。发版必须显式选择 SemVer 的 `patch`、`minor` 或 `major`；未指定时由发布代理根据变更自行决定并在审计记录中说明依据，不得为此暂停发版询问用户。禁止为了维持发版节奏把用户可感知的新能力或新平台压成 patch。版本写在 `apps/reader/src-tauri/tauri.conf.json` 与 `apps/reader/package.json`，必须与 Tag 一致。
 3. **发布基线**：以上一个正式 Release 为审计基线。Release 说明必须覆盖该基线后的全部用户可感知变化；纯测试、重构、CI 或文档提交可不进入公开说明，但必须在发布审计记录中给出明确理由。
 4. **平台范围**：不得在 Release 中宣称尚未交付或未经验证的平台。Android 以 Google Play 轨道中的 Play App Signing 构建为准，iOS 以 App Store Connect/TestFlight 构建为准，macOS 以签名、公证且带 Sparkle 更新元数据的 universal DMG/ZIP 为准。Windows 在正式安装包、签名/更新与审计工作流完成前，不得列为该 Release 的已交付资产。
-5. **验证命令**：正式发布前必须通过 `flutter pub get`、`flutter analyze`、`flutter test`、MCP sidecar 的 `go test ./...`，以及 `.github/workflows/ci.yml` 中 Android、iOS、macOS、Windows 的构建门禁。移动端真机回归作为建议检查，不是 production 发布或 App Store 送审的前置门禁；未执行时如实记录，不得宣称通过。macOS 验收仍按 `docs/releasing.md` 执行。
+5. **验证命令**：正式发布前必须通过 `apps/reader` 的 `npm ci` 与 `npm run build`、MCP sidecar 的 `go test ./...`，以及 `.github/workflows/ci.yml`。移动端真机回归作为建议检查，不是 production 发布的前置门禁；未执行时如实记录，不得宣称通过。商店交付流水线在迁到 Tauri 之前不得对 `published` 事件跑旧的 Flutter Job。
 6. **Draft 内准备资产后自动公开**：先创建 `vX.Y.Z` Draft Release，再通过带 `release_tag` 的 macOS 资产工作流构建、签名、公证并上传资产。DMG、ZIP 和 `appcast.xml` 齐全且工作流成功后必须立即公开该 Release，不得暂停询问用户确认。`published` 事件只允许审计已有资产，禁止在 Release 已公开后才首次构建或上传正式资产。
 7. **签名边界**：签名证书、密钥库、API Key、Sparkle Ed25519 私钥及密码必须保存在仓库外或受保护的 GitHub Environment 中，严禁提交到 Git。Android 正式交付必须启用 Play App Signing；macOS 更新 ZIP 和 `appcast.xml` 必须使用与客户端内置公钥匹配的固定私钥签名。
 8. **失败处理**：任一阻塞验证、签名、公证、上传或资产审计失败时，Release 必须保持或恢复为 Draft；修复并重新执行门禁后才可公开。不得发布已知损坏、缺少声明资产或版本不一致的 Release。
@@ -36,9 +36,8 @@
 Related Issue: #<issue-number>
 ```
 
+商店交付与 Sparkle / Play 流水线尚未从 Flutter 迁完，在完成前不要用旧的 `google-play.yml` / `ios-app-store.yml` / `macos-dmg.yml` 对正式 Tag 发版。
+
 ## 标准发布入口
 
-- 使用 `dart run tool/release.dart` 进行版本规划和提交覆盖审计；该命令默认只执行 dry run。
-- 用户要求发版时，代理自行决定 SemVer 级别、完成 dry run 覆盖审计后立即 `--execute`，不得把 dry run 结果拿回来等人确认。执行模式复用当前源码提交已经通过的跨平台 CI；不存在时只补跑一次。版本号提交使用 `[skip ci]`，避免对同一份源码重复执行门禁。
-- 执行模式创建 Draft Release、等待 macOS 资产工作流把 DMG/ZIP/`appcast.xml` 上传成功，然后公开 Release。公开后由 `published` 事件触发 Google Play production 和 App Store Connect 上传；该事件只做快速资产审计，不允许重建或覆盖已公开资产。
-- 禁止绕过工具的提交覆盖审计直接生成公开说明；遇到工具无法表达的特殊发布场景，应先补充工具及测试，再继续发布。
+Tauri 发版工具尚未替代 `tool/release.dart`。在商店流水线迁完之前，不要对 `main` 打正式 Tag 走旧的 Flutter 资产 Job。

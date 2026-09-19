@@ -8,8 +8,7 @@ on:
         required: true
         default: true
         type: boolean
-  release:
-    types: [published]
+  # Flutter iOS pipeline retired with the Tauri rewrite.
 
 concurrency:
   group: leeef-ios-app-store

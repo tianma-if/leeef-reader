@@ -28,8 +28,8 @@ on:
         required: true
         default: false
         type: boolean
-  release:
-    types: [published]
+  # Flutter Play pipeline retired with the Tauri rewrite. Keep manual dispatch
+  # until the Tauri Android AAB path is wired.
 
 permissions:
   contents: read
