@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { api, type Settings } from '../api'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 
 type FeedItem = { title: string; href?: string; author?: string }
 
@@ -7,7 +11,6 @@ export function OpdsScreen() {
   const [settings, setSettings] = useState<Settings>({})
   const [url, setUrl] = useState('https://opds.feedbooks.net/catalog.atom')
   const [items, setItems] = useState<FeedItem[]>([])
-  const [error, setError] = useState('')
 
   useEffect(() => {
     void api.getSettings().then((value) => {
@@ -17,7 +20,6 @@ export function OpdsScreen() {
   }, [])
 
   const load = async () => {
-    setError('')
     try {
       const xml = await (await fetch(url)).text()
       const doc = new DOMParser().parseFromString(xml, 'text/xml')
@@ -30,36 +32,38 @@ export function OpdsScreen() {
           undefined,
       }))
       setItems(entries)
-      const catalogs = [{ name: '当前目录', url }]
-      await api.saveSettings({ ...settings, opdsCatalogs: catalogs })
+      await api.saveSettings({ ...settings, opdsCatalogs: [{ name: '当前目录', url }] })
     } catch (cause) {
-      setError(String(cause))
+      toast.error(String(cause))
     }
   }
 
   return (
-    <main className="page">
-      <header className="page-bar">
-        <h1>OPDS</h1>
-        <button type="button" className="btn" onClick={() => void load()}>
-          浏览
-        </button>
+    <main className="px-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-6">
+      <header className="mb-4 flex items-center justify-between gap-3">
+        <h1 className="font-heading text-2xl">OPDS</h1>
+        <Button onClick={() => void load()}>浏览</Button>
       </header>
-      <input value={url} onChange={(event) => setUrl(event.target.value)} />
-      {error ? <p className="reader-error">{error}</p> : null}
-      <ul className="plain">
+      <Input className="mb-4" value={url} onChange={(event) => setUrl(event.target.value)} />
+      <div className="grid gap-3">
         {items.map((item) => (
-          <li key={`${item.title}-${item.href}`}>
-            <strong>{item.title}</strong>
-            {item.author ? <span> · {item.author}</span> : null}
-            {item.href ? (
-              <a href={item.href} target="_blank" rel="noreferrer">
-                打开
-              </a>
-            ) : null}
-          </li>
+          <Card key={`${item.title}-${item.href}`} size="sm">
+            <CardHeader>
+              <CardTitle>{item.title}</CardTitle>
+            </CardHeader>
+            <CardContent className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground text-sm">{item.author}</span>
+              {item.href ? (
+                <Button size="sm" variant="outline" asChild>
+                  <a href={item.href} target="_blank" rel="noreferrer">
+                    打开
+                  </a>
+                </Button>
+              ) : null}
+            </CardContent>
+          </Card>
         ))}
-      </ul>
+      </div>
     </main>
   )
 }

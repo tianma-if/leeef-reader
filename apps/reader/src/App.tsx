@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react'
+import {
+  BarChart3,
+  BookOpen,
+  Bot,
+  Rss,
+  Settings,
+  StickyNote,
+} from 'lucide-react'
 import { AiScreen } from './ai/AiScreen'
 import { api, type Book } from './api'
+import { Button } from '@/components/ui/button'
 import { LibraryScreen } from './library/LibraryScreen'
 import { NotesScreen } from './notes/NotesScreen'
 import { OpdsScreen } from './opds/OpdsScreen'
@@ -10,6 +19,15 @@ import { StatsScreen } from './stats/StatsScreen'
 import './App.css'
 
 type Tab = 'library' | 'notes' | 'stats' | 'opds' | 'ai' | 'settings'
+
+const tabs: { id: Tab; label: string; icon: typeof BookOpen }[] = [
+  { id: 'library', label: '书架', icon: BookOpen },
+  { id: 'notes', label: '笔记', icon: StickyNote },
+  { id: 'stats', label: '统计', icon: BarChart3 },
+  { id: 'opds', label: 'OPDS', icon: Rss },
+  { id: 'ai', label: 'AI', icon: Bot },
+  { id: 'settings', label: '设置', icon: Settings },
+]
 
 function App() {
   const [tab, setTab] = useState<Tab>('library')
@@ -33,32 +51,26 @@ function App() {
   }
 
   return (
-    <div className="app">
-      <nav className="dock">
-        {(
-          [
-            ['library', '书架'],
-            ['notes', '笔记'],
-            ['stats', '统计'],
-            ['opds', 'OPDS'],
-            ['ai', 'AI'],
-            ['settings', '设置'],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            className={tab === id ? 'active' : ''}
-            onClick={() => setTab(id)}
-          >
-            {label}
-          </button>
-        ))}
+    <div className="flex min-h-dvh flex-col bg-background md:flex-row">
+      <nav className="order-2 flex border-t bg-card md:order-0 md:w-20 md:flex-col md:border-t-0 md:border-r">
+        {tabs.map((item) => {
+          const Icon = item.icon
+          return (
+            <Button
+              key={item.id}
+              type="button"
+              variant={tab === item.id ? 'secondary' : 'ghost'}
+              className="h-auto flex-1 flex-col gap-1 rounded-none py-3 md:flex-none"
+              onClick={() => setTab(item.id)}
+            >
+              <Icon className="size-4" />
+              <span className="text-[0.7rem]">{item.label}</span>
+            </Button>
+          )
+        })}
       </nav>
-      <div className="app-main">
-        {tab === 'library' ? (
-          <LibraryScreen onOpen={setOpen} />
-        ) : null}
+      <div className="min-h-0 flex-1">
+        {tab === 'library' ? <LibraryScreen onOpen={setOpen} /> : null}
         {tab === 'notes' ? (
           <NotesScreen
             onOpenBook={(id) => {

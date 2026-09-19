@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { api, type Excerpt } from '../api'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 
 type Props = { onOpenBook: (bookId: string) => void }
 
@@ -18,39 +22,47 @@ export function NotesScreen({ onOpenBook }: Props) {
   )
 
   return (
-    <main className="page">
-      <header className="page-bar">
-        <h1>笔记</h1>
-      </header>
-      <input
-        className="search"
+    <main className="px-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-6">
+      <h1 className="font-heading mb-4 text-2xl">笔记</h1>
+      <Input
+        className="mb-4"
         value={query}
         onChange={(event) => setQuery(event.target.value)}
         placeholder="搜索书摘和笔记"
       />
       {visible.length === 0 ? (
-        <p className="empty">还没有书摘。阅读时选中文字即可添加。</p>
+        <p className="text-muted-foreground">还没有书摘。阅读时选中文字即可添加。</p>
       ) : (
-        <ul className="note-list">
+        <div className="grid gap-3">
           {visible.map((item) => (
-            <li key={item.id}>
-              <button type="button" onClick={() => onOpenBook(item.bookId)}>
-                <strong>{item.bookTitle}</strong>
+            <Card key={item.id} size="sm">
+              <CardHeader>
+                <CardTitle>{item.bookTitle}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
                 <p>{item.quote}</p>
-                {item.note ? <em>{item.note}</em> : null}
-              </button>
-              <button
-                type="button"
-                className="text-btn"
-                onClick={() =>
-                  void api.deleteExcerpt(item.id).then(() => api.listExcerpts().then(setItems))
-                }
-              >
-                删除
-              </button>
-            </li>
+                {item.note ? <p className="text-muted-foreground">{item.note}</p> : null}
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => onOpenBook(item.bookId)}>
+                    打开
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() =>
+                      void api.deleteExcerpt(item.id).then(() => {
+                        void api.listExcerpts().then(setItems)
+                        toast.success('已删除')
+                      })
+                    }
+                  >
+                    删除
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           ))}
-        </ul>
+        </div>
       )}
     </main>
   )

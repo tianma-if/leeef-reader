@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type Book, type Settings } from '../api'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 type Msg = { role: 'user' | 'assistant'; content: string }
 
@@ -64,32 +66,37 @@ export function AiScreen() {
   }
 
   return (
-    <main className="page">
-      <header className="page-bar">
-        <h1>AI</h1>
-      </header>
-      <div className="chat">
+    <main className="flex h-full flex-col px-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-4">
+      <h1 className="font-heading mb-4 text-2xl">AI</h1>
+      <div className="mb-3 min-h-0 flex-1 space-y-2 overflow-auto">
         {messages.map((message, index) => (
-          <p key={index} className={message.role}>
+          <p
+            key={index}
+            className={
+              message.role === 'user'
+                ? 'bg-secondary ml-8 rounded-lg px-3 py-2'
+                : 'bg-card mr-8 rounded-lg px-3 py-2 ring-1 ring-foreground/10'
+            }
+          >
             {message.content}
           </p>
         ))}
       </div>
       <form
-        className="row"
+        className="flex gap-2"
         onSubmit={(event) => {
           event.preventDefault()
           void send()
         }}
       >
-        <input
+        <Input
           value={input}
           onChange={(event) => setInput(event.target.value)}
           placeholder="问书库或当前阅读"
         />
-        <button type="submit" className="btn" disabled={busy}>
+        <Button type="submit" disabled={busy}>
           发送
-        </button>
+        </Button>
       </form>
     </main>
   )

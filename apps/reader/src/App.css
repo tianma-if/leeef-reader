@@ -1,204 +1,3 @@
-:root {
-  font-family: "Songti SC", "Noto Serif SC", "Source Han Serif SC", serif;
-  color: #292b29;
-  background: #f4efe6;
-}
-
-html,
-body,
-#root {
-  margin: 0;
-  min-height: 100%;
-}
-
-.app {
-  min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
-}
-
-.app-main {
-  flex: 1;
-  min-height: 0;
-}
-
-.dock {
-  order: 2;
-  display: flex;
-  border-top: 1px solid #e4d9c8;
-  background: #fffaf3;
-}
-
-.dock button {
-  flex: 1;
-  border: 0;
-  background: transparent;
-  padding: 0.7rem 0.2rem;
-  color: inherit;
-}
-
-.dock .active {
-  font-weight: 700;
-}
-
-.page {
-  padding: calc(1rem + env(safe-area-inset-top, 0px)) 1rem 1.4rem;
-}
-
-.page-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.page h1 {
-  margin: 0 0 0.8rem;
-  font-size: 1.5rem;
-}
-
-.page h2 {
-  font-size: 1.1rem;
-  margin: 1.4rem 0 0.6rem;
-}
-
-.toolbar,
-.row {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  margin: 0.6rem 0 1rem;
-}
-
-input,
-select,
-textarea {
-  font: inherit;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid #d7ccbb;
-  border-radius: 8px;
-  background: #fff;
-  color: inherit;
-}
-
-.btn,
-.shelf-import {
-  appearance: none;
-  border: 1px solid #c9c0b1;
-  background: #fffaf3;
-  border-radius: 8px;
-  padding: 0.45rem 0.9rem;
-  cursor: pointer;
-  color: inherit;
-}
-
-.btn.danger {
-  color: #9b2c2c;
-}
-
-.empty,
-.hint {
-  color: #6b645a;
-  line-height: 1.6;
-}
-
-.shelf-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.9rem 0.65rem;
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.shelf-card {
-  appearance: none;
-  width: 100%;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-}
-
-.shelf-cover {
-  aspect-ratio: 3 / 4;
-  border-radius: 6px;
-  background: linear-gradient(160deg, #3d4a3c, #1f2a1e);
-  color: #f4efe6;
-  display: grid;
-  place-items: center;
-  font-size: 1.8rem;
-  margin-bottom: 0.45rem;
-}
-
-.shelf-card strong,
-.shelf-card em {
-  display: block;
-}
-
-.shelf-card em {
-  font-style: normal;
-  font-size: 0.72rem;
-  color: #7a7368;
-}
-
-.modal {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  display: grid;
-  place-items: center;
-}
-
-.modal-card {
-  width: min(92vw, 24rem);
-  background: #fffaf3;
-  padding: 1rem;
-  border-radius: 12px;
-  display: grid;
-  gap: 0.6rem;
-}
-
-.note-list,
-.plain {
-  list-style: none;
-  padding: 0;
-}
-
-.note-list li {
-  display: flex;
-  gap: 0.6rem;
-  padding: 0.7rem 0;
-  border-bottom: 1px solid #eadfcf;
-}
-
-.stat-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.7rem;
-}
-
-.stat-grid article {
-  background: #fffaf3;
-  padding: 0.9rem;
-  border-radius: 10px;
-}
-
-.stat-grid strong {
-  display: block;
-  font-size: 1.6rem;
-}
-
-.chat p {
-  padding: 0.5rem 0.7rem;
-  border-radius: 8px;
-}
-
-.chat .user {
-  background: #e8efe4;
-}
-
 .reader-shell {
   height: 100dvh;
   display: flex;
@@ -219,14 +18,6 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.reader-chrome button {
-  appearance: none;
-  border: 1px solid #c9c0b1;
-  background: #fffaf3;
-  border-radius: 8px;
-  padding: 0.3rem 0.5rem;
 }
 
 .reader-body {
@@ -258,7 +49,7 @@ textarea {
 .reader-panel {
   width: min(42vw, 16rem);
   overflow: auto;
-  border-left: 1px solid #e4d9c8;
+  border-left: 1px solid var(--border);
   padding: 0.6rem;
 }
 
@@ -270,32 +61,11 @@ textarea {
 }
 
 .reader-error {
-  color: #9b2c2c;
+  color: var(--destructive);
   padding: 0 1rem 1rem;
 }
 
 .reader-status {
   margin: 2rem 1rem;
-  color: #6b645a;
-}
-
-.search {
-  width: 100%;
-  margin-bottom: 0.8rem;
-}
-
-@media (min-width: 900px) {
-  .app {
-    flex-direction: row;
-  }
-  .dock {
-    order: 0;
-    flex-direction: column;
-    width: 5.5rem;
-    border-top: 0;
-    border-right: 1px solid #e4d9c8;
-  }
-  .shelf-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
+  color: var(--muted-foreground);
 }

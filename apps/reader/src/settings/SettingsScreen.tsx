@@ -1,12 +1,24 @@
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { api, type Settings } from '../api'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Separator } from '@/components/ui/separator'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Slider } from '@/components/ui/slider'
 
 const desktop = !/Android|iPhone|iPad/i.test(navigator.userAgent)
 
 export function SettingsScreen() {
   const [value, setValue] = useState<Settings>({})
   const [dbPath, setDbPath] = useState('')
-  const [saved, setSaved] = useState('')
   const [mcp, setMcp] = useState<{ running: boolean; endpoint?: string }>({ running: false })
   const [pair, setPair] = useState('')
 
@@ -19,187 +31,215 @@ export function SettingsScreen() {
   const patch = (next: Partial<Settings>) => setValue((current) => ({ ...current, ...next }))
 
   return (
-    <main className="page">
-      <header className="page-bar">
-        <h1>设置</h1>
-        <button
-          type="button"
-          className="btn"
+    <main className="mx-auto max-w-xl px-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-8">
+      <header className="mb-6 flex items-center justify-between gap-3">
+        <h1 className="font-heading text-2xl">设置</h1>
+        <Button
           onClick={() =>
-            void api.saveSettings(value).then(() => {
-              setSaved('已保存')
-              setTimeout(() => setSaved(''), 1500)
-            })
+            void api.saveSettings(value).then(() => toast.success('已保存'))
           }
         >
-          {saved || '保存'}
-        </button>
+          保存
+        </Button>
       </header>
 
-      <h2>阅读外观</h2>
-      <label>
-        主题
-        <select
-          value={value.theme ?? 'paper'}
-          onChange={(event) => patch({ theme: event.target.value as Settings['theme'] })}
-        >
-          <option value="paper">纸张</option>
-          <option value="sepia">护眼</option>
-          <option value="night">夜间</option>
-        </select>
-      </label>
-      <label>
-        字号 {value.fontSize ?? 18}
-        <input
-          type="range"
-          min={14}
-          max={28}
-          value={value.fontSize ?? 18}
-          onChange={(event) => patch({ fontSize: Number(event.target.value) })}
-        />
-      </label>
-      <label>
-        行距 {value.lineHeight ?? 1.65}
-        <input
-          type="range"
-          min={1.3}
-          max={2.2}
-          step={0.05}
-          value={value.lineHeight ?? 1.65}
-          onChange={(event) => patch({ lineHeight: Number(event.target.value) })}
-        />
-      </label>
-      <label>
-        排版
-        <select
-          value={value.flow ?? 'paginated'}
-          onChange={(event) => patch({ flow: event.target.value as Settings['flow'] })}
-        >
-          <option value="paginated">分页</option>
-          <option value="scrolled">连续滚动</option>
-        </select>
-      </label>
-      <label>
-        栏数
-        <select
-          value={value.columns ?? 1}
-          onChange={(event) => patch({ columns: Number(event.target.value) as 1 | 2 })}
-        >
-          <option value={1}>单栏</option>
-          <option value={2}>双栏</option>
-        </select>
-      </label>
-      <label>
-        中文
-        <select
-          value={value.chinese ?? 'original'}
-          onChange={(event) =>
-            patch({ chinese: event.target.value as Settings['chinese'] })
-          }
-        >
-          <option value="original">原文</option>
-          <option value="simplified">简体</option>
-          <option value="traditional">繁体</option>
-        </select>
-      </label>
+      <section className="grid gap-4">
+        <h2 className="text-lg">阅读外观</h2>
+        <div className="grid gap-1.5">
+          <Label>主题</Label>
+          <Select
+            value={value.theme ?? 'paper'}
+            onValueChange={(theme) => patch({ theme: theme as Settings['theme'] })}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="paper">纸张</SelectItem>
+              <SelectItem value="sepia">护眼</SelectItem>
+              <SelectItem value="night">夜间</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-2">
+          <Label>字号 {value.fontSize ?? 18}</Label>
+          <Slider
+            min={14}
+            max={28}
+            value={[value.fontSize ?? 18]}
+            onValueChange={([fontSize]) => patch({ fontSize })}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label>行距 {value.lineHeight ?? 1.65}</Label>
+          <Slider
+            min={1.3}
+            max={2.2}
+            step={0.05}
+            value={[value.lineHeight ?? 1.65]}
+            onValueChange={([lineHeight]) => patch({ lineHeight })}
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label>排版</Label>
+          <Select
+            value={value.flow ?? 'paginated'}
+            onValueChange={(flow) => patch({ flow: flow as Settings['flow'] })}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="paginated">分页</SelectItem>
+              <SelectItem value="scrolled">连续滚动</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-1.5">
+          <Label>栏数</Label>
+          <Select
+            value={String(value.columns ?? 1)}
+            onValueChange={(columns) => patch({ columns: Number(columns) as 1 | 2 })}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1">单栏</SelectItem>
+              <SelectItem value="2">双栏</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-1.5">
+          <Label>中文</Label>
+          <Select
+            value={value.chinese ?? 'original'}
+            onValueChange={(chinese) => patch({ chinese: chinese as Settings['chinese'] })}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="original">原文</SelectItem>
+              <SelectItem value="simplified">简体</SelectItem>
+              <SelectItem value="traditional">繁体</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </section>
 
-      <h2>TTS</h2>
-      <label>
-        语速 {value.ttsRate ?? 1}
-        <input
-          type="range"
-          min={0.6}
-          max={1.6}
-          step={0.1}
-          value={value.ttsRate ?? 1}
-          onChange={(event) => patch({ ttsRate: Number(event.target.value) })}
-        />
-      </label>
+      <Separator className="my-6" />
+      <section className="grid gap-4">
+        <h2 className="text-lg">TTS</h2>
+        <div className="grid gap-2">
+          <Label>语速 {value.ttsRate ?? 1}</Label>
+          <Slider
+            min={0.6}
+            max={1.6}
+            step={0.1}
+            value={[value.ttsRate ?? 1]}
+            onValueChange={([ttsRate]) => patch({ ttsRate })}
+          />
+        </div>
+      </section>
 
+      <Separator className="my-6" />
       {desktop ? (
-        <>
-          <h2>AI（仅桌面填写）</h2>
-          <label>
-            Endpoint
-            <input
+        <section className="grid gap-4">
+          <h2 className="text-lg">AI（仅桌面填写）</h2>
+          <div className="grid gap-1.5">
+            <Label>Endpoint</Label>
+            <Input
               value={value.aiEndpoint ?? ''}
               onChange={(event) => patch({ aiEndpoint: event.target.value })}
               placeholder="https://api.openai.com/v1"
             />
-          </label>
-          <label>
-            API Key
-            <input
+          </div>
+          <div className="grid gap-1.5">
+            <Label>API Key</Label>
+            <Input
               type="password"
               value={value.aiKey ?? ''}
               onChange={(event) => patch({ aiKey: event.target.value })}
             />
-          </label>
-          <label>
-            模型
-            <input
+          </div>
+          <div className="grid gap-1.5">
+            <Label>模型</Label>
+            <Input
               value={value.aiModel ?? ''}
               onChange={(event) => patch({ aiModel: event.target.value })}
               placeholder="gpt-4o-mini"
             />
-          </label>
-          <h2>同步</h2>
-          <label>
-            后端
-            <select
-              value={value.syncBackend ?? ''}
-              onChange={(event) =>
-                patch({ syncBackend: event.target.value as Settings['syncBackend'] })
+          </div>
+          <h2 className="text-lg">同步</h2>
+          <div className="grid gap-1.5">
+            <Label>后端</Label>
+            <Select
+              value={value.syncBackend || 'none'}
+              onValueChange={(syncBackend) =>
+                patch({
+                  syncBackend: (syncBackend === 'none' ? '' : syncBackend) as Settings['syncBackend'],
+                })
               }
             >
-              <option value="">未配置</option>
-              <option value="s3">S3 兼容</option>
-              <option value="webdav">WebDAV</option>
-            </select>
-          </label>
-          <label>
-            地址
-            <input
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">未配置</SelectItem>
+                <SelectItem value="s3">S3 兼容</SelectItem>
+                <SelectItem value="webdav">WebDAV</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label>地址</Label>
+            <Input
               value={value.syncEndpoint ?? ''}
               onChange={(event) => patch({ syncEndpoint: event.target.value })}
             />
-          </label>
-          <p className="hint">手机通过桌面配对二维码同步这些凭据。写操作会记入 sync_operations，供 MCP 与多端同步使用。</p>
-        </>
+          </div>
+          <p className="text-muted-foreground text-sm">
+            手机通过桌面配对码同步这些凭据。写操作会记入 sync_operations。
+          </p>
+        </section>
       ) : (
-        <p className="hint">对象存储、AI 和 TTS 凭据只在桌面端填写，手机通过配对同步。</p>
+        <p className="text-muted-foreground text-sm">
+          对象存储、AI 和 TTS 凭据只在桌面端填写，手机通过配对同步。
+        </p>
       )}
 
-      <h2>配对</h2>
-      <div className="row">
-        <button
-          type="button"
-          className="btn"
-          onClick={() => void api.pairingCode().then(setPair)}
-        >
-          生成配对码
-        </button>
-        {pair ? <strong>{pair}</strong> : null}
-      </div>
-      <p className="hint">手机在「我的同步设备」里输入该一次性配对码，同步桌面凭据。</p>
+      <Separator className="my-6" />
+      <section className="grid gap-3">
+        <h2 className="text-lg">配对</h2>
+        <div className="flex items-center gap-3">
+          <Button variant="outline" onClick={() => void api.pairingCode().then(setPair)}>
+            生成配对码
+          </Button>
+          {pair ? <strong className="tracking-widest">{pair}</strong> : null}
+        </div>
+      </section>
 
-      <h2>MCP</h2>
-      <p className="hint">数据库路径：{dbPath || '…'}</p>
-      <p className="hint">
-        {mcp.running ? `已运行 ${mcp.endpoint}` : '未运行'}
-      </p>
-      <div className="row">
-        <button
-          type="button"
-          className="btn"
-          onClick={() => void api.mcpStart().then(setMcp).catch((cause) => setSaved(String(cause)))}
-        >
-          启动 sidecar
-        </button>
-        <button type="button" className="btn" onClick={() => void api.mcpStop().then(setMcp)}>
-          停止
-        </button>
-      </div>
+      <Separator className="my-6" />
+      <section className="grid gap-3">
+        <h2 className="text-lg">MCP</h2>
+        <p className="text-muted-foreground text-sm">数据库：{dbPath || '…'}</p>
+        <p className="text-muted-foreground text-sm">
+          {mcp.running ? `已运行 ${mcp.endpoint}` : '未运行'}
+        </p>
+        <div className="flex gap-2">
+          <Button
+            onClick={() =>
+              void api.mcpStart().then(setMcp).catch((cause) => toast.error(String(cause)))
+            }
+          >
+            启动 sidecar
+          </Button>
+          <Button variant="outline" onClick={() => void api.mcpStop().then(setMcp)}>
+            停止
+          </Button>
+        </div>
+      </section>
     </main>
   )
 }

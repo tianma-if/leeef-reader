@@ -10,7 +10,7 @@ leeef-mcp --database <mcp_database_path>
 
 ## 布局
 
-- `apps/reader`：Vite + React + Tauri 2
+- `apps/reader`：Vite + React + Tailwind + shadcn/ui + Tauri 2（壳用组件库，阅读表面仍自绘）
 - `apps/reader/public/vendor/foliate-js`：沿用本仓库已 vendored 的 foliate
 - `apps/reader/public/reader`：阅读 iframe（和壳同一块系统 WebView）
 - `apps/reader/src-tauri/plugins/native-bridge`：Android `PixelCopy` / iOS `takeSnapshot`
