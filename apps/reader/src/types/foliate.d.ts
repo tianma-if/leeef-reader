@@ -13,10 +13,14 @@ declare global {
     goTo: (locator: string) => Promise<void>
     book?: {
       metadata?: { title?: unknown; author?: unknown }
+      toc?: TocItem[]
     }
-    lastLocation?: { cfi?: string; fraction?: number }
+    lastLocation?: { cfi?: string; fraction?: number; tocItem?: { label?: string } }
     renderer: { atStart: boolean; atEnd: boolean }
+    search: (opts: { query: string }) => AsyncIterable<{ cfi?: string; excerpt?: string }>
   }
+
+  type TocItem = { label?: unknown; href?: string; subitems?: TocItem[] }
 
   interface HTMLElementTagNameMap {
     'foliate-view': FoliateViewElement

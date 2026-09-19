@@ -1,5 +1,11 @@
 # Tauri 阅读壳（`tauri` 分支）
 
+数据层是 SQLite `leeef.sqlite`，表结构对齐 Flutter Drift / MCP sidecar。MCP：
+
+```bash
+leeef-mcp --database <mcp_database_path>
+```
+
 本分支在当前仓库里另起 Tauri 壳，不 fork Readest，也不另开 GitHub 仓库。Flutter 应用仍在 `main`。
 
 ## 布局
