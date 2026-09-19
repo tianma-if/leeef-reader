@@ -76,6 +76,12 @@ sidecars/*/build/
 **/windows/flutter/ephemeral/
 **/windows/CMakeLists.txt.user
 
+# Tauri reader (apps/reader)
+apps/reader/node_modules/
+apps/reader/dist/
+apps/reader/src-tauri/target/
+apps/reader/src-tauri/gen/
+
 # Local environment/secrets
 .env
 .env.*

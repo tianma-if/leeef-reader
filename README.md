@@ -11,6 +11,8 @@ iOS · Android · macOS · Windows
 
 </div>
 
+> **`tauri` 分支**：阅读壳改为 Tauri + 系统 WebView（见 [`docs/tauri-reader.md`](docs/tauri-reader.md)）。Flutter 应用仍在 `main`。不要 fork Readest。
+
 ## 核心能力
 
 ### 1. 跨端同步

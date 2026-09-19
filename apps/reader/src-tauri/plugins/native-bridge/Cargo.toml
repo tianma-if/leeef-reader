@@ -1,0 +1,19 @@
+[package]
+name = "tauri-plugin-native-bridge"
+version = "0.1.0"
+authors = ["Leeef"]
+description = "Native webview capture for Leeef page turns"
+edition = "2021"
+rust-version = "1.77"
+links = "tauri-plugin-native-bridge"
+
+[dependencies]
+tauri = { version = "2" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
+base64 = "0.22"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
