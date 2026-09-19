@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { api, isAndroid, type Book, type Shelf, type Tag } from '../api'
+import { api, isAndroid, isMobile, type Book, type Shelf, type Tag } from '../api'
 import { prepareBookFile } from '../lib/bookFile'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -49,6 +49,8 @@ export function LibraryScreen({ onOpen }: Props) {
   const [tag, setTag] = useState('all')
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState<Book | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const useNativePicker = isAndroid() || !isMobile()
 
   const reload = async () => {
     const [nextBooks, nextTags, nextShelves] = await Promise.all([
@@ -93,7 +95,7 @@ export function LibraryScreen({ onOpen }: Props) {
     }
   }
 
-  const onAndroidImport = async () => {
+  const onNativeImport = async () => {
     setBusy(true)
     try {
       const picked = await invoke<{ name: string; data: string }[]>(
@@ -133,28 +135,29 @@ export function LibraryScreen({ onOpen }: Props) {
     <main className="px-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-6">
       <header className="mb-4 flex items-center justify-between gap-3">
         <h1 className="font-heading text-2xl">书架</h1>
-        {isAndroid() ? (
-          <Button disabled={busy} onClick={() => void onAndroidImport()}>
+        {useNativePicker ? (
+          <Button disabled={busy} onClick={() => void onNativeImport()}>
             {busy ? '导入中…' : '导入'}
           </Button>
         ) : (
-          <Button asChild disabled={busy}>
-            <label>
+          <>
+            <input
+              ref={fileInputRef}
+              className="sr-only"
+              type="file"
+              accept={ACCEPT}
+              multiple
+              disabled={busy}
+              onChange={(event) => {
+                const files = event.target.files
+                event.target.value = ''
+                if (files) void importPicked([...files])
+              }}
+            />
+            <Button disabled={busy} onClick={() => fileInputRef.current?.click()}>
               {busy ? '导入中…' : '导入'}
-              <input
-                hidden
-                type="file"
-                accept={ACCEPT}
-                multiple
-                disabled={busy}
-                onChange={(event) => {
-                  const files = event.target.files
-                  event.target.value = ''
-                  if (files) void importPicked([...files])
-                }}
-              />
-            </label>
-          </Button>
+            </Button>
+          </>
         )}
       </header>
       <div className="mb-4 flex flex-wrap gap-2">

@@ -11,9 +11,10 @@ links = "tauri-plugin-native-bridge"
 tauri = { version = "2" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
-
-[target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
 base64 = "0.22"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+rfd = "0.15"
 
 [build-dependencies]
 tauri-plugin = { version = "2", features = ["build"] }

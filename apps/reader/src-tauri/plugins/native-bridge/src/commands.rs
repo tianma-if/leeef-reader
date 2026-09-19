@@ -19,5 +19,12 @@ pub(crate) async fn capture_webview_region<R: Runtime>(
 pub(crate) async fn pick_books<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<Vec<crate::models::PickedBook>> {
-    app.native_bridge().pick_books()
+    #[cfg(desktop)]
+    {
+        app.native_bridge().pick_books().await
+    }
+    #[cfg(mobile)]
+    {
+        app.native_bridge().pick_books()
+    }
 }
