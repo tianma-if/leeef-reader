@@ -13,6 +13,12 @@ on:
         required: true
         type: boolean
         default: true
+      platforms:
+        description: Which signed jobs to run
+        required: true
+        type: choice
+        options: [all, macos, android]
+        default: all
 
 permissions:
   contents: write
@@ -23,7 +29,7 @@ concurrency:
 
 jobs:
   macos:
-    if: github.repository == 'tianma-if/leeef-reader'
+    if: github.repository == 'tianma-if/leeef-reader' && (inputs.platforms == 'all' || inputs.platforms == 'macos')
     name: Signed macOS DMG
     runs-on: macos-15
     timeout-minutes: 90
@@ -90,7 +96,7 @@ jobs:
             --clobber
 
   android:
-    if: github.repository == 'tianma-if/leeef-reader'
+    if: github.repository == 'tianma-if/leeef-reader' && (inputs.platforms == 'all' || inputs.platforms == 'android')
     name: Signed Android APK and AAB
     runs-on: ubuntu-latest
     timeout-minutes: 90
