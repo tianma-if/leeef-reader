@@ -147,6 +147,9 @@ export function SettingsScreen() {
       {desktop ? (
         <section className="grid gap-4">
           <h2 className="text-lg">AI（仅桌面填写）</h2>
+          <p className="text-muted-foreground text-sm">
+            OpenAI 兼容接口，DeepSeek、OpenRouter、xAI 等填各自 Base URL 即可。
+          </p>
           <div className="grid gap-1.5">
             <Label>Endpoint</Label>
             <Input

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import {
   BarChart3,
   BookOpen,
@@ -7,7 +7,6 @@ import {
   Settings,
   StickyNote,
 } from 'lucide-react'
-import { AiScreen } from './ai/AiScreen'
 import { api, type Book } from './api'
 import { Button } from '@/components/ui/button'
 import { LibraryScreen } from './library/LibraryScreen'
@@ -17,6 +16,10 @@ import { ReaderView } from './reader/ReaderView'
 import { SettingsScreen } from './settings/SettingsScreen'
 import { StatsScreen } from './stats/StatsScreen'
 import './App.css'
+
+const AiScreen = lazy(() =>
+  import('./ai/AiScreen').then((module) => ({ default: module.AiScreen })),
+)
 
 type Tab = 'library' | 'notes' | 'stats' | 'opds' | 'ai' | 'settings'
 
@@ -81,7 +84,11 @@ function App() {
         ) : null}
         {tab === 'stats' ? <StatsScreen /> : null}
         {tab === 'opds' ? <OpdsScreen /> : null}
-        {tab === 'ai' ? <AiScreen /> : null}
+        {tab === 'ai' ? (
+          <Suspense fallback={<p className="text-muted-foreground px-4 pt-8">加载 AI…</p>}>
+            <AiScreen />
+          </Suspense>
+        ) : null}
         {tab === 'settings' ? <SettingsScreen /> : null}
       </div>
     </div>
