@@ -234,7 +234,7 @@ export function ReaderSidebar(props: Props) {
   if (props.mobile) {
     return (
       <Sheet open={props.open} onOpenChange={(open) => !open && props.onClose()}>
-        <SheetContent side="bottom" className="max-h-[80dvh] gap-0 pb-[env(safe-area-inset-bottom,0px)]">
+        <SheetContent side="bottom" className="max-h-[80dvh] gap-0 pb-[max(env(safe-area-inset-bottom,0px),var(--leeef-safe-bottom,0px))]">
           <SheetHeader>
             <SheetTitle>目录与书签</SheetTitle>
           </SheetHeader>

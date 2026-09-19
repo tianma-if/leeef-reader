@@ -14,12 +14,17 @@ import { ReaderFooter } from './ReaderFooter'
 import { ReaderSidebar } from './ReaderSidebar'
 import { SelectionPopup, type SelectionState } from './SelectionPopup'
 import {
-  claimFromDelta,
   releaseVelocity,
   shouldCommitTurn,
   TAP_SLOP_PX,
   zoneOf,
 } from './turnCommit'
+import {
+  createTurnGestureIntent,
+  edgeDirectionOf,
+  shouldClaimTurnGesture,
+  type TurnGestureIntent,
+} from './turnGestureArena'
 import { useReaderChrome } from './useReaderChrome'
 
 type Props = {
@@ -41,6 +46,21 @@ const loadFoliate = () =>
     script.onerror = () => reject(new Error('无法加载阅读引擎'))
     document.head.append(script)
   })
+
+const loadBookSource = async (book: Book) => {
+  const type = book.mediaType || 'application/epub+zip'
+  const name = `${book.title}.epub`
+  if (book.filePath) {
+    try {
+      const response = await fetch(api.bookFileUrl(book.filePath))
+      if (response.ok) return new File([await response.blob()], name, { type })
+    } catch {
+      // Fall through to the binary IPC path.
+    }
+  }
+  const bytes = await api.bookBytes(book.id)
+  return new File([bytes], name, { type })
+}
 
 const waitForSize = (element: HTMLElement) =>
   new Promise<void>((resolve) => {
@@ -70,11 +90,13 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     startX: number
     startY: number
     originX: number
+    visualOrigin: number
     left: number
     width: number
     claimed: boolean
     vertical: boolean
     forward: boolean
+    intent: TurnGestureIntent
     samples: { distance: number; time: number }[]
   } | null>(null)
   const turner = useRef<CapturedPageTurn | null>(null)
@@ -107,7 +129,14 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       navigate: async (forward) => {
         const view = viewRef.current
         if (!view) return
-        await (forward ? view.next() : view.prev())
+        const renderer = view.renderer
+        const hadAnimated = renderer?.hasAttribute('animated')
+        renderer?.removeAttribute('animated')
+        try {
+          await (forward ? view.next() : view.prev())
+        } finally {
+          if (hadAnimated) renderer?.setAttribute('animated', '')
+        }
       },
     })
     return turner.current
@@ -180,13 +209,14 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     let view: FoliateViewElement | null = null
 
     const start = async () => {
-      const loaded = await api.getSettings()
+      const [loaded, source] = await Promise.all([
+        api.getSettings(),
+        loadBookSource(book),
+        loadFoliate(),
+      ])
       if (cancelled) return
       settingsRef.current = loaded
       setSettings(loaded)
-      const bytes = await api.bookBytes(book.id)
-      await loadFoliate()
-      if (cancelled) return
       await waitForSize(host)
       if (cancelled) return
       view = document.createElement('foliate-view')
@@ -281,13 +311,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         })
         paintHighlights(view)
       }) as EventListener)
-      const copy = new Uint8Array(bytes.byteLength)
-      copy.set(bytes)
-      await view.open(
-        new File([new Blob([copy])], book.title + '.epub', {
-          type: book.mediaType || 'application/epub+zip',
-        }),
-      )
+      await view.open(source)
       if (cancelled) return
       applyViewLayout(view, loaded, mobile)
       setToc(view.book?.toc ?? [])
@@ -366,17 +390,21 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     const rect = hostRef.current?.getBoundingClientRect()
     if (!rect) return
     event.currentTarget.setPointerCapture(event.pointerId)
+    const now = performance.now()
+    const localX = event.clientX - rect.left
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
       originX: event.clientX,
+      visualOrigin: 0,
       left: rect.left,
       width: rect.width,
       claimed: false,
       vertical: false,
       forward: true,
-      samples: [{ distance: 0, time: performance.now() }],
+      intent: createTurnGestureIntent(edgeDirectionOf(localX, rect.width), now),
+      samples: [{ distance: 0, time: now }],
     }
     if (mobile && paginated) void getTurner().prepare()
   }
@@ -387,21 +415,30 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     const dx = event.clientX - drag.startX
     const dy = event.clientY - drag.startY
     if (!drag.claimed && !drag.vertical) {
-      const claim = claimFromDelta(dx, dy)
-      if (claim === 'vertical') {
+      if (drag.intent.verticalLocked) {
         drag.vertical = true
         return
       }
-      if (claim && mobile && paginated) {
+      const claimed = shouldClaimTurnGesture(drag.intent, {
+        deltaX: dx,
+        deltaY: dy,
+        deltaT: performance.now(),
+      })
+      if (drag.intent.verticalLocked) {
+        drag.vertical = true
+        return
+      }
+      if (claimed && mobile && paginated) {
         drag.claimed = true
-        drag.forward = claim === 'forward'
-        drag.originX = event.clientX
+        drag.forward = dx < 0
+        drag.originX = drag.startX
+        drag.visualOrigin = Math.max(0, drag.forward ? -dx : dx)
         getTurner().startDrag(drag.forward)
       }
     }
     if (!drag.claimed) return
     const signed = drag.forward ? drag.originX - event.clientX : event.clientX - drag.originX
-    const next = Math.min(1, Math.max(0, signed / drag.width))
+    const next = Math.min(1, Math.max(0, (signed - drag.visualOrigin) / drag.width))
     getTurner().setProgress(next)
     drag.samples.push({ distance: signed, time: performance.now() })
     if (drag.samples.length > 8) drag.samples.shift()
@@ -415,7 +452,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     const dy = event.clientY - drag.startY
     if (drag.claimed) {
       const signed = drag.forward ? drag.originX - event.clientX : event.clientX - drag.originX
-      const progressValue = Math.min(1, Math.max(0, signed / drag.width))
+      const progressValue = Math.min(1, Math.max(0, (signed - drag.visualOrigin) / drag.width))
       getTurner().setProgress(progressValue)
       const velocity = releaseVelocity(drag.samples, performance.now())
       const commit =

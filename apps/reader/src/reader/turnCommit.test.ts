@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { claimFromDelta, settleDuration, shouldCommitTurn, zoneOf } from './turnCommit'
+import { settleDuration, shouldCommitTurn, zoneOf } from './turnCommit'
+import {
+  createTurnGestureIntent,
+  shouldClaimTurnGesture,
+} from './turnGestureArena'
 
 describe('zoneOf', () => {
   it('splits the page into edge turn and center chrome', () => {
@@ -21,15 +25,23 @@ describe('shouldCommitTurn', () => {
   })
 })
 
-describe('claimFromDelta', () => {
-  it('claims a horizontal swipe from anywhere, not only the edge', () => {
-    expect(claimFromDelta(-16, 2)).toBe('forward')
-    expect(claimFromDelta(16, -3)).toBe('back')
+describe('shouldClaimTurnGesture', () => {
+  it('claims a center swipe after two coherent horizontal samples', () => {
+    const intent = createTurnGestureIntent(0, 0)
+    expect(shouldClaimTurnGesture(intent, { deltaX: -4, deltaY: 0, deltaT: 10 })).toBe(false)
+    expect(shouldClaimTurnGesture(intent, { deltaX: -8, deltaY: 0, deltaT: 20 })).toBe(true)
+  })
+
+  it('claims an inward edge swipe on the first sample', () => {
+    const intent = createTurnGestureIntent(-1, 0)
+    expect(shouldClaimTurnGesture(intent, { deltaX: -3, deltaY: 0, deltaT: 8 })).toBe(true)
   })
 
   it('locks vertical flicks so chrome toggle still works', () => {
-    expect(claimFromDelta(2, -20)).toBe('vertical')
-    expect(claimFromDelta(-4, 4)).toBe(null)
+    const intent = createTurnGestureIntent(0, 0)
+    expect(shouldClaimTurnGesture(intent, { deltaX: 2, deltaY: -20, deltaT: 16 })).toBe(false)
+    expect(intent.verticalLocked).toBe(true)
+    expect(shouldClaimTurnGesture(intent, { deltaX: -20, deltaY: -20, deltaT: 30 })).toBe(false)
   })
 })
 

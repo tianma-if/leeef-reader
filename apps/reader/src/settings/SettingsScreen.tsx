@@ -35,7 +35,7 @@ export function SettingsScreen() {
   const patch = (next: Partial<Settings>) => setValue((current) => ({ ...current, ...next }))
 
   return (
-    <main className="mx-auto max-w-xl px-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-8">
+    <main className="mx-auto max-w-xl px-4 pt-4 pb-8">
       <header className="mb-6 flex items-center justify-between gap-3">
         <h1 className="font-heading text-2xl">设置</h1>
         <Button

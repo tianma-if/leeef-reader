@@ -42,6 +42,17 @@ function App() {
     void api.listBooks().then(setBooks).catch(() => undefined)
   }, [open, tab])
 
+  useEffect(() => {
+    const hrefs = ['/vendor/foliate-js/view.js', '/vendor/foliate-js/paginator.js']
+    for (const href of hrefs) {
+      if (document.querySelector(`link[href="${href}"]`)) continue
+      const link = document.createElement('link')
+      link.rel = 'modulepreload'
+      link.href = href
+      document.head.append(link)
+    }
+  }, [])
+
   if (open) {
     return (
       <ReaderView
@@ -57,8 +68,8 @@ function App() {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col bg-background md:flex-row">
-      <nav className="order-2 flex border-t bg-card pb-[env(safe-area-inset-bottom,0px)] md:order-0 md:w-20 md:flex-col md:border-t-0 md:border-r md:pb-0">
+    <div className="flex h-full min-h-0 flex-col bg-background md:flex-row">
+      <nav className="order-2 flex border-t bg-card md:order-0 md:w-20 md:flex-col md:border-t-0 md:border-r">
         {tabs.map((item) => {
           const Icon = item.icon
           return (

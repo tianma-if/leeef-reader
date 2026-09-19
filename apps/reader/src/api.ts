@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 
 export type Book = {
   id: string
@@ -67,6 +67,9 @@ export type Settings = {
   chinese?: 'original' | 'simplified' | 'traditional'
 }
 
+const asBytes = (raw: ArrayBuffer | Uint8Array | number[]): Uint8Array<ArrayBuffer> =>
+  raw instanceof ArrayBuffer ? new Uint8Array(raw) : new Uint8Array(raw)
+
 const toB64 = (bytes: Uint8Array) => {
   let binary = ''
   const chunk = 0x8000
@@ -99,8 +102,11 @@ export const api = {
   deleteBook: (id: string) => invoke('delete_book', { id }),
   updateBook: (id: string, title?: string, author?: string, rating?: number) =>
     invoke('update_book', { id, title: title ?? null, author: author ?? null, rating: rating ?? null }),
-  bookBytes: async (id: string) => new Uint8Array(await invoke<number[]>('book_bytes', { id })),
-  bookCover: async (id: string) => new Uint8Array(await invoke<number[]>('book_cover', { id })),
+  bookBytes: async (id: string) =>
+    asBytes(await invoke<ArrayBuffer | number[]>('book_bytes', { id })),
+  bookCover: async (id: string) =>
+    asBytes(await invoke<ArrayBuffer | number[]>('book_cover', { id })),
+  bookFileUrl: (filePath: string) => convertFileSrc(filePath),
   saveProgress: (
     bookId: string,
     locator: string,

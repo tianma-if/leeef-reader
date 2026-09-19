@@ -84,3 +84,4 @@ dependencies {
 }
 
 apply(from = "tauri.build.gradle.kts")
+apply(from = "debug-id.gradle.kts")

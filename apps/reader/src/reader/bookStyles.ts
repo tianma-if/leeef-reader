@@ -47,10 +47,11 @@ export const applyViewLayout = (
   const flow = settings.flow ?? 'paginated'
   const paginated = flow === 'paginated'
   renderer.setAttribute('flow', flow)
-  renderer.setAttribute('max-column-count', String(settings.columns ?? 1))
+  renderer.setAttribute('max-column-count', String(mobile ? 1 : (settings.columns ?? 1)))
   renderer.setAttribute('margin', '44px')
   renderer.setAttribute('max-block-size', '10000px')
   if (paginated && mobile) {
+    renderer.setAttribute('max-inline-size', '10000')
     view.setAttribute('no-swipe', '')
     renderer.setAttribute('no-swipe', '')
     renderer.removeAttribute('animated')

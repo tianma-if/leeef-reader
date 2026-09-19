@@ -39,7 +39,7 @@ export function OpdsScreen() {
   }
 
   return (
-    <main className="px-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-6">
+    <main className="px-4 pt-4 pb-6">
       <header className="mb-4 flex items-center justify-between gap-3">
         <h1 className="font-heading text-2xl">OPDS</h1>
         <Button onClick={() => void load()}>浏览</Button>

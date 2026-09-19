@@ -22,7 +22,7 @@ export function NotesScreen({ onOpenBook }: Props) {
   )
 
   return (
-    <main className="px-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-6">
+    <main className="px-4 pt-4 pb-6">
       <h1 className="font-heading mb-4 text-2xl">笔记</h1>
       <Input
         className="mb-4"

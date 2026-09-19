@@ -3,6 +3,7 @@ mod mcp;
 
 use db::AppState;
 use serde::Deserialize;
+use tauri::ipc::Response;
 use tauri::{Manager, State};
 
 #[derive(Deserialize)]
@@ -71,13 +72,13 @@ fn update_book(
 }
 
 #[tauri::command]
-fn book_bytes(state: State<AppState>, id: String) -> Result<Vec<u8>, String> {
-    db::book_bytes(&state, &id)
+fn book_bytes(state: State<AppState>, id: String) -> Result<Response, String> {
+    Ok(Response::new(db::book_bytes(&state, &id)?))
 }
 
 #[tauri::command]
-fn book_cover(state: State<AppState>, id: String) -> Result<Vec<u8>, String> {
-    db::book_cover(&state, &id)
+fn book_cover(state: State<AppState>, id: String) -> Result<Response, String> {
+    Ok(Response::new(db::book_cover(&state, &id)?))
 }
 
 #[tauri::command]

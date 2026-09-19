@@ -30,7 +30,7 @@ export function AiScreen() {
 
   if (settings == null) {
     return (
-      <main className="px-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-4">
+      <main className="px-4 pt-4 pb-4">
         <h1 className="font-heading mb-4 text-2xl">AI</h1>
         <p className="text-muted-foreground">正在读取设置…</p>
       </main>
@@ -39,7 +39,7 @@ export function AiScreen() {
 
   if (!hasAiCredentials(settings)) {
     return (
-      <main className="px-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-4">
+      <main className="px-4 pt-4 pb-4">
         <h1 className="font-heading mb-4 text-2xl">AI</h1>
         <p className="text-muted-foreground">
           {isMobile()
@@ -79,7 +79,7 @@ function AiChat({ settings }: { settings: Settings }) {
   }
 
   return (
-    <main className="flex h-full flex-col px-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-4">
+    <main className="flex h-full flex-col px-4 pt-4 pb-4">
       <h1 className="font-heading mb-4 text-2xl">AI</h1>
       <div className="mb-3 min-h-0 flex-1 space-y-3 overflow-auto">
         {messages.length === 0 ? (

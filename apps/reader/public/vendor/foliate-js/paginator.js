@@ -1072,7 +1072,10 @@ export class Paginator extends HTMLElement {
             index: this.#adjacentIndex(dir),
             anchor: prev ? () => 1 : () => 0,
         })
-        if (shouldGo || !this.hasAttribute('animated')) await wait(100)
+        // Captured-slide sets no-swipe and owns the animation. The 100ms
+        // debounce lets neighboring CSS columns show under the overlay.
+        if ((shouldGo || !this.hasAttribute('animated')) && !this.hasAttribute('no-swipe'))
+            await wait(100)
         this.#locked = false
     }
     prev(distance) {

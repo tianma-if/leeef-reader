@@ -1,12 +1,14 @@
 .reader-shell {
   position: relative;
-  height: 100dvh;
+  height: 100%;
   overflow: hidden;
 }
 
 .reader-stage {
   position: absolute;
   inset: 0;
+  background: inherit;
+  overflow: hidden;
 }
 
 .reader-stage foliate-view {
@@ -30,7 +32,7 @@
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  padding: calc(0.4rem + env(safe-area-inset-top, 0px)) 0.5rem 0.4rem;
+  padding: 0.4rem 0.5rem;
 }
 
 .reader-header strong {
@@ -44,7 +46,6 @@
 
 .reader-footer {
   bottom: 0;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .reader-header.is-hidden,
@@ -91,18 +92,23 @@
 }
 
 .reader-band-top {
-  top: calc(0.45rem + env(safe-area-inset-top, 0px));
+  top: 0.45rem;
   left: 1rem;
 }
 
 .reader-band-bottom {
   right: 1rem;
-  bottom: calc(0.45rem + env(safe-area-inset-bottom, 0px));
+  bottom: 0.45rem;
+}
+
+.reader-shell.is-capturing .reader-band,
+.reader-shell:has([data-page-turn]) .reader-band {
+  visibility: hidden;
 }
 
 .reader-ribbon {
   position: absolute;
-  top: env(safe-area-inset-top, 0px);
+  top: 0;
   right: 1.25rem;
   z-index: 5;
   width: 0.28rem;

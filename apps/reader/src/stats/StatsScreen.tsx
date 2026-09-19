@@ -39,7 +39,7 @@ export function StatsScreen() {
   ]
 
   return (
-    <main className="px-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-6">
+    <main className="px-4 pt-4 pb-6">
       <h1 className="font-heading mb-4 text-2xl">统计</h1>
       <div className="mb-6 grid grid-cols-2 gap-3">
         {cards.map((card) => (

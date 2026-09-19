@@ -192,7 +192,7 @@ export function LibraryScreen({ onOpen }: Props) {
 
   return (
     <main
-      className="px-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-6"
+      className="px-4 pt-4 pb-6"
       onDragOver={
         desktop
           ? (event) => {

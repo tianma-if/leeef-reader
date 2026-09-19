@@ -2,16 +2,27 @@
  * Flat captured-page slide overlay.
  *
  * Adapted from Readest's PageSlideRenderer (AGPL-3.0): one compositor
- * sheet, translate3d 1:1 with progress, clip to the reader cell.
+ * sheet, translate3d 1:1 with progress, clip to the reader cell. Settle
+ * uses Web Animations so the play-out runs on the compositor.
  */
 
 const EDGE_SHADOW_WIDTH_PX = 28
+const SETTLE_KEYFRAME_STEPS = 32
+
+export type PageSlideSettleOptions = {
+  from: number
+  target: number
+  rtl: boolean
+  duration: number
+  easing: (progress: number) => number
+}
 
 export class PageSlideRenderer {
   private sheet: HTMLDivElement | null = null
   private canvas: HTMLCanvasElement | null = null
   private shadow: HTMLDivElement | null = null
   private width = 0
+  private shadowRtl: boolean | null = null
 
   attach(container: HTMLElement, width: number, height: number, dpr = window.devicePixelRatio) {
     this.width = width
@@ -26,6 +37,7 @@ export class PageSlideRenderer {
       willChange: 'transform',
       backfaceVisibility: 'hidden',
       transform: 'translate3d(0px, 0, 0)',
+      background: 'inherit',
     })
     const canvas = document.createElement('canvas')
     canvas.width = Math.round(width * dpr)
@@ -50,6 +62,7 @@ export class PageSlideRenderer {
     this.sheet = sheet
     this.canvas = canvas
     this.shadow = shadow
+    this.updateShadow(false)
   }
 
   setTexture(source: CanvasImageSource) {
@@ -61,16 +74,29 @@ export class PageSlideRenderer {
 
   render(progress: number, rtl = false) {
     if (!this.sheet) return
-    const shift = (rtl ? 1 : -1) * progress * this.width
-    this.sheet.style.transform = `translate3d(${shift}px, 0, 0)`
-    if (!this.shadow) return
-    const fade = Math.min(1, progress * 3) * (1 - progress)
-    this.shadow.style.opacity = String(fade)
-    this.shadow.style.left = rtl ? '0' : 'auto'
-    this.shadow.style.right = rtl ? 'auto' : '0'
-    this.shadow.style.background = rtl
-      ? 'linear-gradient(to left, rgba(0,0,0,0.28), transparent)'
-      : 'linear-gradient(to right, rgba(0,0,0,0.28), transparent)'
+    this.updateShadow(rtl)
+    this.sheet.style.transform = this.transformAt(progress, rtl)
+  }
+
+  animateSettle(options: PageSlideSettleOptions): Animation | null {
+    const sheet = this.sheet
+    if (!sheet || typeof sheet.animate !== 'function') return null
+    this.updateShadow(options.rtl)
+    const span = options.target - options.from
+    const keyframes = Array.from({ length: SETTLE_KEYFRAME_STEPS + 1 }, (_, index) => {
+      const offset = index / SETTLE_KEYFRAME_STEPS
+      const progress = options.from + span * options.easing(offset)
+      return { offset, transform: this.transformAt(progress, options.rtl) }
+    })
+    try {
+      return sheet.animate(keyframes, {
+        duration: options.duration,
+        easing: 'linear',
+        fill: 'both',
+      })
+    } catch {
+      return null
+    }
   }
 
   dispose() {
@@ -78,5 +104,26 @@ export class PageSlideRenderer {
     this.sheet = null
     this.canvas = null
     this.shadow = null
+    this.shadowRtl = null
+  }
+
+  private transformAt(progress: number, rtl: boolean) {
+    const shift = (rtl ? 1 : -1) * progress * this.width
+    return `translate3d(${shift}px, 0, 0)`
+  }
+
+  private updateShadow(rtl: boolean) {
+    const shadow = this.shadow
+    if (!shadow || this.shadowRtl === rtl) return
+    this.shadowRtl = rtl
+    if (rtl) {
+      shadow.style.left = `${-EDGE_SHADOW_WIDTH_PX}px`
+      shadow.style.right = 'auto'
+      shadow.style.background = 'linear-gradient(to right, transparent, rgba(0, 0, 0, 0.35))'
+    } else {
+      shadow.style.left = '100%'
+      shadow.style.right = 'auto'
+      shadow.style.background = 'linear-gradient(to right, rgba(0, 0, 0, 0.35), transparent)'
+    }
   }
 }

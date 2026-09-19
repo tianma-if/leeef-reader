@@ -6,18 +6,6 @@ export const FLICK_PROJECT_MS = 240
 export const SETTLE_MS = 450
 export const SETTLE_FLOOR_MS = 90
 export const TAP_SLOP_PX = 12
-export const CLAIM_DISTANCE_PX = 12
-export const VERTICAL_LOCK_PX = 8
-
-export type GestureClaim = 'forward' | 'back' | 'vertical' | null
-
-export const claimFromDelta = (dx: number, dy: number): GestureClaim => {
-  const absX = Math.abs(dx)
-  const absY = Math.abs(dy)
-  if (absY >= VERTICAL_LOCK_PX && absY > absX) return 'vertical'
-  if (absX >= CLAIM_DISTANCE_PX && absX > absY) return dx < 0 ? 'forward' : 'back'
-  return null
-}
 
 export type Zone = 'left' | 'center' | 'right'
 
