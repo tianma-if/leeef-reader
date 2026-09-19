@@ -25,4 +25,17 @@ npm install
 npm run tauri dev
 ```
 
-Android / iOS 需先在 `apps/reader` 里执行 `npm run tauri android init` / `ios init`，真机调试，不要用模拟器。
+## Android 真机
+
+只使用 USB 真机，不要开模拟器。Redmi / HyperOS 需打开开发者选项里的 **USB 安装**，`adb install` 弹出「USB安装提示」时点 **继续安装**。
+
+```bash
+cd apps/reader
+export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
+npx tauri android build --debug --apk --target aarch64 --ci
+adb -s fb091b3c install -r -t src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+adb -s fb091b3c shell am start -n dev.leeef.leeef_reader/.MainActivity
+```
+
+调试包 applicationId 为 `dev.leeef.leeef_reader.debug`（见 `debug-id.gradle.kts`），避免覆盖商店版。若某次构建尚未套上 suffix，安装的是 `dev.leeef.leeef_reader`。
