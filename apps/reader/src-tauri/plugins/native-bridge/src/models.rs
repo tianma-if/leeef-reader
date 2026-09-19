@@ -13,3 +13,14 @@ pub struct CaptureWebviewRegionRequest {
 pub struct CaptureWebviewRegionResponse {
     pub data: String,
 }
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct PickedBook {
+    pub name: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct PickBooksResponse {
+    pub files: Vec<PickedBook>,
+}

@@ -14,3 +14,10 @@ pub(crate) async fn capture_webview_region<R: Runtime>(
         .capture_webview_region(&window, payload)?;
     Ok(tauri::ipc::Response::new(bytes))
 }
+
+#[command]
+pub(crate) async fn pick_books<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<Vec<crate::models::PickedBook>> {
+    app.native_bridge().pick_books()
+}

@@ -10,6 +10,9 @@ class CaptureWebviewRegionArgs: Decodable {
 }
 
 class NativeBridgePlugin: Plugin {
+  @objc public func pick_books(_ invoke: Invoke) {
+    invoke.resolve(["files": [] as [Any]])
+  }
   /// WKWebView snapshot for the captured slide pipeline.
   /// Adapted from Readest (AGPL-3.0): cap at 2x CSS pixels, JPEG 0.9.
   @objc public func capture_webview_region(_ invoke: Invoke) {

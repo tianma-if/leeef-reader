@@ -32,7 +32,10 @@ impl<R: Runtime, T: Manager<R>> NativeBridgeExt<R> for T {
 
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("native-bridge")
-        .invoke_handler(tauri::generate_handler![commands::capture_webview_region])
+        .invoke_handler(tauri::generate_handler![
+            commands::capture_webview_region,
+            commands::pick_books
+        ])
         .setup(|app, api| {
             #[cfg(mobile)]
             let native_bridge = mobile::init(app, api)?;

@@ -1,17 +1,23 @@
 package dev.leeef.native_bridge
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.provider.OpenableColumns
 import android.util.Base64
 import android.view.PixelCopy
 import android.webkit.WebView
+import androidx.activity.result.ActivityResult
+import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
+import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.ByteArrayOutputStream
@@ -37,6 +43,76 @@ class NativeBridgePlugin(private val activity: Activity) : Plugin(activity) {
     override fun load(webView: WebView) {
         webViewRef = webView
         super.load(webView)
+    }
+
+    @Command
+    fun pick_books(invoke: Invoke) {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        startActivityForResult(invoke, intent, "onPickBooks")
+    }
+
+    @ActivityCallback
+    private fun onPickBooks(invoke: Invoke, result: ActivityResult) {
+        val payload = JSObject()
+        val files = JSArray()
+        payload.put("files", files)
+        if (result.resultCode != Activity.RESULT_OK) {
+            invoke.resolve(payload)
+            return
+        }
+        val data = result.data
+        val uris = mutableListOf<Uri>()
+        val clip = data?.clipData
+        if (clip != null) {
+            for (index in 0 until clip.itemCount) {
+                val uri = clip.getItemAt(index)?.uri
+                if (uri != null) uris.add(uri)
+            }
+        }
+        val single = data?.data
+        if (uris.isEmpty() && single != null) {
+            uris.add(single)
+        }
+        for (uri in uris) {
+            try {
+                activity.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            } catch (_: SecurityException) {
+                // Some providers only grant a one-shot read.
+            }
+            val name = queryDisplayName(uri)
+            val stream = activity.contentResolver.openInputStream(uri) ?: continue
+            val bytes = stream.use { input -> input.readBytes() }
+            files.put(
+                JSObject()
+                    .put("name", name)
+                    .put("data", Base64.encodeToString(bytes, Base64.NO_WRAP)),
+            )
+        }
+        invoke.resolve(payload)
+    }
+
+    private fun queryDisplayName(uri: Uri): String {
+        val cursor = activity.contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME),
+            null,
+            null,
+            null,
+        )
+        cursor?.use {
+            if (it.moveToFirst()) {
+                val index = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0) return it.getString(index)
+            }
+        }
+        return uri.lastPathSegment ?: "book"
     }
 
     @Command

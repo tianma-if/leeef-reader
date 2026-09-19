@@ -21,4 +21,8 @@ impl<R: Runtime> NativeBridge<R> {
         // Desktop falls back to foliate's own paginator animation.
         Err(crate::Error::UnsupportedPlatformError)
     }
+
+    pub fn pick_books(&self) -> crate::Result<Vec<crate::models::PickedBook>> {
+        Err(crate::Error::UnsupportedPlatformError)
+    }
 }

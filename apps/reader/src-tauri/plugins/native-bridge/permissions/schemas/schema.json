@@ -307,10 +307,22 @@
           "markdownDescription": "Denies the capture_webview_region command without any pre-configured scope."
         },
         {
-          "description": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`",
+          "description": "Enables the pick_books command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pick-books",
+          "markdownDescription": "Enables the pick_books command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pick_books command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pick-books",
+          "markdownDescription": "Denies the pick_books command without any pre-configured scope."
+        },
+        {
+          "description": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`\n- `allow-pick-books`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`"
+          "markdownDescription": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`\n- `allow-pick-books`"
         }
       ]
     }

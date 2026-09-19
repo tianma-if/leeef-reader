@@ -1,4 +1,4 @@
-const COMMANDS: &[&str] = &["capture_webview_region"];
+const COMMANDS: &[&str] = &["capture_webview_region", "pick_books"];
 
 fn main() {
     tauri_plugin::Builder::new(COMMANDS)
