@@ -31,6 +31,8 @@ pub struct Book {
     pub locator: Option<String>,
     pub chapter_title: Option<String>,
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub shelf_ids: Vec<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -306,6 +308,7 @@ pub fn list_books(state: &AppState) -> Result<Vec<Book>, String> {
                 locator: row.get(13)?,
                 chapter_title: row.get(14)?,
                 tags: vec![],
+                shelf_ids: vec![],
             })
         })
         .map_err(|e| e.to_string())?;
@@ -326,8 +329,36 @@ pub fn list_books(state: &AppState) -> Result<Vec<Book>, String> {
             .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
+        let mut shelf_stmt = db
+            .prepare("SELECT bookshelf_id FROM bookshelf_entries WHERE book_id = ?1")
+            .map_err(|e| e.to_string())?;
+        book.shelf_ids = shelf_stmt
+            .query_map(params![book.id], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
     }
     Ok(books)
+}
+
+pub fn book_cover(state: &AppState, id: &str) -> Result<Vec<u8>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let path: Option<String> = db
+        .query_row(
+            "SELECT cover_path FROM books WHERE id = ?1 AND is_deleted = 0",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .flatten();
+    let Some(path) = path.filter(|value| !value.is_empty()) else {
+        return Ok(Vec::new());
+    };
+    match fs::read(path) {
+        Ok(bytes) => Ok(bytes),
+        Err(_) => Ok(Vec::new()),
+    }
 }
 
 pub fn import_book(

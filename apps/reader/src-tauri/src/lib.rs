@@ -69,6 +69,11 @@ fn book_bytes(state: State<AppState>, id: String) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
+fn book_cover(state: State<AppState>, id: String) -> Result<Vec<u8>, String> {
+    db::book_cover(&state, &id)
+}
+
+#[tauri::command]
 fn save_progress(
     state: State<AppState>,
     book_id: String,
@@ -261,6 +266,7 @@ pub fn run() {
             delete_book,
             update_book,
             book_bytes,
+            book_cover,
             save_progress,
             list_excerpts,
             create_excerpt,

@@ -1,14 +1,32 @@
-import { useEffect, useRef, useState } from 'react'
-import { api, isMobile, type Book, type Bookmark, type Excerpt, type Settings } from '../api'
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react'
+import {
+  api,
+  isMobile,
+  type Book,
+  type Bookmark,
+  type Excerpt,
+  type Settings,
+} from '../api'
+import { applyViewLayout, highlightDraw, themeOf } from './bookStyles'
 import { CapturedPageTurn } from './capturedTurn'
+import { ReaderChrome } from './ReaderChrome'
+import { ReaderFooter } from './ReaderFooter'
+import { ReaderSidebar } from './ReaderSidebar'
+import { SelectionPopup, type SelectionState } from './SelectionPopup'
+import {
+  claimFromDelta,
+  releaseVelocity,
+  shouldCommitTurn,
+  TAP_SLOP_PX,
+  zoneOf,
+} from './turnCommit'
+import { useReaderChrome } from './useReaderChrome'
 
 type Props = {
   book: Book
   onClose: () => void
+  initialLocator?: string
 }
-
-type TocItem = { label?: unknown; href?: string; subitems?: TocItem[] }
-type Panel = 'none' | 'toc' | 'search' | 'marks' | 'theme'
 
 const loadFoliate = () =>
   new Promise<void>((resolve, reject) => {
@@ -39,71 +57,139 @@ const waitForSize = (element: HTMLElement) =>
     observer.observe(element)
   })
 
-const labelOf = (value: unknown): string => {
-  if (typeof value === 'string') return value
-  if (Array.isArray(value)) return labelOf(value[0])
-  return ''
-}
-
-const themes: Record<string, { fg: string; bg: string }> = {
-  paper: { fg: '#292b29', bg: '#fbf8f1' },
-  sepia: { fg: '#5b4636', bg: '#f4ecd8' },
-  night: { fg: '#d6d6d6', bg: '#121212' },
-}
-
-export function ReaderView({ book, onClose }: Props) {
+export function ReaderView({ book, onClose, initialLocator }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<FoliateViewElement | null>(null)
   const started = useRef(Date.now())
+  const excerptsRef = useRef<Excerpt[]>([])
+  const settingsRef = useRef<Settings>({})
+  const saveTimer = useRef<number>(0)
+  const prepareTimer = useRef<number>(0)
   const dragRef = useRef<{
+    pointerId: number
     startX: number
+    startY: number
+    originX: number
+    left: number
     width: number
+    claimed: boolean
+    vertical: boolean
     forward: boolean
-    session: Awaited<ReturnType<CapturedPageTurn['beginDrag']>>
+    samples: { distance: number; time: number }[]
   } | null>(null)
+  const turner = useRef<CapturedPageTurn | null>(null)
+
   const [title, setTitle] = useState(book.title)
   const [progress, setProgress] = useState(book.progress)
   const [chapter, setChapter] = useState(book.chapterTitle ?? '')
+  const [locator, setLocator] = useState(book.locator ?? '')
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState('正在打开…')
-  const [panel, setPanel] = useState<Panel>('none')
   const [toc, setToc] = useState<TocItem[]>([])
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<{ cfi?: string; excerpt?: string }[]>([])
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [excerpts, setExcerpts] = useState<Excerpt[]>([])
   const [settings, setSettings] = useState<Settings>({})
+  const [selection, setSelection] = useState<SelectionState | null>(null)
   const mobile = isMobile()
+  const chrome = useReaderChrome()
+  const chromeRef = useRef(chrome)
+  chromeRef.current = chrome
+  const paginated = (settings.flow ?? 'paginated') === 'paginated'
+  const theme = themeOf(settings)
+  const bookmarked = bookmarks.some((item) => item.locator === locator)
 
-  const locator = () => viewRef.current?.lastLocation?.cfi ?? book.locator ?? ''
+  const getTurner = () => {
+    turner.current ??= new CapturedPageTurn({
+      getHostElement: () => hostRef.current,
+      getContentRect: () => hostRef.current?.getBoundingClientRect() ?? null,
+      navigate: async (forward) => {
+        const view = viewRef.current
+        if (!view) return
+        await (forward ? view.next() : view.prev())
+      },
+    })
+    return turner.current
+  }
 
-  const reloadMarks = () => {
-    void api.listBookmarks(book.id).then(setBookmarks)
-    void api.listExcerpts(book.id).then(setExcerpts)
+  const reloadMarks = useCallback(async () => {
+    const [nextBookmarks, nextExcerpts] = await Promise.all([
+      api.listBookmarks(book.id),
+      api.listExcerpts(book.id),
+    ])
+    setBookmarks(nextBookmarks)
+    setExcerpts(nextExcerpts)
+    excerptsRef.current = nextExcerpts
+  }, [book.id])
+
+  const paintHighlights = useCallback((view: FoliateViewElement) => {
+    for (const item of excerptsRef.current) {
+      void view.addAnnotation({ value: item.locator, color: item.color || '#c4a35a' })
+    }
+  }, [])
+
+  const patchSettings = (partial: Partial<Settings>) => {
+    setSettings((current) => {
+      const next = { ...current, ...partial }
+      settingsRef.current = next
+      window.clearTimeout(saveTimer.current)
+      saveTimer.current = window.setTimeout(() => {
+        void api.saveSettings(next)
+      }, 280)
+      const view = viewRef.current
+      if (view) applyViewLayout(view, next, mobile)
+      return next
+    })
+  }
+
+  const turn = (forward: boolean) => {
+    const view = viewRef.current
+    if (!view) return
+    chromeRef.current.hide()
+    const useCapture =
+      isMobile() && (settingsRef.current.flow ?? 'paginated') === 'paginated'
+    if (useCapture) {
+      void getTurner()
+        .turn(forward)
+        .catch(() => {
+          void (forward ? view.next() : view.prev())
+        })
+      return
+    }
+    void (forward ? view.next() : view.prev())
+  }
+  const turnRef = useRef(turn)
+  turnRef.current = turn
+
+  const goTo = (target: string) => {
+    void viewRef.current?.goTo(target)
+    chrome.closeSidebar()
+    setSelection(null)
   }
 
   useEffect(() => {
-    void api.getSettings().then(setSettings)
-    reloadMarks()
+    excerptsRef.current = excerpts
+  }, [excerpts])
+
+  useEffect(() => {
+    void reloadMarks()
     const host = hostRef.current
     if (!host) return
     let cancelled = false
     let view: FoliateViewElement | null = null
 
     const start = async () => {
+      const loaded = await api.getSettings()
+      if (cancelled) return
+      settingsRef.current = loaded
+      setSettings(loaded)
       const bytes = await api.bookBytes(book.id)
       await loadFoliate()
       if (cancelled) return
       await waitForSize(host)
       if (cancelled) return
       view = document.createElement('foliate-view')
-      const flow = settings.flow ?? 'paginated'
-      view.setAttribute('flow', flow)
-      view.setAttribute('max-column-count', String(settings.columns ?? 1))
-      view.setAttribute('margin', '24px')
-      view.setAttribute('max-block-size', '10000px')
-      if (mobile && flow === 'paginated') view.setAttribute('no-swipe', '')
-      else if (!mobile && flow === 'paginated') view.setAttribute('animated', '')
       host.append(view)
       viewRef.current = view
       view.addEventListener('relocate', ((event: Event) => {
@@ -115,15 +201,85 @@ export function ReaderView({ book, onClose }: Props) {
         const fraction = Number(detail.fraction ?? 0)
         setProgress(fraction)
         setChapter(detail.tocItem?.label ?? '')
+        setLocator(detail.cfi ?? '')
         void api.saveProgress(book.id, detail.cfi ?? '', fraction, detail.tocItem?.label)
+        getTurner().invalidate()
+        window.clearTimeout(prepareTimer.current)
+        if (isMobile() && (settingsRef.current.flow ?? 'paginated') === 'paginated') {
+          prepareTimer.current = window.setTimeout(() => {
+            void getTurner().prepare()
+          }, 160)
+        }
+      }) as EventListener)
+      view.addEventListener('draw-annotation', ((event: Event) => {
+        const detail = (event as CustomEvent).detail as {
+          draw: (fn: typeof highlightDraw, options: { color?: string }) => void
+          annotation: { color?: string }
+        }
+        detail.draw(highlightDraw, { color: detail.annotation.color ?? '#c4a35a' })
+      }) as EventListener)
+      view.addEventListener('create-overlay', (() => {
+        if (view) paintHighlights(view)
       }) as EventListener)
       view.addEventListener('load', ((event: Event) => {
-        const doc = (event as CustomEvent).detail?.doc as Document | undefined
-        if (!doc) return
-        doc.addEventListener('mouseup', () => {
-          const text = doc.getSelection()?.toString().trim()
-          if (text) (view as HTMLElement).dataset.selection = text
+        const detail = (event as CustomEvent).detail as { doc?: Document; index?: number }
+        const doc = detail.doc
+        if (!doc || !view) return
+        const index = detail.index ?? 0
+        const onPointer = () => {
+          const text = doc.getSelection()?.toString().trim() ?? ''
+          const range =
+            doc.getSelection()?.rangeCount ? doc.getSelection()!.getRangeAt(0) : null
+          if (!text || !range || range.collapsed) {
+            setSelection(null)
+            return
+          }
+          const frame = doc.defaultView?.frameElement as HTMLElement | null
+          const frameRect = frame?.getBoundingClientRect()
+          const rangeRect = range.getBoundingClientRect()
+          if (!frameRect) return
+          setSelection({
+            text,
+            cfi: view!.getCFI(index, range),
+            x: frameRect.left + rangeRect.left + rangeRect.width / 2,
+            y: frameRect.top + Math.max(8, rangeRect.top - 8),
+          })
+        }
+        doc.addEventListener('mouseup', onPointer)
+        doc.addEventListener('touchend', onPointer)
+        doc.addEventListener('click', (event) => {
+          if (doc.getSelection()?.toString().trim()) return
+          const ratio = event.clientX / (doc.defaultView?.innerWidth || 1)
+          const zone = zoneOf(ratio)
+          const ui = chromeRef.current
+          if (ui.visible || ui.sidebar) {
+            ui.hide()
+            ui.closeSidebar()
+            return
+          }
+          if (zone === 'center') ui.toggle()
+          else if ((settingsRef.current.flow ?? 'paginated') === 'paginated') {
+            turnRef.current(zone === 'right')
+          } else ui.toggle()
         })
+        doc.addEventListener('touchstart', (event) => {
+          const touch = event.changedTouches[0]
+          if (!touch) return
+          ;(doc.documentElement as HTMLElement).dataset.touchX = String(touch.clientX)
+          ;(doc.documentElement as HTMLElement).dataset.touchY = String(touch.clientY)
+        })
+        doc.addEventListener('touchend', (event) => {
+          const touch = event.changedTouches[0]
+          if (!touch) return
+          const startX = Number((doc.documentElement as HTMLElement).dataset.touchX ?? touch.clientX)
+          const startY = Number((doc.documentElement as HTMLElement).dataset.touchY ?? touch.clientY)
+          const dx = touch.clientX - startX
+          const dy = touch.clientY - startY
+          if (dy < -10 && Math.abs(dy) > 2 * Math.abs(dx) && Math.abs(dx) < (doc.defaultView?.innerWidth ?? 1) * 0.3) {
+            chromeRef.current.toggle()
+          }
+        })
+        paintHighlights(view)
       }) as EventListener)
       const copy = new Uint8Array(bytes.byteLength)
       copy.set(bytes)
@@ -133,13 +289,15 @@ export function ReaderView({ book, onClose }: Props) {
         }),
       )
       if (cancelled) return
+      applyViewLayout(view, loaded, mobile)
       setToc(view.book?.toc ?? [])
       const metaTitle = view.book?.metadata?.title
       if (typeof metaTitle === 'string' && metaTitle.trim()) setTitle(metaTitle)
       await view.init({
-        lastLocation: book.locator,
-        showTextStart: !book.locator,
+        lastLocation: initialLocator || book.locator,
+        showTextStart: !(initialLocator || book.locator),
       })
+      paintHighlights(view)
       if (!cancelled) setStatus('')
     }
 
@@ -152,255 +310,251 @@ export function ReaderView({ book, onClose }: Props) {
 
     return () => {
       cancelled = true
+      window.clearTimeout(prepareTimer.current)
+      window.clearTimeout(saveTimer.current)
       const seconds = Math.round((Date.now() - started.current) / 1000)
       if (seconds >= 5) void api.recordSession(book.id, seconds)
+      getTurner().dispose()
       viewRef.current = null
       view?.close()
       view?.remove()
     }
-  }, [book.id])
+  }, [book.id, initialLocator])
 
-  const controller = () =>
-    new CapturedPageTurn({
-      getHostElement: () => hostRef.current,
-      getContentRect: () => hostRef.current?.getBoundingClientRect() ?? null,
-      navigate: async (forward) => {
-        const view = viewRef.current
-        if (!view) return
-        await (forward ? view.next() : view.prev())
-      },
-    })
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return
+      }
+      if (event.key === 'Escape') {
+        if (selection) {
+          setSelection(null)
+          viewRef.current?.deselect()
+          return
+        }
+        if (chrome.sidebar) {
+          chrome.closeSidebar()
+          return
+        }
+        if (chrome.visible) {
+          chrome.hide()
+          return
+        }
+        onClose()
+        return
+      }
+      if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+        event.preventDefault()
+        turn(false)
+      }
+      if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') {
+        event.preventDefault()
+        turn(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [chrome, onClose, selection])
 
-  const turn = (forward: boolean) => {
-    const view = viewRef.current
-    if (!view) return
-    if (mobile && (settings.flow ?? 'paginated') === 'paginated') {
-      void controller()
-        .turn(forward)
-        .catch(() => {
-          void (forward ? view.next() : view.prev())
+  const onGesturePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (chrome.visible || chrome.sidebar) {
+      chrome.hide()
+      chrome.closeSidebar()
+      return
+    }
+    const rect = hostRef.current?.getBoundingClientRect()
+    if (!rect) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: event.clientX,
+      left: rect.left,
+      width: rect.width,
+      claimed: false,
+      vertical: false,
+      forward: true,
+      samples: [{ distance: 0, time: performance.now() }],
+    }
+    if (mobile && paginated) void getTurner().prepare()
+  }
+
+  const onGesturePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    const dx = event.clientX - drag.startX
+    const dy = event.clientY - drag.startY
+    if (!drag.claimed && !drag.vertical) {
+      const claim = claimFromDelta(dx, dy)
+      if (claim === 'vertical') {
+        drag.vertical = true
+        return
+      }
+      if (claim && mobile && paginated) {
+        drag.claimed = true
+        drag.forward = claim === 'forward'
+        drag.originX = event.clientX
+        getTurner().startDrag(drag.forward)
+      }
+    }
+    if (!drag.claimed) return
+    const signed = drag.forward ? drag.originX - event.clientX : event.clientX - drag.originX
+    const next = Math.min(1, Math.max(0, signed / drag.width))
+    getTurner().setProgress(next)
+    drag.samples.push({ distance: signed, time: performance.now() })
+    if (drag.samples.length > 8) drag.samples.shift()
+  }
+
+  const onGesturePointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    dragRef.current = null
+    const dx = event.clientX - drag.startX
+    const dy = event.clientY - drag.startY
+    if (drag.claimed) {
+      const signed = drag.forward ? drag.originX - event.clientX : event.clientX - drag.originX
+      const progressValue = Math.min(1, Math.max(0, signed / drag.width))
+      getTurner().setProgress(progressValue)
+      const velocity = releaseVelocity(drag.samples, performance.now())
+      const commit =
+        event.type === 'pointercancel'
+          ? false
+          : shouldCommitTurn(progressValue, velocity, drag.width)
+      void getTurner()
+        .endDrag(commit)
+        .then((started) => {
+          if (!started && commit) turn(drag.forward)
         })
       return
     }
-    void (forward ? view.next() : view.prev())
+    if (event.type === 'pointercancel') return
+    if (chrome.visible || chrome.sidebar) return
+    if (drag.vertical || (dy < -10 && Math.abs(dy) > 2 * Math.abs(dx))) {
+      chrome.toggle()
+      return
+    }
+    if (Math.hypot(dx, dy) > TAP_SLOP_PX) return
+    const zone = zoneOf((event.clientX - drag.left) / drag.width)
+    if (zone === 'center') chrome.toggle()
+    else if (paginated) turn(zone === 'right')
+    else chrome.toggle()
   }
 
-  const speak = () => {
-    const text =
-      (viewRef.current as HTMLElement | null)?.dataset.selection ||
-      chapter ||
-      title
-    window.speechSynthesis.cancel()
-    const utter = new SpeechSynthesisUtterance(text)
-    utter.rate = settings.ttsRate ?? 1
-    window.speechSynthesis.speak(utter)
+  const toggleBookmark = () => {
+    const current = viewRef.current?.lastLocation?.cfi ?? locator
+    const existing = bookmarks.find((item) => item.locator === current)
+    if (existing) {
+      void api.deleteBookmark(existing.id).then(reloadMarks)
+      return
+    }
+    void api.addBookmark(book.id, current, chapter || title).then(reloadMarks)
   }
-
-  const theme = themes[settings.theme ?? 'paper']
 
   return (
     <div className="reader-shell" style={{ color: theme.fg, background: theme.bg }}>
-      <header className="reader-chrome">
-        <button type="button" onClick={onClose}>
-          书架
-        </button>
-        <strong>{title}</strong>
-        <span>{(progress * 100).toFixed(1)}%</span>
-        <button type="button" onClick={() => setPanel(panel === 'toc' ? 'none' : 'toc')}>
-          目录
-        </button>
-        <button type="button" onClick={() => setPanel(panel === 'search' ? 'none' : 'search')}>
-          搜索
-        </button>
-        <button type="button" onClick={() => setPanel(panel === 'marks' ? 'none' : 'marks')}>
-          书签
-        </button>
-        <button type="button" onClick={() => setPanel(panel === 'theme' ? 'none' : 'theme')}>
-          样式
-        </button>
-        <button type="button" onClick={speak}>
-          朗读
-        </button>
-      </header>
-      <div className="reader-body">
-        <div className="reader-stage" ref={hostRef}>
-          {status ? <p className="reader-status">{status}</p> : null}
-          {mobile && (settings.flow ?? 'paginated') === 'paginated' ? (
-            <div
-              className="reader-gesture"
-              onPointerDown={(event) => {
-                if (panel !== 'none') return
-                const rect = event.currentTarget.getBoundingClientRect()
-                const x = event.clientX - rect.left
-                const edge = rect.width * 0.4
-                if (x > edge && x < rect.width - edge) return
-                const forward = x >= rect.width - edge
-                event.currentTarget.setPointerCapture(event.pointerId)
-                void controller()
-                  .beginDrag(forward)
-                  .then((session) => {
-                    if (!session) return
-                    dragRef.current = {
-                      startX: event.clientX,
-                      width: rect.width,
-                      forward,
-                      session,
-                    }
-                  })
-                  .catch(() => {
-                    turn(forward)
-                  })
-              }}
-              onPointerMove={(event) => {
-                const drag = dragRef.current
-                if (!drag?.session) return
-                const delta = event.clientX - drag.startX
-                const signed = drag.forward ? -delta : delta
-                const progress = Math.min(1, Math.max(0, signed / drag.width))
-                drag.session.overlayEl.dataset.progress = String(progress)
-                drag.session.setProgress(progress)
-              }}
-              onPointerUp={(event) => {
-                const drag = dragRef.current
-                if (drag?.session) {
-                  dragRef.current = null
-                  const progress = Number(drag.session.overlayEl.dataset.progress ?? '0')
-                  void drag.session.finish(progress > 0.28)
-                  return
-                }
-                if (panel !== 'none') return
-                const rect = event.currentTarget.getBoundingClientRect()
-                const ratio = (event.clientX - rect.left) / rect.width
-                if (ratio < 0.28) turn(false)
-                else if (ratio > 0.72) turn(true)
-              }}
-            />
-          ) : (
-            <div
-              className="reader-gesture"
-              onPointerUp={(event) => {
-                if (panel !== 'none') return
-                const rect = event.currentTarget.getBoundingClientRect()
-                const ratio = (event.clientX - rect.left) / rect.width
-                if (ratio < 0.28) turn(false)
-                else if (ratio > 0.72) turn(true)
-              }}
-            />
-          )}
-        </div>
-        {panel !== 'none' ? (
-          <aside className="reader-panel">
-            {panel === 'toc' ? (
-              <nav>
-                {toc.map((item) => (
-                  <button
-                    key={String(item.href)}
-                    type="button"
-                    onClick={() => item.href && void viewRef.current?.goTo(item.href)}
-                  >
-                    {labelOf(item.label)}
-                  </button>
-                ))}
-              </nav>
-            ) : null}
-            {panel === 'search' ? (
-              <div>
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="书内搜索"
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && viewRef.current) {
-                      void (async () => {
-                        const next: { cfi?: string; excerpt?: string }[] = []
-                        for await (const hit of viewRef.current!.search({ query })) {
-                          next.push(hit)
-                          if (next.length > 40) break
-                        }
-                        setHits(next)
-                      })()
-                    }
-                  }}
-                />
-                {hits.map((hit) => (
-                  <button
-                    key={hit.cfi}
-                    type="button"
-                    onClick={() => hit.cfi && void viewRef.current?.goTo(hit.cfi)}
-                  >
-                    {hit.excerpt}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            {panel === 'marks' ? (
-              <div>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() =>
-                    void api
-                      .addBookmark(book.id, locator(), chapter || title)
-                      .then(reloadMarks)
-                  }
-                >
-                  添加书签
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    const quote =
-                      (viewRef.current as HTMLElement | null)?.dataset.selection ?? ''
-                    if (!quote) return
-                    void api
-                      .createExcerpt({
-                        bookId: book.id,
-                        locator: locator(),
-                        quote,
-                        color: 'yellow',
-                      })
-                      .then(reloadMarks)
-                  }}
-                >
-                  保存书摘
-                </button>
-                <h3>书签</h3>
-                {bookmarks.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => void viewRef.current?.goTo(item.locator)}
-                  >
-                    {item.title || item.locator}
-                  </button>
-                ))}
-                <h3>书摘</h3>
-                {excerpts.map((item) => (
-                  <p key={item.id}>{item.quote}</p>
-                ))}
-              </div>
-            ) : null}
-            {panel === 'theme' ? (
-              <div>
-                {(['paper', 'sepia', 'night'] as const).map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => {
-                      const next = { ...settings, theme: name }
-                      setSettings(next)
-                      void api.saveSettings(next)
-                    }}
-                  >
-                    {name}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </aside>
+      <div className="reader-stage" ref={hostRef}>
+        {status ? <p className="reader-status">{status}</p> : null}
+        {paginated ? (
+          <div
+            className="reader-gesture"
+            onPointerDown={onGesturePointerDown}
+            onPointerMove={onGesturePointerMove}
+            onPointerUp={onGesturePointerUp}
+            onPointerCancel={onGesturePointerUp}
+          />
         ) : null}
       </div>
+
+      <ReaderChrome
+        title={title}
+        chapter={chapter}
+        progress={progress}
+        visible={chrome.visible}
+        bookmarked={bookmarked}
+        mobile={mobile}
+        onBack={onClose}
+        onToggleBookmark={toggleBookmark}
+        onOpenSidebar={chrome.openSidebar}
+        onKeepVisible={chrome.show}
+        onRequestHide={chrome.hide}
+      />
+      <ReaderFooter
+        mobile={mobile}
+        visible={chrome.visible}
+        footerTab={chrome.footerTab}
+        settings={settings}
+        progress={progress}
+        chapter={chapter}
+        onOpenTab={chrome.openTab}
+        onPatch={patchSettings}
+        onGoToFraction={(value) => void viewRef.current?.goToFraction(value)}
+        onTurn={turn}
+        onKeepVisible={chrome.show}
+        onRequestHide={chrome.hide}
+      />
+      <ReaderSidebar
+        open={chrome.sidebar}
+        mobile={mobile}
+        toc={toc}
+        query={query}
+        hits={hits}
+        bookmarks={bookmarks}
+        excerpts={excerpts}
+        settings={settings}
+        onPatch={patchSettings}
+        onQuery={setQuery}
+        onSearch={() => {
+          const view = viewRef.current
+          if (!view || !query.trim()) return
+          void (async () => {
+            const next: { cfi?: string; excerpt?: string }[] = []
+            for await (const hit of view.search({ query })) {
+              next.push(hit)
+              if (next.length > 40) break
+            }
+            setHits(next)
+          })()
+        }}
+        onGo={goTo}
+        onAddBookmark={toggleBookmark}
+        onDeleteBookmark={(id) => void api.deleteBookmark(id).then(reloadMarks)}
+        onClose={chrome.closeSidebar}
+      />
+      {selection ? (
+        <SelectionPopup
+          selection={selection}
+          onCopy={() => {
+            void navigator.clipboard.writeText(selection.text)
+            setSelection(null)
+          }}
+          onHighlight={() => {
+            void api
+              .createExcerpt({
+                bookId: book.id,
+                locator: selection.cfi,
+                quote: selection.text,
+                color: '#c4a35a',
+              })
+              .then(async () => {
+                await reloadMarks()
+                void viewRef.current?.addAnnotation({
+                  value: selection.cfi,
+                  color: '#c4a35a',
+                })
+                setSelection(null)
+                viewRef.current?.deselect()
+              })
+          }}
+          onBookmark={() => {
+            void api.addBookmark(book.id, selection.cfi, selection.text.slice(0, 40)).then(() => {
+              void reloadMarks()
+              setSelection(null)
+            })
+          }}
+        />
+      ) : null}
       {error ? <p className="reader-error">{error}</p> : null}
     </div>
   )

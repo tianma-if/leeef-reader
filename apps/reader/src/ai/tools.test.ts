@@ -21,6 +21,7 @@ const book = (overrides: Partial<Book> = {}): Book => ({
   locator: 'epubcfi(/6/2)',
   chapterTitle: '第一章',
   tags: ['玄幻'],
+  shelfIds: [],
   ...overrides,
 })
 

@@ -17,6 +17,7 @@ export type Book = {
   locator?: string | null
   chapterTitle?: string | null
   tags: string[]
+  shelfIds: string[]
 }
 
 export type Excerpt = {
@@ -99,6 +100,7 @@ export const api = {
   updateBook: (id: string, title?: string, author?: string, rating?: number) =>
     invoke('update_book', { id, title: title ?? null, author: author ?? null, rating: rating ?? null }),
   bookBytes: async (id: string) => new Uint8Array(await invoke<number[]>('book_bytes', { id })),
+  bookCover: async (id: string) => new Uint8Array(await invoke<number[]>('book_cover', { id })),
   saveProgress: (
     bookId: string,
     locator: string,

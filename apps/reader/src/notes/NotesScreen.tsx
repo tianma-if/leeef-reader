@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 
-type Props = { onOpenBook: (bookId: string) => void }
+type Props = { onOpenBook: (bookId: string, locator?: string) => void }
 
 export function NotesScreen({ onOpenBook }: Props) {
   const [items, setItems] = useState<Excerpt[]>([])
@@ -43,7 +43,11 @@ export function NotesScreen({ onOpenBook }: Props) {
                 <p>{item.quote}</p>
                 {item.note ? <p className="text-muted-foreground">{item.note}</p> : null}
                 <div className="flex gap-2">
-                  <Button size="sm" variant="outline" onClick={() => onOpenBook(item.bookId)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onOpenBook(item.bookId, item.locator)}
+                  >
                     打开
                   </Button>
                   <Button

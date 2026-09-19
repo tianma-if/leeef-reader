@@ -35,6 +35,7 @@ const tabs: { id: Tab; label: string; icon: typeof BookOpen }[] = [
 function App() {
   const [tab, setTab] = useState<Tab>('library')
   const [open, setOpen] = useState<Book | null>(null)
+  const [openLocator, setOpenLocator] = useState<string | undefined>()
   const [books, setBooks] = useState<Book[]>([])
 
   useEffect(() => {
@@ -45,8 +46,10 @@ function App() {
     return (
       <ReaderView
         book={open}
+        initialLocator={openLocator}
         onClose={() => {
           setOpen(null)
+          setOpenLocator(undefined)
           void api.listBooks().then(setBooks)
         }}
       />
@@ -55,7 +58,7 @@ function App() {
 
   return (
     <div className="flex min-h-dvh flex-col bg-background md:flex-row">
-      <nav className="order-2 flex border-t bg-card md:order-0 md:w-20 md:flex-col md:border-t-0 md:border-r">
+      <nav className="order-2 flex border-t bg-card pb-[env(safe-area-inset-bottom,0px)] md:order-0 md:w-20 md:flex-col md:border-t-0 md:border-r md:pb-0">
         {tabs.map((item) => {
           const Icon = item.icon
           return (
@@ -73,12 +76,22 @@ function App() {
         })}
       </nav>
       <div className="min-h-0 flex-1">
-        {tab === 'library' ? <LibraryScreen onOpen={setOpen} /> : null}
+        {tab === 'library' ? (
+          <LibraryScreen
+            onOpen={(book) => {
+              setOpenLocator(undefined)
+              setOpen(book)
+            }}
+          />
+        ) : null}
         {tab === 'notes' ? (
           <NotesScreen
-            onOpenBook={(id) => {
+            onOpenBook={(id, locator) => {
               const book = books.find((item) => item.id === id)
-              if (book) setOpen(book)
+              if (book) {
+                setOpenLocator(locator)
+                setOpen(book)
+              }
             }}
           />
         ) : null}
