@@ -7,7 +7,7 @@ on:
         description: GitHub Release tag to attach signed installers
         required: true
         type: string
-        default: v2.0.0
+        default: v2.1.0
       upload_play:
         description: Upload the signed AAB to Google Play production
         required: true
@@ -39,6 +39,8 @@ jobs:
         working-directory: apps/reader
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag }}
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
@@ -77,13 +79,14 @@ jobs:
         run: npx tauri build --target universal-apple-darwin --bundles dmg,app
       - name: Stage GitHub Release assets
         run: |
+          version="$(node -p "require('./package.json').version")"
           mkdir -p "$RUNNER_TEMP/macos-dist"
           dmg="$(find src-tauri/target/universal-apple-darwin/release/bundle/dmg -name '*.dmg' | head -n 1)"
           app="$(find src-tauri/target/universal-apple-darwin/release/bundle/macos -name '*.app' | head -n 1)"
           test -n "$dmg"
           test -n "$app"
-          cp "$dmg" "$RUNNER_TEMP/macos-dist/Leeef-Reader-2.0.0-macos-universal.dmg"
-          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/macos-dist/Leeef-Reader-2.0.0-macos-universal.zip"
+          cp "$dmg" "$RUNNER_TEMP/macos-dist/Leeef-Reader-${version}-macos-universal.dmg"
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/macos-dist/Leeef-Reader-${version}-macos-universal.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: leeef-macos
@@ -109,6 +112,8 @@ jobs:
         working-directory: apps/reader
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -156,13 +161,15 @@ jobs:
         run: npx tauri android build --apk --aab --target aarch64
       - name: Stage GitHub Release assets
         run: |
+          version="$(node -p "require('./package.json').version")"
           mkdir -p "$RUNNER_TEMP/android-dist"
           apk="$(find src-tauri/gen/android/app/build/outputs/apk -name '*release*.apk' | head -n 1)"
           aab="$(find src-tauri/gen/android/app/build/outputs/bundle -name '*release*.aab' | head -n 1)"
           test -n "$apk"
           test -n "$aab"
-          cp "$apk" "$RUNNER_TEMP/android-dist/Leeef-Reader-2.0.0-android-arm64.apk"
-          cp "$aab" "$RUNNER_TEMP/android-dist/Leeef-Reader-2.0.0-android.aab"
+          cp "$apk" "$RUNNER_TEMP/android-dist/Leeef-Reader-${version}-android-arm64.apk"
+          cp "$aab" "$RUNNER_TEMP/android-dist/Leeef-Reader-${version}-android.aab"
+          echo "ANDROID_AAB=$RUNNER_TEMP/android-dist/Leeef-Reader-${version}-android.aab" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v4
         with:
           name: leeef-android
@@ -182,7 +189,7 @@ jobs:
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: dev.leeef.leeef_reader
-          releaseFiles: ${{ runner.temp }}/android-dist/Leeef-Reader-2.0.0-android.aab
+          releaseFiles: ${{ env.ANDROID_AAB }}
           tracks: production
           status: completed
       - name: Remove signing material
