@@ -7,10 +7,13 @@ export function SettingsScreen() {
   const [value, setValue] = useState<Settings>({})
   const [dbPath, setDbPath] = useState('')
   const [saved, setSaved] = useState('')
+  const [mcp, setMcp] = useState<{ running: boolean; endpoint?: string }>({ running: false })
+  const [pair, setPair] = useState('')
 
   useEffect(() => {
     void api.getSettings().then(setValue)
     void api.mcpDatabasePath().then(setDbPath)
+    void api.mcpStatus().then(setMcp).catch(() => undefined)
   }, [])
 
   const patch = (next: Partial<Settings>) => setValue((current) => ({ ...current, ...next }))
@@ -167,9 +170,36 @@ export function SettingsScreen() {
         <p className="hint">对象存储、AI 和 TTS 凭据只在桌面端填写，手机通过配对同步。</p>
       )}
 
+      <h2>配对</h2>
+      <div className="row">
+        <button
+          type="button"
+          className="btn"
+          onClick={() => void api.pairingCode().then(setPair)}
+        >
+          生成配对码
+        </button>
+        {pair ? <strong>{pair}</strong> : null}
+      </div>
+      <p className="hint">手机在「我的同步设备」里输入该一次性配对码，同步桌面凭据。</p>
+
       <h2>MCP</h2>
       <p className="hint">数据库路径：{dbPath || '…'}</p>
-      <p className="hint">sidecar：`leeef-mcp --database {dbPath || 'leeef.sqlite'}`</p>
+      <p className="hint">
+        {mcp.running ? `已运行 ${mcp.endpoint}` : '未运行'}
+      </p>
+      <div className="row">
+        <button
+          type="button"
+          className="btn"
+          onClick={() => void api.mcpStart().then(setMcp).catch((cause) => setSaved(String(cause)))}
+        >
+          启动 sidecar
+        </button>
+        <button type="button" className="btn" onClick={() => void api.mcpStop().then(setMcp)}>
+          停止
+        </button>
+      </div>
     </main>
   )
 }

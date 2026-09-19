@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { useEffect, useMemo, useState } from 'react'
-import { api, isAndroid, type Book, type Tag } from '../api'
+import { api, isAndroid, type Book, type Shelf, type Tag } from '../api'
 import { prepareBookFile } from '../lib/bookFile'
 
 type Props = {
@@ -22,6 +22,7 @@ const decodeBase64 = (data: string) => {
 export function LibraryScreen({ onOpen }: Props) {
   const [books, setBooks] = useState<Book[]>([])
   const [tags, setTags] = useState<Tag[]>([])
+  const [shelves, setShelves] = useState<Shelf[]>([])
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<SortKey>('updated')
   const [filter, setFilter] = useState<FilterKey>('all')
@@ -31,9 +32,14 @@ export function LibraryScreen({ onOpen }: Props) {
   const [editing, setEditing] = useState<Book | null>(null)
 
   const reload = async () => {
-    const [nextBooks, nextTags] = await Promise.all([api.listBooks(), api.listTags()])
+    const [nextBooks, nextTags, nextShelves] = await Promise.all([
+      api.listBooks(),
+      api.listTags(),
+      api.listShelves(),
+    ])
     setBooks(nextBooks)
     setTags(nextTags)
+    setShelves(nextShelves)
   }
 
   useEffect(() => {
@@ -216,6 +222,45 @@ export function LibraryScreen({ onOpen }: Props) {
               <input name="author" defaultValue={editing.author ?? ''} />
             </label>
             <p className="hint">长按/右键打开详情。删除会进回收标记，同步后其他设备也会看到。</p>
+            <label>
+              加入书架
+              <select
+                defaultValue=""
+                onChange={(event) => {
+                  const shelfId = event.target.value
+                  if (shelfId) void api.addBookToShelf(shelfId, editing.id)
+                }}
+              >
+                <option value="">选择目录</option>
+                {shelves.map((shelf) => (
+                  <option key={shelf.id} value={shelf.id}>
+                    {shelf.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="row">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  const name = window.prompt('新目录名称')
+                  if (name) void api.createShelf(name).then(reload)
+                }}
+              >
+                新建目录
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  const name = window.prompt('新标签')
+                  if (name) void api.createTag(name, 0x3d4a3c).then(reload)
+                }}
+              >
+                新建标签
+              </button>
+            </div>
             <div className="row">
               <button type="submit" className="btn">
                 保存

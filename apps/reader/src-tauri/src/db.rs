@@ -594,6 +594,27 @@ pub fn list_shelves(state: &AppState) -> Result<Vec<Shelf>, String> {
         .map_err(|e| e.to_string())
 }
 
+pub fn add_book_to_shelf(state: &AppState, shelf_id: &str, book_id: &str) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.execute(
+        "INSERT OR REPLACE INTO bookshelf_entries(bookshelf_id, book_id, sort_order, updated_at)
+         VALUES (?1, ?2, 0, ?3)",
+        params![shelf_id, book_id, now()],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn remove_book_from_shelf(state: &AppState, shelf_id: &str, book_id: &str) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.execute(
+        "DELETE FROM bookshelf_entries WHERE bookshelf_id = ?1 AND book_id = ?2",
+        params![shelf_id, book_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn create_shelf(state: &AppState, name: &str, parent_id: Option<&str>) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.execute(

@@ -129,6 +129,10 @@ export const api = {
   listShelves: () => invoke<Shelf[]>('list_shelves'),
   createShelf: (name: string, parentId?: string) =>
     invoke('create_shelf', { name, parentId: parentId ?? null }),
+  addBookToShelf: (shelfId: string, bookId: string) =>
+    invoke('add_book_to_shelf', { shelfId, bookId }),
+  removeBookFromShelf: (shelfId: string, bookId: string) =>
+    invoke('remove_book_from_shelf', { shelfId, bookId }),
   listTags: () => invoke<Tag[]>('list_tags'),
   createTag: (name: string, color: number) => invoke('create_tag', { name, color }),
   setBookTag: (bookId: string, tagId: string, on: boolean) =>
@@ -139,6 +143,13 @@ export const api = {
   getSettings: () => invoke<Settings>('get_settings'),
   saveSettings: (value: Settings) => invoke('save_settings', { value }),
   mcpDatabasePath: () => invoke<string>('mcp_database_path'),
+  mcpStart: () =>
+    invoke<{ running: boolean; endpoint?: string; databasePath: string }>('mcp_start'),
+  mcpStop: () =>
+    invoke<{ running: boolean; endpoint?: string; databasePath: string }>('mcp_stop'),
+  mcpStatus: () =>
+    invoke<{ running: boolean; endpoint?: string; databasePath: string }>('mcp_status'),
+  pairingCode: () => invoke<string>('pairing_code'),
 }
 
 export const isAndroid = () => /Android/i.test(navigator.userAgent)

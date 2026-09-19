@@ -829,8 +829,13 @@ export class Paginator extends HTMLElement {
             vx: 0, xy: 0,
         }
     }
+    #ownsSwipe() {
+        return this.hasAttribute('no-swipe')
+            || this.closest?.('foliate-view')?.hasAttribute('no-swipe')
+    }
     #onTouchMove(e) {
         const state = this.#touchState
+        if (this.#ownsSwipe()) return
         if (state.pinched) return
         state.pinched = globalThis.visualViewport.scale > 1
         if (this.scrolled || state.pinched) return

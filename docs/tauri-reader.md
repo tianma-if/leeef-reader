@@ -21,7 +21,7 @@ leeef-mcp --database <mcp_database_path>
 
 TXT 先转 EPUB，再进同一阅读器。
 
-桌面端原生截图尚未接，暂用 foliate 自带的 `animated` 分页。
+移动端分页阅读：foliate `no-swipe` + 窗口 `PixelCopy` 只截当前页，底下瞬间跳栏。桌面暂用 foliate `animated`。
 
 ## 开发
 

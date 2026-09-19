@@ -248,6 +248,13 @@ textarea {
   height: 100%;
 }
 
+.reader-gesture {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  touch-action: none;
+}
+
 .reader-panel {
   width: min(42vw, 16rem);
   overflow: auto;

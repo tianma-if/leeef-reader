@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, isMobile, type Book, type Bookmark, type Excerpt, type Settings } from '../api'
+import { CapturedPageTurn } from './capturedTurn'
 
 type Props = {
   book: Book
@@ -54,6 +55,12 @@ export function ReaderView({ book, onClose }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<FoliateViewElement | null>(null)
   const started = useRef(Date.now())
+  const dragRef = useRef<{
+    startX: number
+    width: number
+    forward: boolean
+    session: Awaited<ReturnType<CapturedPageTurn['beginDrag']>>
+  } | null>(null)
   const [title, setTitle] = useState(book.title)
   const [progress, setProgress] = useState(book.progress)
   const [chapter, setChapter] = useState(book.chapterTitle ?? '')
@@ -95,7 +102,8 @@ export function ReaderView({ book, onClose }: Props) {
       view.setAttribute('max-column-count', String(settings.columns ?? 1))
       view.setAttribute('margin', '24px')
       view.setAttribute('max-block-size', '10000px')
-      if (!mobile && flow === 'paginated') view.setAttribute('animated', '')
+      if (mobile && flow === 'paginated') view.setAttribute('no-swipe', '')
+      else if (!mobile && flow === 'paginated') view.setAttribute('animated', '')
       host.append(view)
       viewRef.current = view
       view.addEventListener('relocate', ((event: Event) => {
@@ -152,9 +160,28 @@ export function ReaderView({ book, onClose }: Props) {
     }
   }, [book.id])
 
+  const controller = () =>
+    new CapturedPageTurn({
+      getHostElement: () => hostRef.current,
+      getContentRect: () => hostRef.current?.getBoundingClientRect() ?? null,
+      navigate: async (forward) => {
+        const view = viewRef.current
+        if (!view) return
+        await (forward ? view.next() : view.prev())
+      },
+    })
+
   const turn = (forward: boolean) => {
     const view = viewRef.current
     if (!view) return
+    if (mobile && (settings.flow ?? 'paginated') === 'paginated') {
+      void controller()
+        .turn(forward)
+        .catch(() => {
+          void (forward ? view.next() : view.prev())
+        })
+      return
+    }
     void (forward ? view.next() : view.prev())
   }
 
@@ -196,18 +223,70 @@ export function ReaderView({ book, onClose }: Props) {
         </button>
       </header>
       <div className="reader-body">
-        <div
-          className="reader-stage"
-          ref={hostRef}
-          onPointerUp={(event) => {
-            if (panel !== 'none') return
-            const rect = event.currentTarget.getBoundingClientRect()
-            const ratio = (event.clientX - rect.left) / rect.width
-            if (ratio < 0.28) turn(false)
-            else if (ratio > 0.72) turn(true)
-          }}
-        >
+        <div className="reader-stage" ref={hostRef}>
           {status ? <p className="reader-status">{status}</p> : null}
+          {mobile && (settings.flow ?? 'paginated') === 'paginated' ? (
+            <div
+              className="reader-gesture"
+              onPointerDown={(event) => {
+                if (panel !== 'none') return
+                const rect = event.currentTarget.getBoundingClientRect()
+                const x = event.clientX - rect.left
+                const edge = rect.width * 0.4
+                if (x > edge && x < rect.width - edge) return
+                const forward = x >= rect.width - edge
+                event.currentTarget.setPointerCapture(event.pointerId)
+                void controller()
+                  .beginDrag(forward)
+                  .then((session) => {
+                    if (!session) return
+                    dragRef.current = {
+                      startX: event.clientX,
+                      width: rect.width,
+                      forward,
+                      session,
+                    }
+                  })
+                  .catch(() => {
+                    turn(forward)
+                  })
+              }}
+              onPointerMove={(event) => {
+                const drag = dragRef.current
+                if (!drag?.session) return
+                const delta = event.clientX - drag.startX
+                const signed = drag.forward ? -delta : delta
+                const progress = Math.min(1, Math.max(0, signed / drag.width))
+                drag.session.overlayEl.dataset.progress = String(progress)
+                drag.session.setProgress(progress)
+              }}
+              onPointerUp={(event) => {
+                const drag = dragRef.current
+                if (drag?.session) {
+                  dragRef.current = null
+                  const progress = Number(drag.session.overlayEl.dataset.progress ?? '0')
+                  void drag.session.finish(progress > 0.28)
+                  return
+                }
+                if (panel !== 'none') return
+                const rect = event.currentTarget.getBoundingClientRect()
+                const ratio = (event.clientX - rect.left) / rect.width
+                if (ratio < 0.28) turn(false)
+                else if (ratio > 0.72) turn(true)
+              }}
+            />
+          ) : (
+            <div
+              className="reader-gesture"
+              onPointerUp={(event) => {
+                if (panel !== 'none') return
+                const rect = event.currentTarget.getBoundingClientRect()
+                const ratio = (event.clientX - rect.left) / rect.width
+                if (ratio < 0.28) turn(false)
+                else if (ratio > 0.72) turn(true)
+              }}
+            />
+          )}
         </div>
         {panel !== 'none' ? (
           <aside className="reader-panel">

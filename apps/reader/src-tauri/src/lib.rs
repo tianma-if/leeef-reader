@@ -1,4 +1,5 @@
 mod db;
+mod mcp;
 
 use db::AppState;
 use serde::Deserialize;
@@ -151,6 +152,24 @@ fn create_shelf(
 }
 
 #[tauri::command]
+fn add_book_to_shelf(
+    state: State<AppState>,
+    shelf_id: String,
+    book_id: String,
+) -> Result<(), String> {
+    db::add_book_to_shelf(&state, &shelf_id, &book_id)
+}
+
+#[tauri::command]
+fn remove_book_from_shelf(
+    state: State<AppState>,
+    shelf_id: String,
+    book_id: String,
+) -> Result<(), String> {
+    db::remove_book_from_shelf(&state, &shelf_id, &book_id)
+}
+
+#[tauri::command]
 fn list_tags(state: State<AppState>) -> Result<Vec<db::Tag>, String> {
     db::list_tags(&state)
 }
@@ -198,6 +217,28 @@ fn mcp_database_path(state: State<AppState>) -> String {
     db::database_path(&state)
 }
 
+#[tauri::command]
+fn mcp_start(app: tauri::AppHandle, state: State<AppState>) -> Result<mcp::McpStatus, String> {
+    mcp::start(&app, &state)
+}
+
+#[tauri::command]
+fn mcp_stop(app: tauri::AppHandle, state: State<AppState>) -> Result<mcp::McpStatus, String> {
+    mcp::stop(&app, &state)
+}
+
+#[tauri::command]
+fn mcp_status(app: tauri::AppHandle, state: State<AppState>) -> Result<mcp::McpStatus, String> {
+    mcp::status(&app, &state)
+}
+
+#[tauri::command]
+fn pairing_code(state: State<AppState>) -> Result<String, String> {
+    let code = format!("{:06}", (uuid::Uuid::new_v4().as_u128() % 1_000_000) as u32);
+    db::kv_set(&state, "pairing_code", &code)?;
+    Ok(code)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -211,6 +252,7 @@ pub fn run() {
             std::fs::create_dir_all(&root)?;
             let state = db::open(root)?;
             app.manage(state);
+            app.manage(mcp::McpHandle::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -228,6 +270,8 @@ pub fn run() {
             delete_bookmark,
             list_shelves,
             create_shelf,
+            add_book_to_shelf,
+            remove_book_from_shelf,
             list_tags,
             create_tag,
             set_book_tag,
@@ -235,7 +279,11 @@ pub fn run() {
             list_sessions,
             get_settings,
             save_settings,
-            mcp_database_path
+            mcp_database_path,
+            mcp_start,
+            mcp_stop,
+            mcp_status,
+            pairing_code
         ])
         .run(tauri::generate_context!())
         .expect("error while running Leeef Reader");
