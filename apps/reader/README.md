@@ -1,10 +1,15 @@
-# Leeef Reader（Tauri）
+# Leeef Reader（Tauri 客户端）
 
-Leeef 的新阅读壳：系统 WebView + foliate 分页 + 移动端原生截图滑动。
+产品说明、下载与功能见仓库根目录：
 
-详见仓库根目录 [`docs/tauri-reader.md`](../../docs/tauri-reader.md)。
+- [English README](../../README.md)
+- [简体中文 README](../../README.zh-CN.md)
+
+开发入口：
 
 ```bash
 npm install
 npm run tauri dev
 ```
+
+Android 真机、翻页约定和原生桥见 [`docs/tauri-reader.md`](../../docs/tauri-reader.md)。
