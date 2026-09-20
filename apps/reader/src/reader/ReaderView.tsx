@@ -7,7 +7,8 @@ import {
   type Excerpt,
   type Settings,
 } from '../api'
-import { applyViewLayout, highlightDraw, themeOf } from './bookStyles'
+import { applyReadingFont, applyViewLayout, highlightDraw, themeOf } from './bookStyles'
+import { mountReadingFont } from './fontLoader'
 import { CapturedPageTurn } from './capturedTurn'
 import { ReaderChrome } from './ReaderChrome'
 import { ReaderFooter } from './ReaderFooter'
@@ -167,7 +168,10 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         void api.saveSettings(next)
       }, 280)
       const view = viewRef.current
-      if (view) applyViewLayout(view, next, mobile)
+      if (view) {
+        applyViewLayout(view, next, mobile)
+        void applyReadingFont(view, next)
+      }
       return next
     })
   }
@@ -217,6 +221,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       if (cancelled) return
       settingsRef.current = loaded
       setSettings(loaded)
+      void mountReadingFont(document, loaded.fontFamily).catch(() => undefined)
       await waitForSize(host)
       if (cancelled) return
       view = document.createElement('foliate-view')
@@ -255,6 +260,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         const detail = (event as CustomEvent).detail as { doc?: Document; index?: number }
         const doc = detail.doc
         if (!doc || !view) return
+        void applyReadingFont(view, settingsRef.current)
         const index = detail.index ?? 0
         const onPointer = () => {
           const text = doc.getSelection()?.toString().trim() ?? ''
@@ -314,6 +320,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       await view.open(source)
       if (cancelled) return
       applyViewLayout(view, loaded, mobile)
+      void applyReadingFont(view, loaded)
       setToc(view.book?.toc ?? [])
       const metaTitle = view.book?.metadata?.title
       if (typeof metaTitle === 'string' && metaTitle.trim()) setTitle(metaTitle)

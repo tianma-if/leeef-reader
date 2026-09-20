@@ -9,6 +9,20 @@ describe('bookCss', () => {
     expect(css).toContain('18px')
     expect(css).toContain('1.65')
     expect(css).toContain('color-scheme: light')
+    expect(css).toContain('Noto Serif SC')
+    expect(css).toContain('font-family: inherit !important')
+  })
+
+  it('keeps publisher faces when 书籍原字体 is selected', () => {
+    const css = bookCss({ fontFamily: 'publisher' })
+    expect(css).not.toContain('font-family: inherit !important')
+    expect(css).toContain('Georgia')
+  })
+
+  it('applies a bundled reading face', () => {
+    const css = bookCss({ fontFamily: 'lxgw-wenkai' })
+    expect(css).toContain('LXGW WenKai')
+    expect(css).toContain('font-family: inherit !important')
   })
 
   it('uses night palette and dark color-scheme', () => {

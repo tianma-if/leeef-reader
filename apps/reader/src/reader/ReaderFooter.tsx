@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import type { Settings } from '../api'
 import { THEMES, type ThemeName } from './bookStyles'
+import { FontPicker } from './FontPicker'
 import type { FooterTab } from './useReaderChrome'
 
 type Props = {
@@ -67,6 +68,10 @@ export function ReaderFooter({
           ) : null}
           {footerTab === 'font' ? (
             <div className="reader-footer-panel grid gap-3">
+              <FontPicker
+                value={settings.fontFamily}
+                onChange={(fontFamily) => onPatch({ fontFamily })}
+              />
               <label className="grid gap-2 text-sm">
                 字号 {fontSize}
                 <Slider
@@ -149,24 +154,62 @@ export function ReaderFooter({
           </div>
         </>
       ) : (
-        <div className="reader-footer-desktop">
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="上一页" onClick={() => onTurn(false)}>
-            <ChevronLeft />
-          </Button>
-          <Slider
-            className="flex-1"
-            min={0}
-            max={1000}
-            value={[Math.round(progress * 1000)]}
-            onValueChange={([value]) => onGoToFraction(value / 1000)}
-          />
-          <span className="text-muted-foreground w-14 text-right text-xs">
-            {(progress * 100).toFixed(1)}%
-          </span>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="下一页" onClick={() => onTurn(true)}>
-            <ChevronRight />
-          </Button>
-        </div>
+        <>
+          {footerTab === 'font' ? (
+            <div className="reader-footer-panel grid gap-3">
+              <FontPicker
+                value={settings.fontFamily}
+                onChange={(fontFamily) => onPatch({ fontFamily })}
+              />
+              <label className="grid gap-2 text-sm">
+                字号 {fontSize}
+                <Slider
+                  min={14}
+                  max={28}
+                  value={[fontSize]}
+                  onValueChange={([value]) => onPatch({ fontSize: value })}
+                />
+              </label>
+              <label className="grid gap-2 text-sm">
+                行距 {lineHeight.toFixed(2)}
+                <Slider
+                  min={1.3}
+                  max={2.2}
+                  step={0.05}
+                  value={[lineHeight]}
+                  onValueChange={([value]) => onPatch({ lineHeight: value })}
+                />
+              </label>
+            </div>
+          ) : null}
+          <div className="reader-footer-desktop">
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="上一页" onClick={() => onTurn(false)}>
+              <ChevronLeft />
+            </Button>
+            <Slider
+              className="flex-1"
+              min={0}
+              max={1000}
+              value={[Math.round(progress * 1000)]}
+              onValueChange={([value]) => onGoToFraction(value / 1000)}
+            />
+            <span className="text-muted-foreground w-14 text-right text-xs">
+              {(progress * 100).toFixed(1)}%
+            </span>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="下一页" onClick={() => onTurn(true)}>
+              <ChevronRight />
+            </Button>
+            <Button
+              type="button"
+              variant={footerTab === 'font' ? 'secondary' : 'ghost'}
+              size="icon-sm"
+              aria-label="字体"
+              onClick={() => onOpenTab('font')}
+            >
+              <Type />
+            </Button>
+          </div>
+        </>
       )}
     </footer>
   )

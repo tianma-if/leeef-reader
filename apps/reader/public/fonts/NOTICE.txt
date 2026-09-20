@@ -1,0 +1,6 @@
+Bundled reading fonts are SIL Open Font License 1.1.
+Noto Serif SC / Noto Sans SC: Google / Adobe Source Han.
+LXGW WenKai: lxgw/LxgwWenKai.
+Zhuque Fangsong: TrionesType/zhuque (technical preview).
+Literata: Google Fonts.
+License texts are in licenses/.

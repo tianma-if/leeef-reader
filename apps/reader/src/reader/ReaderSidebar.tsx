@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Slider } from '@/components/ui/slider'
 import type { Bookmark, Excerpt, Settings } from '../api'
 import { THEMES, labelOf, type ThemeName } from './bookStyles'
+import { FontPicker } from './FontPicker'
 
 type Props = {
   open: boolean
@@ -140,6 +141,10 @@ function SidebarBody(props: Omit<Props, 'open' | 'onClose'> & { mobile: boolean 
       </TabsContent>
       {!props.mobile ? (
         <TabsContent value="style" className="grid gap-4 px-4 py-2">
+          <FontPicker
+            value={props.settings.fontFamily}
+            onChange={(fontFamily) => props.onPatch({ fontFamily })}
+          />
           <div className="flex flex-wrap gap-2">
             {(Object.keys(THEMES) as ThemeName[]).map((name) => (
               <Button

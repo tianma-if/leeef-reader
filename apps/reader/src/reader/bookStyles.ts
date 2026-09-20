@@ -1,4 +1,6 @@
 import type { Settings } from '../api'
+import { mountReadingFontOnView } from './fontLoader'
+import { resolveFont, shouldOverrideBookFont } from './fonts'
 
 export const THEMES = {
   paper: { fg: '#292b29', bg: '#fbf8f1', name: '纸张' },
@@ -10,8 +12,7 @@ export type ThemeName = keyof typeof THEMES
 
 export const DEFAULT_FONT_SIZE = 18
 export const DEFAULT_LINE_HEIGHT = 1.65
-export const DEFAULT_FONT_FAMILY =
-  'Georgia, "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", serif'
+export const DEFAULT_FONT_FAMILY = 'noto-serif-sc'
 
 export const themeOf = (settings: Settings) => THEMES[settings.theme ?? 'paper']
 
@@ -19,8 +20,9 @@ export const bookCss = (settings: Settings) => {
   const theme = themeOf(settings)
   const fontSize = settings.fontSize ?? DEFAULT_FONT_SIZE
   const lineHeight = settings.lineHeight ?? DEFAULT_LINE_HEIGHT
-  const fontFamily = settings.fontFamily?.trim() || DEFAULT_FONT_FAMILY
+  const font = resolveFont(settings.fontFamily)
   const night = settings.theme === 'night'
+  const override = shouldOverrideBookFont(font)
   return `
 html {
   color-scheme: ${night ? 'dark' : 'light'};
@@ -30,7 +32,17 @@ body {
   background: ${theme.bg} !important;
   font-size: ${fontSize}px !important;
   line-height: ${lineHeight} !important;
-  font-family: ${fontFamily} !important;
+  font-family: ${font.stack} !important;
+}
+${
+  override
+    ? `body *:not(code):not(pre):not(kbd):not(samp) {
+  font-family: inherit !important;
+}
+code, pre, kbd, samp {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
+}`
+    : ''
 }
 a { color: inherit; }
 img, svg, video { max-width: 100%; }
@@ -65,6 +77,14 @@ export const applyViewLayout = (
     renderer.removeAttribute('animated')
   }
   renderer.setStyles?.(bookCss(settings))
+}
+
+export const applyReadingFont = async (
+  view: FoliateViewElement | null | undefined,
+  settings: Settings,
+) => {
+  await mountReadingFontOnView(view, settings.fontFamily)
+  view?.renderer?.setStyles?.(bookCss(settings))
 }
 
 export const highlightDraw = (

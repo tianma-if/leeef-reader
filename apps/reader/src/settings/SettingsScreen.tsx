@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
+import { FontPicker } from '../reader/FontPicker'
 
 const desktop = !/Android|iPhone|iPad/i.test(navigator.userAgent)
 
@@ -64,6 +65,13 @@ export function SettingsScreen() {
               <SelectItem value="night">夜间</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+        <div className="grid gap-2">
+          <Label>字体</Label>
+          <FontPicker
+            value={value.fontFamily}
+            onChange={(fontFamily) => patch({ fontFamily })}
+          />
         </div>
         <div className="grid gap-2">
           <Label>字号 {value.fontSize ?? 18}</Label>
