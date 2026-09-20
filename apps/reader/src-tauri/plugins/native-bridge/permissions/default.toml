@@ -1,3 +1,9 @@
 [default]
 description = "Native capture used by mobile slide turns"
-permissions = ["allow-capture-webview-region", "allow-pick-books"]
+permissions = [
+  "allow-capture-webview-region",
+  "allow-set-cover-progress",
+  "allow-uncover-webview",
+  "allow-probe-webview-ready",
+  "allow-pick-books",
+]

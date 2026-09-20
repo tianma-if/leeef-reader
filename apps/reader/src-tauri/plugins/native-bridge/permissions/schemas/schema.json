@@ -319,10 +319,46 @@
           "markdownDescription": "Denies the pick_books command without any pre-configured scope."
         },
         {
-          "description": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`\n- `allow-pick-books`",
+          "description": "Enables the probe_webview_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-probe-webview-ready",
+          "markdownDescription": "Enables the probe_webview_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the probe_webview_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-probe-webview-ready",
+          "markdownDescription": "Denies the probe_webview_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_cover_progress command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-cover-progress",
+          "markdownDescription": "Enables the set_cover_progress command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_cover_progress command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-cover-progress",
+          "markdownDescription": "Denies the set_cover_progress command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the uncover_webview command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-uncover-webview",
+          "markdownDescription": "Enables the uncover_webview command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the uncover_webview command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-uncover-webview",
+          "markdownDescription": "Denies the uncover_webview command without any pre-configured scope."
+        },
+        {
+          "description": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`\n- `allow-set-cover-progress`\n- `allow-uncover-webview`\n- `allow-probe-webview-ready`\n- `allow-pick-books`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`\n- `allow-pick-books`"
+          "markdownDescription": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`\n- `allow-set-cover-progress`\n- `allow-uncover-webview`\n- `allow-probe-webview-ready`\n- `allow-pick-books`"
         }
       ]
     }

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-probe-webview-ready"
+description = "Enables the probe_webview_ready command without any pre-configured scope."
+commands.allow = ["probe_webview_ready"]
+
+[[permission]]
+identifier = "deny-probe-webview-ready"
+description = "Denies the probe_webview_ready command without any pre-configured scope."
+commands.deny = ["probe_webview_ready"]

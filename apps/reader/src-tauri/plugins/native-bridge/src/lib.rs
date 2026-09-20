@@ -34,6 +34,9 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("native-bridge")
         .invoke_handler(tauri::generate_handler![
             commands::capture_webview_region,
+            commands::set_cover_progress,
+            commands::uncover_webview,
+            commands::probe_webview_ready,
             commands::pick_books
         ])
         .setup(|app, api| {

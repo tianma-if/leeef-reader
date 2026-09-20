@@ -25,6 +25,21 @@ impl<R: Runtime> NativeBridge<R> {
         Err(crate::Error::UnsupportedPlatformError)
     }
 
+    pub fn set_cover_progress(
+        &self,
+        _payload: crate::models::CoverProgressRequest,
+    ) -> crate::Result<()> {
+        Ok(())
+    }
+
+    pub fn uncover_webview(&self) -> crate::Result<()> {
+        Ok(())
+    }
+
+    pub fn probe_webview_ready(&self) -> crate::Result<crate::models::ProbeReadyResponse> {
+        Ok(crate::models::ProbeReadyResponse { ready: true })
+    }
+
     pub async fn pick_books(&self) -> crate::Result<Vec<crate::models::PickedBook>> {
         let window = self.0.get_webview_window("main");
         let mut dialog = rfd::AsyncFileDialog::new()

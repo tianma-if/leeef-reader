@@ -42,6 +42,18 @@ class NativeBridgePlugin: Plugin {
       }
     }
   }
+
+  @objc public func set_cover_progress(_ invoke: Invoke) {
+    invoke.resolve()
+  }
+
+  @objc public func uncover_webview(_ invoke: Invoke) {
+    invoke.resolve()
+  }
+
+  @objc public func probe_webview_ready(_ invoke: Invoke) {
+    invoke.resolve(["ready": true])
+  }
 }
 
 @_cdecl("init_plugin_native_bridge")

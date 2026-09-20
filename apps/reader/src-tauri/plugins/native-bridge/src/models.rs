@@ -7,6 +7,20 @@ pub struct CaptureWebviewRegionRequest {
     pub y: f64,
     pub width: f64,
     pub height: f64,
+    #[serde(default)]
+    pub cover: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoverProgressRequest {
+    pub progress: f64,
+    pub forward: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ProbeReadyResponse {
+    pub ready: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

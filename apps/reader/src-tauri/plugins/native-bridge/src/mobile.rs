@@ -4,7 +4,10 @@ use tauri::{
     AppHandle, Runtime,
 };
 
-use crate::models::{CaptureWebviewRegionRequest, CaptureWebviewRegionResponse, PickedBook};
+use crate::models::{
+    CaptureWebviewRegionRequest, CaptureWebviewRegionResponse, CoverProgressRequest, PickedBook,
+    ProbeReadyResponse,
+};
 
 #[cfg(target_os = "ios")]
 tauri::ios_plugin_binding!(init_plugin_native_bridge);
@@ -35,6 +38,20 @@ impl<R: Runtime> NativeBridge<R> {
         base64::engine::general_purpose::STANDARD
             .decode(response.data)
             .map_err(|e| crate::Error::NativeBridgeError(format!("invalid capture payload: {e}")))
+    }
+
+    pub fn set_cover_progress(&self, payload: CoverProgressRequest) -> crate::Result<()> {
+        self.0.run_mobile_plugin::<()>("set_cover_progress", payload)?;
+        Ok(())
+    }
+
+    pub fn uncover_webview(&self) -> crate::Result<()> {
+        self.0.run_mobile_plugin::<()>("uncover_webview", ())?;
+        Ok(())
+    }
+
+    pub fn probe_webview_ready(&self) -> crate::Result<ProbeReadyResponse> {
+        Ok(self.0.run_mobile_plugin("probe_webview_ready", ())?)
     }
 
     pub fn pick_books(&self) -> crate::Result<Vec<PickedBook>> {

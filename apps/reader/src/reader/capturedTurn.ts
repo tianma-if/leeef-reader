@@ -5,7 +5,13 @@
  * so the gesture's first frame is already a GPU texture.
  */
 import { PageSlideRenderer } from './pageSlide'
-import { captureWebviewRegion, type CaptureRect } from './nativeCapture'
+import {
+  captureWebviewRegion,
+  probeWebviewReady,
+  setCoverProgress,
+  uncoverWebview,
+  type CaptureRect,
+} from './nativeCapture'
 import { settleDuration } from './turnCommit'
 
 const waitForPaint = () =>
@@ -24,6 +30,8 @@ type PreparedSurface = {
   painted: boolean
 }
 
+const isAndroid = () => /Android/i.test(navigator.userAgent)
+
 type DragSession = {
   forward: boolean
   progress: number
@@ -31,6 +39,8 @@ type DragSession = {
   renderer: PageSlideRenderer | null
   ready: Promise<boolean>
   settled: boolean
+  liveReady: boolean
+  nativeCover: boolean
 }
 
 export class CapturedPageTurn {
@@ -82,6 +92,8 @@ export class CapturedPageTurn {
       overlay: null,
       renderer: null,
       settled: false,
+      liveReady: false,
+      nativeCover: false,
       ready: Promise.resolve(false),
     }
     this.drag = session
@@ -92,7 +104,9 @@ export class CapturedPageTurn {
     const drag = this.drag
     if (!drag) return
     drag.progress = Math.min(1, Math.max(0, progress))
-    if (!drag.settled) drag.renderer?.render(drag.progress, !drag.forward)
+    if (drag.settled || !drag.liveReady) return
+    if (drag.nativeCover) void setCoverProgress(drag.progress, drag.forward)
+    else drag.renderer?.render(drag.progress, !drag.forward)
   }
 
   async endDrag(complete: boolean) {
@@ -105,7 +119,11 @@ export class CapturedPageTurn {
       return false
     }
     const target = complete ? 1 : 0
-    if (drag.renderer) await this.animate(drag.renderer, drag.progress, target, !drag.forward)
+    if (drag.nativeCover) {
+      await this.animateNative(drag, target)
+    } else if (drag.renderer) {
+      await this.animate(drag.renderer, drag.progress, target, !drag.forward)
+    }
     if (!complete) await this.host.navigate(!drag.forward)
     if (this.drag === drag) this.disposeDrag()
     return true
@@ -119,6 +137,7 @@ export class CapturedPageTurn {
   }
 
   private async setupDrag(session: DragSession) {
+    if (isAndroid()) return this.setupNativeCover(session)
     let surface = this.takePrepared()
     if (!surface && this.preparing) {
       const pending = await this.preparing
@@ -145,10 +164,9 @@ export class CapturedPageTurn {
     if (this.drag !== session) return false
     await this.host.navigate(session.forward)
     if (this.drag !== session) return false
-    // Next page is already in the column strip; wait one paint so we never
-    // scrub the overlay off a still-white iframe.
-    await waitForPaint()
+    await this.waitForLivePage(session)
     if (this.drag !== session) return false
+    session.liveReady = true
     surface.renderer.render(session.progress, !session.forward)
     return true
   }
@@ -236,6 +254,7 @@ export class CapturedPageTurn {
     this.drag = null
     if (!drag) return
     drag.settled = true
+    if (drag.nativeCover) void uncoverWebview().catch(() => undefined)
     if (drag.renderer || drag.overlay) {
       drag.renderer?.dispose()
       drag.overlay?.remove()
@@ -269,11 +288,70 @@ export class CapturedPageTurn {
     return { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
   }
 
+  private async setupNativeCover(session: DragSession) {
+    const rect = this.host.getContentRect()
+    if (!rect || rect.width < 8 || rect.height < 8) return false
+    try {
+      await captureWebviewRegion(this.toCaptureRect(rect), true)
+    } catch {
+      return false
+    }
+    if (this.drag !== session) {
+      await uncoverWebview().catch(() => undefined)
+      return false
+    }
+    session.nativeCover = true
+    await this.host.navigate(session.forward)
+    if (this.drag !== session) return false
+    const deadline = performance.now() + 800
+    while (performance.now() < deadline) {
+      if (this.drag !== session) return false
+      if (await probeWebviewReady()) break
+      await waitForPaint()
+    }
+    if (this.drag !== session) return false
+    session.liveReady = true
+    await setCoverProgress(session.progress, session.forward)
+    return true
+  }
+
+  private async waitForLivePage(session: DragSession) {
+    const view = this.host.getHostElement()?.querySelector('foliate-view') as HTMLElement | null
+    if (view) {
+      view.style.transform = 'translateZ(0.1px)'
+    }
+    const deadline = performance.now() + 420
+    await waitForPaint()
+    while (performance.now() < deadline) {
+      if (this.drag !== session) return
+      await waitForPaint()
+    }
+    if (view) view.style.transform = ''
+    await waitForPaint()
+  }
+
   private async decode(bytes: Uint8Array) {
     const copy = new Uint8Array(bytes.byteLength)
     copy.set(bytes)
     const blob = new Blob([copy], { type: 'image/jpeg' })
     return createImageBitmap(blob)
+  }
+
+  private animateNative(drag: DragSession, target: number) {
+    const duration = settleDuration(drag.progress, target)
+    const easing = (t: number) => 1 - (1 - t) ** 3
+    const from = drag.progress
+    const start = performance.now()
+    return new Promise<void>((resolve) => {
+      const tick = (now: number) => {
+        const t = Math.min(1, (now - start) / duration)
+        const progress = from + (target - from) * easing(t)
+        void setCoverProgress(progress, drag.forward)
+        if (t < 1) requestAnimationFrame(tick)
+        else resolve()
+      }
+      requestAnimationFrame(tick)
+    })
   }
 
   private animate(renderer: PageSlideRenderer, from: number, target: number, rtl: boolean) {

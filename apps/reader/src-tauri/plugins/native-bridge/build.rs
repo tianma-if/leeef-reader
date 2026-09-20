@@ -1,4 +1,10 @@
-const COMMANDS: &[&str] = &["capture_webview_region", "pick_books"];
+const COMMANDS: &[&str] = &[
+    "capture_webview_region",
+    "set_cover_progress",
+    "uncover_webview",
+    "probe_webview_ready",
+    "pick_books",
+];
 
 fn main() {
     tauri_plugin::Builder::new(COMMANDS)
