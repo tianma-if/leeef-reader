@@ -1,6 +1,8 @@
 # 商店与 macOS 发布
 
-Leeef Reader 使用三个 GitHub Actions 发布工作流。首次发布前，应先在 Apple Developer、App Store Connect 和 Google Play Console 创建应用；已登记的标识不可随意更换。仓库级发布约束见 [`AGENTS.md`](../AGENTS.md)，本页说明实际操作。
+当前正式资产走 [`.github/workflows/tauri-release.yml`](../.github/workflows/tauri-release.yml)：对 Draft Tag 手动调度，构建签名 macOS DMG/ZIP、Android APK/AAB（默认上传 Google Play production）和 iOS IPA（默认上传 App Store Connect）。旧的 Flutter 工作流 `google-play.yml` / `ios-app-store.yml` / `macos-dmg.yml` 不得对正式 Tag 发版。
+
+首次发布前，应先在 Apple Developer、App Store Connect 和 Google Play Console 创建应用；已登记的标识不可随意更换。仓库级发布约束见 [`AGENTS.md`](../AGENTS.md)，本页说明实际操作。
 
 ## 正式 Release 规则
 
@@ -33,7 +35,7 @@ dart run tool/release.dart \
 
 仅有发布流程、测试或文档调整且仍需发版时，使用 `--bump patch --maintenance`，不提供 `--change-*`，并用 `--ignore-commit` 为基线后的每个提交注明排除原因。工具仍执行完整提交覆盖审计；公开说明明确本次无用户可感知的功能变化，不虚构功能更新。
 
-用户要求发版时，代理完成 dry run 覆盖审计后立即使用完全相同的参数加上 `--execute`，不得停下来等人确认计划。执行模式会确认 `main` 与 `origin/main` 一致，并复用该提交已经通过的跨平台 CI（不存在时只补跑一次）；随后创建跟踪 Issue、更新并提交 `pubspec.yaml`、推送正式 Tag、创建 Draft Release，触发并等待 macOS 资产工作流，核验 DMG、ZIP 和 `appcast.xml` 后公开 Release。仅修改版本号的发版提交带 `[skip ci]`，不会把同一套门禁再跑一遍。公开稳定 Release 会自动触发 Google Play production（`completed`）和 App Store Connect 上传。
+当前 Tauri 发版：确认 `main` 与 `origin/main` 一致并复用已通过的 CI；创建跟踪 Issue、同步 `apps/reader/package.json` 与 `apps/reader/src-tauri/tauri.conf.json` 版本、推送正式 Tag、创建 Draft Release，以该 Tag 调度 `tauri-release.yml`（默认 `platforms: all`、`upload_play: true`、`upload_appstore: true`）。macOS 与 Android 资产上传到 Draft 后立即公开 GitHub Release。Google Play production（`completed`）和 App Store Connect 上传由该工作流直接执行，不依赖 `published` 事件，也不走旧的 Flutter Job。Sparkle `appcast.xml` 尚未接到这条流水线。
 
 若 `pubspec.yaml` 已因未公开的 Draft 递增，显式添加 `--pending-draft vX.Y.Z`。
 工具会验证该 Draft 的 Tag、构建号与当前版本一致，并且位于上一正式 Release 与当前提交之间；
@@ -48,12 +50,11 @@ flutter test test/release_tool_test.dart
 
 | 平台 | 应用标识 | 工作流 | 产物/目标 |
 | --- | --- | --- | --- |
-| Android | `dev.leeef.leeef_reader` | `Publish Google Play` | 签名 AAB、Play internal/alpha/beta/production |
-| iOS | `dev.leeef.leeefReader` | `Publish iOS App Store` | IPA、App Store Connect/TestFlight |
-| iOS 分享扩展 | `dev.leeef.leeefReader.ShareExtension` | 同上 | 随主应用嵌入 |
-| macOS | `dev.leeef.leeefReader` | `Build macOS DMG` | x86_64 + arm64 universal DMG |
+| Android | `dev.leeef.leeef_reader` | `Tauri signed release` | 签名 APK/AAB；默认 Play production `completed` |
+| iOS | `dev.leeef.leeefReader` | `Tauri signed release` | 签名 IPA；默认上传 App Store Connect |
+| macOS | `dev.leeef.leeef-reader` | `Tauri signed release` | Developer ID 签名并公证的 universal DMG/ZIP |
 
-Apple Team ID 当前为 `9KA3NM38B6`，App Group 为 `group.dev.leeef.leeefReader`。iOS 的两个 App Store provisioning profile 都必须启用这个 App Group。
+Apple Team ID 当前为 `9KA3NM38B6`。iOS App Store bundle id 为 `dev.leeef.leeefReader`。Flutter 时代的 Share Extension 与 App Group 未迁到 Tauri，当前 IPA 只签主应用。
 
 ## Google Play
 
@@ -94,7 +95,9 @@ Leeef Reader 不申请 `android.permission.REQUEST_INSTALL_PACKAGES`。发布工
 - Variables：`APPSTORE_ISSUER_ID`、`APPSTORE_API_KEY_ID`。
 - Secrets：`APPSTORE_API_PRIVATE_KEY`（`.p8` 内容）、`APPSTORE_CERTIFICATES_FILE_BASE64`（Apple Distribution `.p12` 的 base64）、`APPSTORE_CERTIFICATES_PASSWORD`。
 
-API Key 至少需要 App Manager 权限。工作流会从 App Store Connect 下载主应用与分享扩展的 profile，使用 `ios/ExportOptions.plist` 导出 IPA。关闭 `upload_testflight` 可只生成 IPA，不上传。正式公开稳定 GitHub Release 时会自动构建并上传 IPA。上传会把 build 送入 App Store Connect/TestFlight；商店元数据、隐私问卷、截图、定价和最终提交审核仍在 App Store Connect 完成。
+API Key 至少需要 App Manager 权限。`tauri-release.yml` 的 iOS job 使用 `app-store` Environment：导入 Apple Distribution 证书，下载 bundle id `dev.leeef.leeefReader` 的 App Store provisioning profile，执行 `npx tauri ios build --export-method app-store-connect`，并把 IPA 上传到 App Store Connect。关闭 `upload_appstore` 可只构建 IPA。当前 Tauri 包没有 Flutter 时代的 Share Extension；不要再去下载 `dev.leeef.leeefReader.ShareExtension` 的 profile。
+
+`CFBundleShortVersionString` 来自 `package.json` 版本。`CFBundleVersion` 默认是 `major * 1000000 + minor * 1000 + patch`（例如 2.2.0 → `2002000`），高于 Flutter 最后一次的 `25`。同一版本再次上传时用 `ios_build_number` 覆盖。上传会把 build 送入 App Store Connect/TestFlight；商店元数据、隐私问卷、截图、定价和最终提交审核仍在 App Store Connect 完成。上传成功不等于审核通过或正式上架。
 
 ## macOS DMG
 
@@ -132,7 +135,7 @@ gh secret set MACOS_SPARKLE_PRIVATE_KEY \
 1. 确认 `main` 与 `origin/main` 一致且工作区干净；以上一个正式 Release 为基线整理中英文用户变更。
 2. 显式选择 SemVer 级别，更新 `pubspec.yaml` 的 `version: X.Y.Z+N`；`N` 必须严格递增。
 3. 等待当前源码提交的跨平台 CI 全部通过；该工作流执行 `apps/reader` 的 npm 测试/构建，以及 `apps/reader/src-tauri` 的 `cargo test --lib`。发布规划器会直接复用这一结果，不重复执行同一套门禁。
-4. 创建 `vX.Y.Z` Draft Release，使用同一 Tag 运行 `Build macOS DMG`，确认 DMG、ZIP、`appcast.xml` 已上传且工作流成功。
-5. 立即公开 GitHub Release。Google Play production 与 App Store Connect 上传由 `published` 事件自动触发，无需先经过测试渠道，也不得为此询问用户。建议检查真机导入、阅读、分享导入、后台音频、同步和 Android 更新流程；如未执行，如实记录，不阻塞正式上架或送审，也不得将其标记为通过。
+4. 创建 `vX.Y.Z` Draft Release，使用同一 Tag 运行 `Tauri signed release`（默认 `platforms: all`），确认 macOS DMG/ZIP 与 Android APK/AAB 已上传且工作流成功。
+5. 立即公开 GitHub Release。Google Play production 与 App Store Connect 上传由 `tauri-release.yml` 直接执行，无需先经过测试渠道，也不得为此询问用户。建议检查真机导入、阅读、分享导入、后台音频、同步和 Android 更新流程；如未执行，如实记录，不阻塞正式上架或送审，也不得将其标记为通过。
 6. 在 Intel 与 Apple Silicon Mac 上验证 DMG 可挂载、拖入 Applications，并运行 `spctl --assess --type execute --verbose "Leeef Reader.app"`；从前一正式版本启动应用，确认新版 ZIP 静默下载后出现“重启以更新”，重启后版本号已更新。该 macOS 验收仍按发布后行为执行，默认不覆盖安装开发者机器上的现有应用。
-7. 确认发布后 macOS 资产审计、Google Play production 与 App Store Connect 上传工作流已触发；分别核验生产轨道、送审和正式上架状态，不将上传成功等同于上架成功。
+7. 确认 `tauri-release.yml` 的 macOS、Android、iOS job 已成功；分别核验 Play 生产轨道、App Store Connect 处理/送审和正式上架状态，不将上传成功等同于上架成功。

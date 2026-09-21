@@ -9,6 +9,7 @@ on:
         default: true
         type: boolean
   # Flutter iOS pipeline retired with the Tauri rewrite.
+  # Official iOS App Store Connect uploads use tauri-release.yml.
 
 concurrency:
   group: leeef-ios-app-store

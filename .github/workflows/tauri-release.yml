@@ -7,17 +7,26 @@ on:
         description: GitHub Release tag to attach signed installers
         required: true
         type: string
-        default: v2.1.0
+        default: v2.2.0
       upload_play:
         description: Upload the signed AAB to Google Play production
         required: true
         type: boolean
         default: true
+      upload_appstore:
+        description: Upload the signed IPA to App Store Connect
+        required: true
+        type: boolean
+        default: true
+      ios_build_number:
+        description: Optional CFBundleVersion override (default major*1000000+minor*1000+patch)
+        required: false
+        type: string
       platforms:
         description: Which signed jobs to run
         required: true
         type: choice
-        options: [all, macos, android]
+        options: [all, macos, android, ios]
         default: all
 
 permissions:
@@ -195,3 +204,121 @@ jobs:
       - name: Remove signing material
         if: always()
         run: rm -f src-tauri/gen/android/keystore.properties "$RUNNER_TEMP/leeef-upload.jks"
+
+  ios:
+    if: github.repository == 'tianma-if/leeef-reader' && (inputs.platforms == 'all' || inputs.platforms == 'ios')
+    name: Signed iOS IPA
+    runs-on: macos-26
+    timeout-minutes: 120
+    environment: app-store
+    defaults:
+      run:
+        working-directory: apps/reader
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag }}
+      - name: Select stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          # App Store submissions reject beta toolchains. Pin the accepted
+          # stable release instead of inheriting a moving runner default.
+          xcode-version: "26.6"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/reader/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+          components: llvm-tools
+      - name: Put llvm-objcopy on PATH
+        run: |
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          bin="$(rustc --print sysroot)/lib/rustlib/${host}/bin"
+          test -x "$bin/llvm-objcopy"
+          echo "$bin" >> "$GITHUB_PATH"
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/reader/src-tauri
+      - run: npm ci
+      - name: Import Apple Distribution certificate
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
+          p12-password: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
+      - name: Download App Store provisioning profile
+        uses: apple-actions/download-provisioning-profiles@v4
+        with:
+          bundle-id: dev.leeef.leeefReader
+          profile-type: IOS_APP_STORE
+          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+      - name: Export iOS provisioning profile
+        run: |
+          profile="$(ls -t "$HOME/Library/MobileDevice/Provisioning Profiles"/*.mobileprovision | head -n 1)"
+          test -n "$profile"
+          test -s "$profile"
+          echo "IOS_MOBILE_PROVISION=$(base64 < "$profile" | tr -d '\n')" >> "$GITHUB_ENV"
+      - name: Resolve iOS bundle version
+        env:
+          IOS_BUILD_NUMBER: ${{ inputs.ios_build_number }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ -n "$IOS_BUILD_NUMBER" ]; then
+            bundle_version="$IOS_BUILD_NUMBER"
+          else
+            bundle_version="$(node -e '
+              const parts = require("./package.json").version.split(".").map(Number);
+              if (parts.length !== 3 || parts.some((n) => !Number.isInteger(n))) {
+                throw new Error("package.json version must be X.Y.Z");
+              }
+              console.log(parts[0] * 1000000 + parts[1] * 1000 + parts[2]);
+            ')"
+          fi
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+          echo "IOS_BUNDLE_VERSION=$bundle_version" >> "$GITHUB_ENV"
+          echo "Using CFBundleShortVersionString=$version CFBundleVersion=$bundle_version"
+      - name: Build signed App Store IPA
+        env:
+          IOS_CERTIFICATE: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
+          APPLE_DEVELOPMENT_TEAM: 9KA3NM38B6
+          CI: true
+        run: |
+          test -n "$IOS_CERTIFICATE"
+          test -n "$IOS_CERTIFICATE_PASSWORD"
+          test -n "$IOS_MOBILE_PROVISION"
+          npx tauri ios build --ci --export-method app-store-connect \
+            --config "{\"bundle\":{\"iOS\":{\"bundleVersion\":\"$IOS_BUNDLE_VERSION\"}}}"
+      - name: Stage and verify IPA
+        run: |
+          mkdir -p "$RUNNER_TEMP/ios-dist"
+          ipa="$(find src-tauri/gen/apple/build -name '*.ipa' | head -n 1)"
+          test -n "$ipa"
+          dest="$RUNNER_TEMP/ios-dist/Leeef-Reader-${APP_VERSION}-ios.ipa"
+          cp "$ipa" "$dest"
+          extract="$(mktemp -d)"
+          unzip -q "$dest" -d "$extract"
+          plist="$(echo "$extract"/Payload/*.app/Info.plist)"
+          test -f "$plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist" | grep -Fx 'dev.leeef.leeefReader'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist" | grep -Fx "$APP_VERSION"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist" | grep -Fx "$IOS_BUNDLE_VERSION"
+          echo "IOS_IPA=$dest" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: leeef-ios
+          path: ${{ runner.temp }}/ios-dist/*
+          if-no-files-found: error
+      - name: Upload IPA to App Store Connect
+        if: inputs.upload_appstore
+        uses: apple-actions/upload-testflight-build@v4
+        with:
+          app-path: ${{ env.IOS_IPA }}
+          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          wait-for-processing: true

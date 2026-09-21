@@ -10,6 +10,12 @@ class CaptureWebviewRegionArgs: Decodable {
 }
 
 class NativeBridgePlugin: Plugin {
+  private weak var webView: WKWebView?
+
+  @objc public override func load(webview: WKWebView) {
+    self.webView = webview
+  }
+
   @objc public func pick_books(_ invoke: Invoke) {
     invoke.resolve(["files": [] as [Any]])
   }

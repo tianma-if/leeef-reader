@@ -1,0 +1,6 @@
+xcuserdata/
+build/
+Externals/
+Pods/
+*.ipa
+.DS_Store
