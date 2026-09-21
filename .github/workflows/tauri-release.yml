@@ -313,9 +313,19 @@ jobs:
           grep -F "PROVISIONING_PROFILE = $IOS_PROFILE_UUID" <<< "$settings"
           grep -F "PROVISIONING_PROFILE_SPECIFIER = $IOS_PROFILE_NAME" <<< "$settings"
       - name: Build signed App Store IPA
+        env:
+          CI: true
+          TAURI_IOS_PREBUILT: "1"
         run: |
           test -n "$IOS_PROFILE_UUID"
           npm run build
+          sdk_root="$(xcrun --sdk iphoneos --show-sdk-path)"
+          npx tauri ios xcode-script -vv \
+            --platform iOS \
+            --sdk-root "$sdk_root" \
+            --configuration release \
+            arm64
+          test -s src-tauri/gen/apple/Externals/arm64/release/libapp.a
           archive="$RUNNER_TEMP/LeeefReader.xcarchive"
           export_path=src-tauri/gen/apple/build/app-store
           xcodebuild archive \
