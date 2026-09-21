@@ -302,11 +302,7 @@ jobs:
         run: |
           test -n "$IOS_PROFILE_UUID"
           npx tauri ios build --ci --export-method app-store-connect \
-            --config "{\"bundle\":{\"iOS\":{\"bundleVersion\":\"$IOS_BUNDLE_VERSION\"}}}" \
-            -- CODE_SIGN_STYLE=Manual \
-            DEVELOPMENT_TEAM=9KA3NM38B6 \
-            PROVISIONING_PROFILE_SPECIFIER="$IOS_PROFILE_UUID" \
-            CODE_SIGN_IDENTITY="Apple Distribution"
+            --config "{\"bundle\":{\"iOS\":{\"bundleVersion\":\"$IOS_BUNDLE_VERSION\"}}}"
       - name: Stage and verify IPA
         run: |
           mkdir -p "$RUNNER_TEMP/ios-dist"
