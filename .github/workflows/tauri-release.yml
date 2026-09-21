@@ -256,12 +256,17 @@ jobs:
           issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
           api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
-      - name: Export iOS provisioning profile
+      - name: Resolve iOS provisioning profile
         run: |
           profile="$(ls -t "$HOME/Library/MobileDevice/Provisioning Profiles"/*.mobileprovision | head -n 1)"
           test -n "$profile"
           test -s "$profile"
-          echo "IOS_MOBILE_PROVISION=$(base64 < "$profile" | tr -d '\n')" >> "$GITHUB_ENV"
+          profile_uuid="$(security cms -D -i "$profile" | plutil -extract UUID raw -)"
+          profile_name="$(security cms -D -i "$profile" | plutil -extract Name raw -)"
+          test -n "$profile_uuid"
+          test -n "$profile_name"
+          echo "IOS_PROFILE_UUID=$profile_uuid" >> "$GITHUB_ENV"
+          echo "IOS_PROFILE_NAME=$profile_name" >> "$GITHUB_ENV"
       - name: Resolve iOS bundle version
         env:
           IOS_BUILD_NUMBER: ${{ inputs.ios_build_number }}
@@ -281,18 +286,27 @@ jobs:
           echo "APP_VERSION=$version" >> "$GITHUB_ENV"
           echo "IOS_BUNDLE_VERSION=$bundle_version" >> "$GITHUB_ENV"
           echo "Using CFBundleShortVersionString=$version CFBundleVersion=$bundle_version"
+      - name: Configure manual App Store signing
+        run: |
+          options=src-tauri/gen/apple/ExportOptions.plist
+          /usr/libexec/PlistBuddy -c "Set :method app-store-connect" "$options"
+          /usr/libexec/PlistBuddy -c "Add :signingStyle string manual" "$options"
+          /usr/libexec/PlistBuddy -c "Add :teamID string 9KA3NM38B6" "$options"
+          /usr/libexec/PlistBuddy -c "Add :signingCertificate string Apple Distribution" "$options"
+          /usr/libexec/PlistBuddy -c "Add :provisioningProfiles dict" "$options"
+          /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:dev.leeef.leeefReader string $IOS_PROFILE_UUID" "$options"
       - name: Build signed App Store IPA
         env:
-          IOS_CERTIFICATE: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
-          IOS_CERTIFICATE_PASSWORD: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
           APPLE_DEVELOPMENT_TEAM: 9KA3NM38B6
           CI: true
         run: |
-          test -n "$IOS_CERTIFICATE"
-          test -n "$IOS_CERTIFICATE_PASSWORD"
-          test -n "$IOS_MOBILE_PROVISION"
+          test -n "$IOS_PROFILE_UUID"
           npx tauri ios build --ci --export-method app-store-connect \
-            --config "{\"bundle\":{\"iOS\":{\"bundleVersion\":\"$IOS_BUNDLE_VERSION\"}}}"
+            --config "{\"bundle\":{\"iOS\":{\"bundleVersion\":\"$IOS_BUNDLE_VERSION\"}}}" \
+            -- CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM=9KA3NM38B6 \
+            PROVISIONING_PROFILE_SPECIFIER="$IOS_PROFILE_UUID" \
+            CODE_SIGN_IDENTITY="Apple Distribution"
       - name: Stage and verify IPA
         run: |
           mkdir -p "$RUNNER_TEMP/ios-dist"
