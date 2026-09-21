@@ -74,7 +74,8 @@ targets:
         release:
           CODE_SIGN_IDENTITY: Apple Distribution
           CODE_SIGN_STYLE: Manual
-          PROVISIONING_PROFILE_SPECIFIER: $(IOS_PROFILE_UUID)
+          PROVISIONING_PROFILE: $(IOS_PROFILE_UUID)
+          PROVISIONING_PROFILE_SPECIFIER: $(IOS_PROFILE_NAME)
       groups: [app]
     dependencies:
       - framework: libapp.a
