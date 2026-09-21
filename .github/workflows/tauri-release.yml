@@ -301,6 +301,11 @@ jobs:
             -workspace src-tauri/gen/apple/leeef_reader.xcodeproj/project.xcworkspace \
             -scheme leeef_reader_iOS \
             -configuration release \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM=9KA3NM38B6 \
+            PROVISIONING_PROFILE="$IOS_PROFILE_UUID" \
+            PROVISIONING_PROFILE_SPECIFIER="$IOS_PROFILE_NAME" \
             -showBuildSettings)"
           grep -F "CODE_SIGN_IDENTITY = Apple Distribution" <<< "$settings"
           grep -F "CODE_SIGN_STYLE = Manual" <<< "$settings"
@@ -308,13 +313,29 @@ jobs:
           grep -F "PROVISIONING_PROFILE = $IOS_PROFILE_UUID" <<< "$settings"
           grep -F "PROVISIONING_PROFILE_SPECIFIER = $IOS_PROFILE_NAME" <<< "$settings"
       - name: Build signed App Store IPA
-        env:
-          APPLE_DEVELOPMENT_TEAM: 9KA3NM38B6
-          CI: true
         run: |
           test -n "$IOS_PROFILE_UUID"
-          npx tauri ios build --ci --export-method app-store-connect \
-            --config "{\"bundle\":{\"iOS\":{\"bundleVersion\":\"$IOS_BUNDLE_VERSION\"}}}"
+          npm run build
+          archive="$RUNNER_TEMP/LeeefReader.xcarchive"
+          export_path=src-tauri/gen/apple/build/app-store
+          xcodebuild archive \
+            -workspace src-tauri/gen/apple/leeef_reader.xcodeproj/project.xcworkspace \
+            -scheme leeef_reader_iOS \
+            -configuration release \
+            -sdk iphoneos \
+            -destination generic/platform=iOS \
+            -archivePath "$archive" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            CODE_SIGN_STYLE=Manual \
+            CURRENT_PROJECT_VERSION="$IOS_BUNDLE_VERSION" \
+            DEVELOPMENT_TEAM=9KA3NM38B6 \
+            MARKETING_VERSION="$APP_VERSION" \
+            PROVISIONING_PROFILE="$IOS_PROFILE_UUID" \
+            PROVISIONING_PROFILE_SPECIFIER="$IOS_PROFILE_NAME"
+          xcodebuild -exportArchive \
+            -archivePath "$archive" \
+            -exportPath "$export_path" \
+            -exportOptionsPlist src-tauri/gen/apple/ExportOptions.plist
       - name: Stage and verify IPA
         run: |
           mkdir -p "$RUNNER_TEMP/ios-dist"
