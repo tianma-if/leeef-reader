@@ -13,6 +13,7 @@ export type ThemeName = keyof typeof THEMES
 export const DEFAULT_FONT_SIZE = 18
 export const DEFAULT_LINE_HEIGHT = 1.65
 export const DEFAULT_FONT_FAMILY = 'noto-serif-sc'
+export const PAGE_MARGIN_PX = { mobile: 16, desktop: 44 } as const
 
 export const themeOf = (settings: Settings) => THEMES[settings.theme ?? 'paper']
 
@@ -60,7 +61,7 @@ export const applyViewLayout = (
   const paginated = flow === 'paginated'
   renderer.setAttribute('flow', flow)
   renderer.setAttribute('max-column-count', String(mobile ? 1 : (settings.columns ?? 1)))
-  renderer.setAttribute('margin', '44px')
+  renderer.setAttribute('margin', `${mobile ? PAGE_MARGIN_PX.mobile : PAGE_MARGIN_PX.desktop}px`)
   renderer.setAttribute('max-block-size', '10000px')
   if (paginated && mobile) {
     renderer.setAttribute('max-inline-size', '10000')

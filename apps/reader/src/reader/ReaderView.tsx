@@ -497,7 +497,10 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   }
 
   return (
-    <div className="reader-shell" style={{ color: theme.fg, background: theme.bg }}>
+    <div
+      className={mobile ? 'reader-shell is-mobile' : 'reader-shell'}
+      style={{ color: theme.fg, background: theme.bg }}
+    >
       <div className="reader-stage" ref={hostRef}>
         {status ? <p className="reader-status">{status}</p> : null}
         {paginated ? (

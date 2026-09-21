@@ -106,6 +106,22 @@
   bottom: 0.45rem;
 }
 
+.reader-shell.is-mobile .reader-band {
+  font-size: 0.65rem;
+  line-height: 16px;
+  height: 16px;
+}
+
+.reader-shell.is-mobile .reader-band-top {
+  top: 0;
+  left: 0.75rem;
+}
+
+.reader-shell.is-mobile .reader-band-bottom {
+  right: 0.75rem;
+  bottom: 0;
+}
+
 .reader-shell.is-capturing .reader-band,
 .reader-shell:has([data-page-turn]) .reader-band {
   visibility: hidden;

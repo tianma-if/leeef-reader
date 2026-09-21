@@ -1,5 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import { bookCss, themeOf } from './bookStyles'
+import { applyViewLayout, bookCss, PAGE_MARGIN_PX, themeOf } from './bookStyles'
+
+const fakeView = () => {
+  const attrs = new Map<string, string>()
+  const renderer = {
+    setAttribute: (name: string, value: string) => {
+      attrs.set(name, value)
+    },
+    removeAttribute: (name: string) => {
+      attrs.delete(name)
+    },
+    setStyles: () => undefined,
+  }
+  const view = {
+    renderer,
+    setAttribute: (name: string, value: string) => {
+      attrs.set(`view:${name}`, value)
+    },
+    removeAttribute: (name: string) => {
+      attrs.delete(`view:${name}`)
+    },
+  }
+  return { view: view as unknown as FoliateViewElement, attrs }
+}
 
 describe('bookCss', () => {
   it('injects paper colors and default type', () => {
@@ -39,5 +62,23 @@ describe('themeOf', () => {
   it('falls back to paper', () => {
     expect(themeOf({}).name).toBe('纸张')
     expect(themeOf({ theme: 'sepia' }).bg).toBe('#f4ecd8')
+  })
+})
+
+describe('applyViewLayout', () => {
+  it('uses a compact page margin on mobile', () => {
+    const { view, attrs } = fakeView()
+    applyViewLayout(view, { flow: 'paginated' }, true)
+    expect(attrs.get('margin')).toBe(`${PAGE_MARGIN_PX.mobile}px`)
+    expect(attrs.get('max-column-count')).toBe('1')
+    expect(attrs.has('view:no-swipe')).toBe(true)
+  })
+
+  it('keeps the wider desktop page margin', () => {
+    const { view, attrs } = fakeView()
+    applyViewLayout(view, { flow: 'paginated', columns: 2 }, false)
+    expect(attrs.get('margin')).toBe(`${PAGE_MARGIN_PX.desktop}px`)
+    expect(attrs.get('max-column-count')).toBe('2')
+    expect(attrs.has('animated')).toBe(true)
   })
 })
