@@ -228,6 +228,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       host.append(view)
       viewRef.current = view
       view.addEventListener('relocate', ((event: Event) => {
+        setStatus('')
         const detail = (event as CustomEvent).detail as {
           cfi?: string
           fraction?: number

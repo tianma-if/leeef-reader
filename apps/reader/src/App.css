@@ -13,7 +13,8 @@
 }
 
 .reader-stage foliate-view {
-  position: relative;
+  position: absolute;
+  inset: 0;
   z-index: 0;
   display: block;
   width: 100%;
@@ -207,6 +208,12 @@
 }
 
 .reader-status {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 2;
   margin: 2rem 1rem;
+  pointer-events: none;
   color: var(--muted-foreground);
 }
