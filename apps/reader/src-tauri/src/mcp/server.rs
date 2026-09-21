@@ -435,24 +435,30 @@ impl LeeefMcp {
                     &color,
                 )
                 .map_err(err)?;
+                crate::edgeever::schedule(self.state.clone(), input.book_id);
                 Ok((id, Uuid::new_v4().to_string()))
             }
             "update_excerpt" => {
                 let input: UpdateExcerptInput =
                     serde_json::from_value(payload.clone()).map_err(|e| err(e.to_string()))?;
+                let book_id = db::excerpt_book_id(&self.state, &input.excerpt_id).map_err(err)?;
                 db::update_excerpt(
                     &self.state,
                     &input.excerpt_id,
+                    None,
                     input.note.as_deref(),
                     &input.color,
                 )
                 .map_err(err)?;
+                crate::edgeever::schedule(self.state.clone(), book_id);
                 Ok((input.excerpt_id, Uuid::new_v4().to_string()))
             }
             "delete_excerpt" => {
                 let input: EntityIdInput =
                     serde_json::from_value(payload.clone()).map_err(|e| err(e.to_string()))?;
+                let book_id = db::excerpt_book_id(&self.state, &input.id).map_err(err)?;
                 db::delete_excerpt(&self.state, &input.id).map_err(err)?;
+                crate::edgeever::schedule(self.state.clone(), book_id);
                 Ok((input.id, Uuid::new_v4().to_string()))
             }
             "create_bookmark" => {

@@ -6,7 +6,7 @@ use tauri::{
 
 use crate::models::{
     CaptureWebviewRegionRequest, CaptureWebviewRegionResponse, CoverProgressRequest, PickedBook,
-    ProbeReadyResponse,
+    ProbeReadyResponse, SaveTextFileRequest, SaveTextFileResponse,
 };
 
 #[cfg(target_os = "ios")]
@@ -41,7 +41,8 @@ impl<R: Runtime> NativeBridge<R> {
     }
 
     pub fn set_cover_progress(&self, payload: CoverProgressRequest) -> crate::Result<()> {
-        self.0.run_mobile_plugin::<()>("set_cover_progress", payload)?;
+        self.0
+            .run_mobile_plugin::<()>("set_cover_progress", payload)?;
         Ok(())
     }
 
@@ -55,9 +56,15 @@ impl<R: Runtime> NativeBridge<R> {
     }
 
     pub fn pick_books(&self) -> crate::Result<Vec<PickedBook>> {
-        let response: crate::models::PickBooksResponse = self
-            .0
-            .run_mobile_plugin("pick_books", ())?;
+        let response: crate::models::PickBooksResponse =
+            self.0.run_mobile_plugin("pick_books", ())?;
         Ok(response.files)
+    }
+
+    pub fn save_text_file(
+        &self,
+        payload: SaveTextFileRequest,
+    ) -> crate::Result<SaveTextFileResponse> {
+        Ok(self.0.run_mobile_plugin("save_text_file", payload)?)
     }
 }

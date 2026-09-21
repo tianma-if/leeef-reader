@@ -4,6 +4,7 @@ const COMMANDS: &[&str] = &[
     "uncover_webview",
     "probe_webview_ready",
     "pick_books",
+    "save_text_file",
 ];
 
 fn main() {

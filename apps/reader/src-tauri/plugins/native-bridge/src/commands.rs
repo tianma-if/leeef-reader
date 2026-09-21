@@ -1,6 +1,9 @@
 use tauri::{command, AppHandle, Runtime};
 
-use crate::models::{CaptureWebviewRegionRequest, CoverProgressRequest, ProbeReadyResponse};
+use crate::models::{
+    CaptureWebviewRegionRequest, CoverProgressRequest, ProbeReadyResponse, SaveTextFileRequest,
+    SaveTextFileResponse,
+};
 use crate::{NativeBridgeExt, Result};
 
 #[command]
@@ -46,5 +49,20 @@ pub(crate) async fn pick_books<R: Runtime>(
     #[cfg(mobile)]
     {
         app.native_bridge().pick_books()
+    }
+}
+
+#[command]
+pub(crate) async fn save_text_file<R: Runtime>(
+    app: AppHandle<R>,
+    payload: SaveTextFileRequest,
+) -> Result<SaveTextFileResponse> {
+    #[cfg(desktop)]
+    {
+        app.native_bridge().save_text_file(payload).await
+    }
+    #[cfg(mobile)]
+    {
+        app.native_bridge().save_text_file(payload)
     }
 }

@@ -331,6 +331,18 @@
           "markdownDescription": "Denies the probe_webview_ready command without any pre-configured scope."
         },
         {
+          "description": "Enables the save_text_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-save-text-file",
+          "markdownDescription": "Enables the save_text_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_text_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-save-text-file",
+          "markdownDescription": "Denies the save_text_file command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_cover_progress command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-cover-progress",
@@ -355,10 +367,10 @@
           "markdownDescription": "Denies the uncover_webview command without any pre-configured scope."
         },
         {
-          "description": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`\n- `allow-set-cover-progress`\n- `allow-uncover-webview`\n- `allow-probe-webview-ready`\n- `allow-pick-books`",
+          "description": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`\n- `allow-set-cover-progress`\n- `allow-uncover-webview`\n- `allow-probe-webview-ready`\n- `allow-pick-books`\n- `allow-save-text-file`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`\n- `allow-set-cover-progress`\n- `allow-uncover-webview`\n- `allow-probe-webview-ready`\n- `allow-pick-books`"
+          "markdownDescription": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`\n- `allow-set-cover-progress`\n- `allow-uncover-webview`\n- `allow-probe-webview-ready`\n- `allow-pick-books`\n- `allow-save-text-file`"
         }
       ]
     }

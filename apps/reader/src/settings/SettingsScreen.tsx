@@ -26,9 +26,16 @@ export function SettingsScreen() {
     token?: string
   }>({ running: false })
   const [pair, setPair] = useState('')
+  const [edgeEverBusy, setEdgeEverBusy] = useState(false)
+  const [edgeEverNotebooks, setEdgeEverNotebooks] = useState<{ id: string; name: string }[]>([])
 
   useEffect(() => {
-    void api.getSettings().then(setValue)
+    void api.getSettings().then((settings) => {
+      setValue(settings)
+      if (settings.edgeEverEnabled) {
+        void api.edgeEverNotebooks().then(setEdgeEverNotebooks).catch(() => undefined)
+      }
+    })
     void api.mcpDatabasePath().then(setDbPath)
     void api.mcpStatus().then(setMcp).catch(() => undefined)
   }, [])
@@ -217,6 +224,93 @@ export function SettingsScreen() {
           <p className="text-muted-foreground text-sm">
             手机通过桌面配对码同步这些凭据。写操作会记入 sync_operations。
           </p>
+
+          <Separator className="my-2" />
+          <h2 className="text-lg">EdgeEver 书摘同步</h2>
+          <p className="text-muted-foreground text-sm">
+            每本书固定同步为一篇 EdgeEver 笔记。Token 需要 read:notebooks、read:memos 和
+            write:memos 权限。
+          </p>
+          <div className="grid gap-1.5">
+            <Label>状态</Label>
+            <Select
+              value={value.edgeEverEnabled ? 'enabled' : 'disabled'}
+              onValueChange={(state) => patch({ edgeEverEnabled: state === 'enabled' })}
+            >
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="disabled">关闭</SelectItem>
+                <SelectItem value="enabled">实时同步</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label>EdgeEver 实例地址</Label>
+            <Input
+              value={value.edgeEverEndpoint ?? ''}
+              onChange={(event) => patch({ edgeEverEndpoint: event.target.value })}
+              placeholder="https://notes.example.com"
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label>API Token</Label>
+            <Input
+              type="password"
+              value={value.edgeEverToken ?? ''}
+              onChange={(event) => patch({ edgeEverToken: event.target.value })}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label>目标笔记本</Label>
+            <Select
+              value={value.edgeEverNotebookId || 'none'}
+              onValueChange={(id) => patch({ edgeEverNotebookId: id === 'none' ? '' : id })}
+            >
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">尚未选择</SelectItem>
+                {edgeEverNotebooks.map((notebook) => (
+                  <SelectItem key={notebook.id} value={notebook.id}>{notebook.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              disabled={edgeEverBusy}
+              onClick={() => {
+                setEdgeEverBusy(true)
+                void api.saveSettings(value)
+                  .then(() => Promise.all([api.edgeEverTest(), api.edgeEverNotebooks()]))
+                  .then(([result, notebooks]) => {
+                    setEdgeEverNotebooks(notebooks)
+                    toast.success(result.message)
+                  })
+                  .catch((cause) => toast.error(String(cause)))
+                  .finally(() => setEdgeEverBusy(false))
+              }}
+            >
+              测试连接并加载笔记本
+            </Button>
+            <Button
+              variant="outline"
+              disabled={edgeEverBusy || !value.edgeEverNotebookId}
+              onClick={() => {
+                setEdgeEverBusy(true)
+                void api.saveSettings(value)
+                  .then(() => api.edgeEverSyncAll())
+                  .then((result) => {
+                    if (result.failed) toast.error(result.errors.join('\n'))
+                    else toast.success(`已同步 ${result.synced} 本，跳过 ${result.skipped} 本`)
+                  })
+                  .catch((cause) => toast.error(String(cause)))
+                  .finally(() => setEdgeEverBusy(false))
+              }}
+            >
+              立即同步全部书摘
+            </Button>
+          </div>
         </section>
       ) : (
         <p className="text-muted-foreground text-sm">

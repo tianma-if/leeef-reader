@@ -66,6 +66,16 @@ pub struct Excerpt {
     pub book_title: Option<String>,
 }
 
+#[derive(Clone)]
+pub struct EdgeEverExcerptNote {
+    pub book_id: String,
+    pub instance_url: String,
+    pub memo_id: String,
+    pub revision: i64,
+    pub remote_content_hash: String,
+    pub local_content_hash: String,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Bookmark {
@@ -223,6 +233,16 @@ pub fn open(root: PathBuf) -> Result<AppState, String> {
           payload_json TEXT,
           occurred_at TEXT NOT NULL,
           applied_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS edgeever_excerpt_notes (
+          book_id TEXT PRIMARY KEY REFERENCES books(id) ON DELETE CASCADE,
+          instance_url TEXT NOT NULL,
+          memo_id TEXT NOT NULL,
+          revision INTEGER NOT NULL,
+          remote_content_hash TEXT NOT NULL,
+          local_content_hash TEXT NOT NULL,
+          synced_at TEXT NOT NULL,
+          last_error TEXT
         );
         CREATE TABLE IF NOT EXISTS audit_events (
           id TEXT PRIMARY KEY,
@@ -603,20 +623,105 @@ pub fn upsert_excerpt(
 pub fn update_excerpt(
     state: &AppState,
     id: &str,
+    quote: Option<&str>,
     note: Option<&str>,
     color: &str,
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let changed = db
         .execute(
-            "UPDATE excerpts SET note = ?2, color = ?3, updated_at = ?4 WHERE id = ?1 AND is_deleted = 0",
-            params![id, note, color, now()],
+            "UPDATE excerpts SET quote = COALESCE(?2, quote), note = ?3, color = ?4, updated_at = ?5
+             WHERE id = ?1 AND is_deleted = 0",
+            params![id, quote, note, color, now()],
         )
         .map_err(|e| e.to_string())?;
     if changed == 0 {
         return Err("excerpt does not exist".into());
     }
     log_op(&db, &state.device_id, "excerpt", id, "upsert", "{}");
+    Ok(())
+}
+
+pub fn excerpt_book_id(state: &AppState, id: &str) -> Result<String, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.query_row(
+        "SELECT book_id FROM excerpts WHERE id = ?1",
+        params![id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "excerpt does not exist".into())
+}
+
+pub fn edgeever_excerpt_note(
+    state: &AppState,
+    book_id: &str,
+    instance_url: &str,
+) -> Result<Option<EdgeEverExcerptNote>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.query_row(
+        "SELECT book_id, instance_url, memo_id, revision, remote_content_hash, local_content_hash
+         FROM edgeever_excerpt_notes WHERE book_id = ?1 AND instance_url = ?2",
+        params![book_id, instance_url],
+        |row| {
+            Ok(EdgeEverExcerptNote {
+                book_id: row.get(0)?,
+                instance_url: row.get(1)?,
+                memo_id: row.get(2)?,
+                revision: row.get(3)?,
+                remote_content_hash: row.get(4)?,
+                local_content_hash: row.get(5)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+pub fn save_edgeever_excerpt_note(
+    state: &AppState,
+    link: &EdgeEverExcerptNote,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.execute(
+        "INSERT INTO edgeever_excerpt_notes(
+           book_id, instance_url, memo_id, revision, remote_content_hash, local_content_hash,
+           synced_at, last_error
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)
+         ON CONFLICT(book_id) DO UPDATE SET
+           instance_url = excluded.instance_url,
+           memo_id = excluded.memo_id,
+           revision = excluded.revision,
+           remote_content_hash = excluded.remote_content_hash,
+           local_content_hash = excluded.local_content_hash,
+           synced_at = excluded.synced_at,
+           last_error = NULL",
+        params![
+            link.book_id,
+            link.instance_url,
+            link.memo_id,
+            link.revision,
+            link.remote_content_hash,
+            link.local_content_hash,
+            now()
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn save_edgeever_sync_error(
+    state: &AppState,
+    book_id: &str,
+    error: &str,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.execute(
+        "UPDATE edgeever_excerpt_notes SET last_error = ?2 WHERE book_id = ?1",
+        params![book_id, error],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1140,4 +1245,42 @@ pub fn audit(
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn excerpt_storage_preserves_internal_line_breaks() {
+        let root = tempfile::tempdir().expect("temporary app data directory");
+        let state = open(root.path().to_path_buf()).expect("open database");
+        let book = import_book(
+            &state,
+            "line-breaks.txt",
+            b"book",
+            "Line breaks",
+            None,
+            "text/plain",
+            None,
+        )
+        .expect("import book");
+        let quote = "第一段\n第二行\n\n第二段";
+        let note = "想法一\n想法二";
+
+        upsert_excerpt(
+            &state,
+            &book.id,
+            "epubcfi(/6/2)",
+            quote,
+            Some(note),
+            "#c4a35a",
+        )
+        .expect("create excerpt");
+
+        let excerpts = list_excerpts(&state, Some(&book.id)).expect("list excerpts");
+        assert_eq!(excerpts.len(), 1);
+        assert_eq!(excerpts[0].quote, quote);
+        assert_eq!(excerpts[0].note.as_deref(), Some(note));
+    }
 }

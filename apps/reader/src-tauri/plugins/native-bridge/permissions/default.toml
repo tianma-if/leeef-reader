@@ -6,4 +6,5 @@ permissions = [
   "allow-uncover-webview",
   "allow-probe-webview-ready",
   "allow-pick-books",
+  "allow-save-text-file",
 ]

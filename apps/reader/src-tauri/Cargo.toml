@@ -29,14 +29,17 @@ hex = "0.4"
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
 regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["rt"] }
+time = { version = "0.3", features = ["formatting", "macros"] }
+urlencoding = "2"
 axum = "0.8"
 rmcp = { version = "3.4", features = ["server", "macros", "transport-streamable-http-server", "schemars"] }
 
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tempfile = "3"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

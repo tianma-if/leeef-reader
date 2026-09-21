@@ -9,6 +9,7 @@ Native capture used by mobile slide turns
 - `allow-uncover-webview`
 - `allow-probe-webview-ready`
 - `allow-pick-books`
+- `allow-save-text-file`
 
 ## Permission Table
 
@@ -93,6 +94,32 @@ Enables the probe_webview_ready command without any pre-configured scope.
 <td>
 
 Denies the probe_webview_ready command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:allow-save-text-file`
+
+</td>
+<td>
+
+Enables the save_text_file command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:deny-save-text-file`
+
+</td>
+<td>
+
+Denies the save_text_file command without any pre-configured scope.
 
 </td>
 </tr>

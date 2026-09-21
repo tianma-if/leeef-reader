@@ -1,4 +1,5 @@
 mod db;
+mod edgeever;
 mod mcp;
 
 use db::AppState;
@@ -117,12 +118,46 @@ fn create_excerpt(
     color: String,
 ) -> Result<(), String> {
     db::upsert_excerpt(&state, &book_id, &locator, &quote, note.as_deref(), &color)?;
+    edgeever::schedule(state.inner().clone(), book_id);
+    Ok(())
+}
+
+#[tauri::command]
+fn update_excerpt(
+    state: State<AppState>,
+    id: String,
+    quote: String,
+    note: Option<String>,
+    color: String,
+) -> Result<(), String> {
+    let book_id = db::excerpt_book_id(&state, &id)?;
+    db::update_excerpt(&state, &id, Some(&quote), note.as_deref(), &color)?;
+    edgeever::schedule(state.inner().clone(), book_id);
     Ok(())
 }
 
 #[tauri::command]
 fn delete_excerpt(state: State<AppState>, id: String) -> Result<(), String> {
-    db::delete_excerpt(&state, &id)
+    let book_id = db::excerpt_book_id(&state, &id)?;
+    db::delete_excerpt(&state, &id)?;
+    edgeever::schedule(state.inner().clone(), book_id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn edgeever_test(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let message = edgeever::test(&state).await?;
+    Ok(serde_json::json!({ "ok": true, "message": message }))
+}
+
+#[tauri::command]
+async fn edgeever_sync_all(state: State<'_, AppState>) -> Result<edgeever::SyncResult, String> {
+    Ok(edgeever::sync_all(&state).await)
+}
+
+#[tauri::command]
+async fn edgeever_notebooks(state: State<'_, AppState>) -> Result<Vec<edgeever::Notebook>, String> {
+    edgeever::notebooks(&state).await
 }
 
 #[tauri::command]
@@ -272,6 +307,7 @@ pub fn run() {
             save_progress,
             list_excerpts,
             create_excerpt,
+            update_excerpt,
             delete_excerpt,
             list_bookmarks,
             add_bookmark,
@@ -287,6 +323,9 @@ pub fn run() {
             list_sessions,
             get_settings,
             save_settings,
+            edgeever_test,
+            edgeever_sync_all,
+            edgeever_notebooks,
             mcp_database_path,
             mcp_start,
             mcp_stop,

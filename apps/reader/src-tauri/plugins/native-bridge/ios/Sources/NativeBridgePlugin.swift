@@ -9,6 +9,11 @@ class CaptureWebviewRegionArgs: Decodable {
   let height: Double
 }
 
+class SaveTextFileArgs: Decodable {
+  let filename: String
+  let content: String
+}
+
 class NativeBridgePlugin: Plugin {
   private weak var webView: WKWebView?
 
@@ -18,6 +23,33 @@ class NativeBridgePlugin: Plugin {
 
   @objc public func pick_books(_ invoke: Invoke) {
     invoke.resolve(["files": [] as [Any]])
+  }
+
+  @objc public func save_text_file(_ invoke: Invoke) {
+    guard let args = try? invoke.parseArgs(SaveTextFileArgs.self) else {
+      return invoke.reject("Failed to parse arguments")
+    }
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(args.filename)
+    do {
+      try args.content.write(to: url, atomically: true, encoding: .utf8)
+    } catch {
+      return invoke.reject("无法准备导出文件：\(error.localizedDescription)")
+    }
+    DispatchQueue.main.async { [weak self] in
+      guard let controller = self?.webView?.window?.rootViewController else {
+        return invoke.reject("View controller not available")
+      }
+      let activity = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+      if let popover = activity.popoverPresentationController {
+        popover.sourceView = self?.webView
+        popover.sourceRect = self?.webView?.bounds ?? .zero
+      }
+      activity.completionWithItemsHandler = { _, completed, _, _ in
+        try? FileManager.default.removeItem(at: url)
+        invoke.resolve(["saved": completed])
+      }
+      controller.present(activity, animated: true)
+    }
   }
   /// WKWebView snapshot for the captured slide pipeline.
   /// Adapted from Readest (AGPL-3.0): cap at 2x CSS pixels, JPEG 0.9.

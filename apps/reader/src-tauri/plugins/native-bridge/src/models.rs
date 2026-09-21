@@ -38,3 +38,15 @@ pub struct PickedBook {
 pub struct PickBooksResponse {
     pub files: Vec<PickedBook>,
 }
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveTextFileRequest {
+    pub filename: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct SaveTextFileResponse {
+    pub saved: bool,
+}

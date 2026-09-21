@@ -37,7 +37,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::set_cover_progress,
             commands::uncover_webview,
             commands::probe_webview_ready,
-            commands::pick_books
+            commands::pick_books,
+            commands::save_text_file
         ])
         .setup(|app, api| {
             #[cfg(mobile)]

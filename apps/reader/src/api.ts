@@ -65,6 +65,18 @@ export type Settings = {
   syncBackend?: 's3' | 'webdav' | ''
   syncEndpoint?: string
   chinese?: 'original' | 'simplified' | 'traditional'
+  edgeEverEnabled?: boolean
+  edgeEverEndpoint?: string
+  edgeEverToken?: string
+  edgeEverNotebookId?: string
+}
+
+export type EdgeEverSyncResult = {
+  configured: boolean
+  synced: number
+  skipped: number
+  failed: number
+  errors: string[]
 }
 
 const asBytes = (raw: ArrayBuffer | Uint8Array | number[]): Uint8Array<ArrayBuffer> =>
@@ -129,6 +141,17 @@ export const api = {
       note: input.note ?? null,
       color: input.color,
     }),
+  updateExcerpt: (input: {
+    id: string
+    quote: string
+    note?: string
+    color: string
+  }) => invoke('update_excerpt', {
+    id: input.id,
+    quote: input.quote,
+    note: input.note ?? null,
+    color: input.color,
+  }),
   deleteExcerpt: (id: string) => invoke('delete_excerpt', { id }),
   listBookmarks: (bookId: string) => invoke<Bookmark[]>('list_bookmarks', { bookId }),
   addBookmark: (bookId: string, locator: string, title?: string) =>
@@ -150,6 +173,9 @@ export const api = {
   listSessions: () => invoke<Session[]>('list_sessions'),
   getSettings: () => invoke<Settings>('get_settings'),
   saveSettings: (value: Settings) => invoke('save_settings', { value }),
+  edgeEverTest: () => invoke<{ ok: boolean; message: string }>('edgeever_test'),
+  edgeEverNotebooks: () => invoke<{ id: string; name: string }[]>('edgeever_notebooks'),
+  edgeEverSyncAll: () => invoke<EdgeEverSyncResult>('edgeever_sync_all'),
   mcpDatabasePath: () => invoke<string>('mcp_database_path'),
   mcpStart: () =>
     invoke<{ running: boolean; endpoint?: string; token?: string; databasePath: string }>(

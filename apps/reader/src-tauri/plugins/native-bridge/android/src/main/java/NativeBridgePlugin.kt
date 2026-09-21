@@ -47,6 +47,12 @@ class CoverProgressArgs {
     var forward: Boolean = true
 }
 
+@InvokeArg
+class SaveTextFileArgs {
+    var filename: String = "书摘.txt"
+    var content: String = ""
+}
+
 /**
  * Window PixelCopy for the captured slide pipeline.
  *
@@ -59,6 +65,7 @@ class NativeBridgePlugin(private val activity: Activity) : Plugin(activity) {
     private var coverPopup: PopupWindow? = null
     private var coverImage: ImageView? = null
     private var coverWidth = 0
+    private var pendingTextExport: String? = null
 
     override fun load(webView: WebView) {
         webViewRef = webView
@@ -133,6 +140,42 @@ class NativeBridgePlugin(private val activity: Activity) : Plugin(activity) {
             }
         }
         return uri.lastPathSegment ?: "book"
+    }
+
+    @Command
+    fun save_text_file(invoke: Invoke) {
+        val args = invoke.parseArgs(SaveTextFileArgs::class.java)
+        pendingTextExport = args.content
+        val mimeType = if (args.filename.endsWith(".md", ignoreCase = true)) {
+            "text/markdown"
+        } else {
+            "text/plain"
+        }
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mimeType
+            putExtra(Intent.EXTRA_TITLE, args.filename)
+        }
+        startActivityForResult(invoke, intent, "onSaveTextFile")
+    }
+
+    @ActivityCallback
+    private fun onSaveTextFile(invoke: Invoke, result: ActivityResult) {
+        val content = pendingTextExport
+        pendingTextExport = null
+        val uri = result.data?.data
+        if (result.resultCode != Activity.RESULT_OK || uri == null || content == null) {
+            invoke.resolve(JSObject().put("saved", false))
+            return
+        }
+        try {
+            activity.contentResolver.openOutputStream(uri, "wt")?.use { output ->
+                output.write(content.toByteArray(Charsets.UTF_8))
+            } ?: throw IllegalStateException("Unable to open destination")
+            invoke.resolve(JSObject().put("saved", true))
+        } catch (error: Exception) {
+            invoke.reject("无法保存导出文件：${error.message}")
+        }
     }
 
     @Command

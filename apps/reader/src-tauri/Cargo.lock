@@ -2198,8 +2198,11 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-native-bridge",
  "tauri-plugin-opener",
+ "tempfile",
+ "time",
  "tokio",
  "tokio-util",
+ "urlencoding",
  "uuid",
  "zip",
 ]

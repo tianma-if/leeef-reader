@@ -8,6 +8,7 @@ import {
   type Settings,
 } from '../api'
 import { applyReadingFont, applyViewLayout, highlightDraw, themeOf } from './bookStyles'
+import { normalizeSelectedText } from './selectionText'
 import { mountReadingFont } from './fontLoader'
 import { CapturedPageTurn } from './capturedTurn'
 import { ReaderChrome } from './ReaderChrome'
@@ -264,7 +265,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         void applyReadingFont(view, settingsRef.current)
         const index = detail.index ?? 0
         const onPointer = () => {
-          const text = doc.getSelection()?.toString().trim() ?? ''
+          const text = normalizeSelectedText(doc.getSelection()?.toString() ?? '')
           const range =
             doc.getSelection()?.rangeCount ? doc.getSelection()!.getRangeAt(0) : null
           if (!text || !range || range.collapsed) {
