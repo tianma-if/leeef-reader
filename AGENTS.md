@@ -16,7 +16,7 @@
 6. **Draft 内准备资产后自动公开**：先创建 `vX.Y.Z` Draft Release，再通过带 `release_tag` 的 macOS 资产工作流构建、签名、公证并上传资产。DMG、ZIP 和 `appcast.xml` 齐全且工作流成功后必须立即公开该 Release，不得暂停询问用户确认。`published` 事件只允许审计已有资产，禁止在 Release 已公开后才首次构建或上传正式资产。
 7. **签名边界**：签名证书、密钥库、API Key、Sparkle Ed25519 私钥及密码必须保存在仓库外或受保护的 GitHub Environment 中，严禁提交到 Git。Android 正式交付必须启用 Play App Signing；macOS 更新 ZIP 和 `appcast.xml` 必须使用与客户端内置公钥匹配的固定私钥签名。
 8. **失败处理**：任一阻塞验证、签名、公证、上传或资产审计失败时，Release 必须保持或恢复为 Draft；修复并重新执行门禁后才可公开。不得发布已知损坏、缺少声明资产或版本不一致的 Release。
-9. **商店交付**：正式发版默认同时交付 Google Play production（`completed`）和 App Store Connect 上传，不要求先经过 internal、draft、TestFlight 测试分发或真机回归，也不得为此暂停询问用户选择渠道。平台自身要求的构建处理、资料与审核仍需完成。商店上传或送审不等于正式上架，商店状态必须单独核验并写入跟踪 Issue。
+9. **商店交付**：正式发版默认同时交付 Google Play production（`completed`），并将 iOS 构建上传 App Store Connect、关联正式版本、提交审核，设置为审核通过后自动发布；不要求先经过 internal、draft、TestFlight 测试分发或真机回归，也不得为此暂停询问用户选择渠道。平台自身要求的构建处理、资料与审核仍需完成。商店上传或送审不等于正式上架，商店状态必须单独核验并写入跟踪 Issue。
 10. **发布后行为**：发布流程默认不得下载、覆盖安装或启动开发者机器上的现有应用。已安装的 macOS 客户端通过 Sparkle 更新，Android 客户端通过 Google Play 更新；只有用户明确要求时才执行本机安装验收。
 11. **Release 说明**：公开说明使用中英文双语，只写用户可感知的变化、影响和必要的升级提醒。类型检查、构建命令、签名、公证、资产复用等技术验证细节留在 Actions 或关联 Issue，不写入公开正文。推荐结构：
 

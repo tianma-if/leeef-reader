@@ -1,6 +1,6 @@
 # 商店与 macOS 发布
 
-当前正式资产走 [`.github/workflows/tauri-release.yml`](../.github/workflows/tauri-release.yml)：对 Draft Tag 手动调度，构建签名 macOS DMG/ZIP、Android APK/AAB（默认上传 Google Play production）和 iOS IPA（默认上传 App Store Connect）。旧的 Flutter 工作流 `google-play.yml` / `ios-app-store.yml` / `macos-dmg.yml` 不得对正式 Tag 发版。
+当前正式资产走 [`.github/workflows/tauri-release.yml`](../.github/workflows/tauri-release.yml)：对 Draft Tag 手动调度，构建签名 macOS DMG/ZIP、Android APK/AAB（默认上传 Google Play production）和 iOS IPA（默认上传 App Store Connect、提交审核，并在审核通过后自动发布）。旧的 Flutter 工作流 `google-play.yml` / `ios-app-store.yml` / `macos-dmg.yml` 不得对正式 Tag 发版。
 
 首次发布前，应先在 Apple Developer、App Store Connect 和 Google Play Console 创建应用；已登记的标识不可随意更换。仓库级发布约束见 [`AGENTS.md`](../AGENTS.md)，本页说明实际操作。
 
@@ -10,7 +10,7 @@
 - 必须按 SemVer 显式决定 patch、minor 或 major。用户可感知的新能力和新增平台不能仅因发版方便而归入 patch。
 - 以上一个正式 Release 为基线审计变更，并使用中英文说明公开的用户可感知变化；构建、签名和公证细节留在 Actions 或关联 Issue。
 - 先创建 Draft Release，在 Draft 内准备并核验 macOS 资产，资产齐全后立即公开，不得停下来询问确认。Release 的 `published` 事件只审计已有资产；审计失败会尝试把 Release 恢复为 Draft。
-- 正式发版默认交付 Google Play production（`completed`）和 App Store Connect 上传。internal、draft、TestFlight 测试分发和移动端真机回归均不是项目强制前置条件。平台自身的构建处理、资料与审核要求仍适用。
+- 正式发版默认交付 Google Play production（`completed`），并将 iOS 构建上传 App Store Connect、关联正式版本、提交审核，设置为审核通过后自动发布。internal、draft、TestFlight 测试分发和移动端真机回归均不是项目强制前置条件。平台自身的构建处理、资料与审核要求仍适用。
 - 当前没有正式 Windows 安装包、签名和更新资产工作流，因此不得在 Release 说明中把 Windows 写成该版本已经交付的平台。
 
 ## 标准发布命令
@@ -35,7 +35,7 @@ dart run tool/release.dart \
 
 仅有发布流程、测试或文档调整且仍需发版时，使用 `--bump patch --maintenance`，不提供 `--change-*`，并用 `--ignore-commit` 为基线后的每个提交注明排除原因。工具仍执行完整提交覆盖审计；公开说明明确本次无用户可感知的功能变化，不虚构功能更新。
 
-当前 Tauri 发版：确认 `main` 与 `origin/main` 一致并复用已通过的 CI；创建跟踪 Issue、同步 `apps/reader/package.json` 与 `apps/reader/src-tauri/tauri.conf.json` 版本、推送正式 Tag、创建 Draft Release，以该 Tag 调度 `tauri-release.yml`（默认 `platforms: all`、`upload_play: true`、`upload_appstore: true`）。macOS 与 Android 资产上传到 Draft 后立即公开 GitHub Release。Google Play production（`completed`）和 App Store Connect 上传由该工作流直接执行，不依赖 `published` 事件，也不走旧的 Flutter Job。Sparkle `appcast.xml` 尚未接到这条流水线。
+当前 Tauri 发版：确认 `main` 与 `origin/main` 一致并复用已通过的 CI；创建跟踪 Issue、同步 `apps/reader/package.json` 与 `apps/reader/src-tauri/tauri.conf.json` 版本、推送正式 Tag、创建 Draft Release，以该 Tag 调度 `tauri-release.yml`（默认 `platforms: all`、`upload_play: true`、`upload_appstore: true`、`submit_appstore: true`）。macOS 与 Android 资产上传到 Draft 后立即公开 GitHub Release。Google Play production（`completed`）以及 App Store Connect 上传、版本关联和送审由该工作流直接执行，不依赖 `published` 事件，也不走旧的 Flutter Job。Sparkle `appcast.xml` 尚未接到这条流水线。
 
 若 `pubspec.yaml` 已因未公开的 Draft 递增，显式添加 `--pending-draft vX.Y.Z`。
 工具会验证该 Draft 的 Tag、构建号与当前版本一致，并且位于上一正式 Release 与当前提交之间；
@@ -51,7 +51,7 @@ flutter test test/release_tool_test.dart
 | 平台 | 应用标识 | 工作流 | 产物/目标 |
 | --- | --- | --- | --- |
 | Android | `dev.leeef.leeef_reader` | `Tauri signed release` | 签名 APK/AAB；默认 Play production `completed` |
-| iOS | `dev.leeef.leeefReader` | `Tauri signed release` | 签名 IPA；默认上传 App Store Connect |
+| iOS | `dev.leeef.leeefReader` | `Tauri signed release` | 签名 IPA；默认上传 App Store Connect、提交审核、审核通过后自动发布 |
 | macOS | `dev.leeef.leeef-reader` | `Tauri signed release` | Developer ID 签名并公证的 universal DMG/ZIP |
 
 Apple Team ID 当前为 `9KA3NM38B6`。iOS App Store bundle id 为 `dev.leeef.leeefReader`。Flutter 时代的 Share Extension 与 App Group 未迁到 Tauri，当前 IPA 只签主应用。
@@ -95,9 +95,9 @@ Leeef Reader 不申请 `android.permission.REQUEST_INSTALL_PACKAGES`。发布工
 - Variables：`APPSTORE_ISSUER_ID`、`APPSTORE_API_KEY_ID`。
 - Secrets：`APPSTORE_API_PRIVATE_KEY`（`.p8` 内容）、`APPSTORE_CERTIFICATES_FILE_BASE64`（Apple Distribution `.p12` 的 base64）、`APPSTORE_CERTIFICATES_PASSWORD`。
 
-API Key 至少需要 App Manager 权限。`tauri-release.yml` 的 iOS job 使用 `app-store` Environment：导入 Apple Distribution 证书，下载 bundle id `dev.leeef.leeefReader` 的 App Store provisioning profile，执行 `npx tauri ios build --export-method app-store-connect`，并把 IPA 上传到 App Store Connect。关闭 `upload_appstore` 可只构建 IPA。当前 Tauri 包没有 Flutter 时代的 Share Extension；不要再去下载 `dev.leeef.leeefReader.ShareExtension` 的 profile。
+API Key 至少需要 App Manager 权限。`tauri-release.yml` 的 iOS job 使用 `app-store` Environment：导入 Apple Distribution 证书，下载 bundle id `dev.leeef.leeefReader` 的 App Store provisioning profile，执行 `npx tauri ios build --export-method app-store-connect`，把 IPA 上传到 App Store Connect，从 GitHub Release 双语说明生成“版本更新内容”，关联精确版本与 build，提交审核，并设置为审核通过后自动发布。关闭 `upload_appstore` 可复用已经处理完成的 build；关闭 `submit_appstore` 才会停止在仅上传/TestFlight 状态。当前 Tauri 包没有 Flutter 时代的 Share Extension；不要再去下载 `dev.leeef.leeefReader.ShareExtension` 的 profile。
 
-`CFBundleShortVersionString` 来自 `package.json` 版本。`CFBundleVersion` 默认是 `major * 1000000 + minor * 1000 + patch`（例如 2.2.0 → `2002000`），高于 Flutter 最后一次的 `25`。同一版本再次上传时用 `ios_build_number` 覆盖。上传会把 build 送入 App Store Connect/TestFlight；商店元数据、隐私问卷、截图、定价和最终提交审核仍在 App Store Connect 完成。上传成功不等于审核通过或正式上架。
+`CFBundleShortVersionString` 来自 `package.json` 版本。`CFBundleVersion` 默认是 `major * 1000000 + minor * 1000 + patch`（例如 2.2.0 → `2002000`），高于 Flutter 最后一次的 `25`。同一版本再次上传时用 `ios_build_number` 覆盖。工作流固定使用对应版本与 build 送审；上传成功、送审成功和正式上架是三个不同状态，发布审计必须分别记录。若 Apple 因缺少商店资料、协议或合规问卷拒绝送审，工作流必须失败并在 App Store Connect 补齐阻塞项后重跑，不能把仅上传成功当成发版完成。
 
 ## macOS DMG
 

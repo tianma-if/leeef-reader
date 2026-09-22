@@ -18,6 +18,11 @@ on:
         required: true
         type: boolean
         default: true
+      submit_appstore:
+        description: Submit the processed build for App Review and release automatically after approval
+        required: true
+        type: boolean
+        default: true
       ios_build_number:
         description: Optional CFBundleVersion override (default major*1000000+minor*1000+patch)
         required: false
@@ -346,3 +351,111 @@ jobs:
           api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
           wait-for-processing: true
+      - name: Submit App Store version for review
+        if: inputs.submit_appstore
+        env:
+          APPSTORE_API_KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+          APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          submit_dir="$RUNNER_TEMP/app-store-submit"
+          mkdir -p "$submit_dir"
+
+          gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json body \
+            --jq .body > "$submit_dir/release.md"
+
+          RELEASE_BODY="$submit_dir/release.md" \
+          ZH_RELEASE_NOTES="$submit_dir/release-notes-zh-Hans.txt" \
+          EN_RELEASE_NOTES="$submit_dir/release-notes-en-US.txt" \
+          node <<'NODE'
+          const fs = require('node:fs')
+
+          const body = fs.readFileSync(process.env.RELEASE_BODY, 'utf8')
+          const extract = (start, end) => {
+            const match = body.match(new RegExp(`${start}\\s*\\n([\\s\\S]*?)(?=${end})`))
+            if (!match) throw new Error(`Missing release-note section: ${start}`)
+            const notes = match[1]
+              .split(/\\r?\\n/)
+              .filter((line) => /^-\s+/.test(line))
+              .join('\n')
+              .trim()
+            if (!notes) throw new Error(`Release-note section is empty: ${start}`)
+            if (notes.length > 4000) throw new Error(`Release notes exceed 4000 characters: ${start}`)
+            return `${notes}\n`
+          }
+
+          fs.writeFileSync(
+            process.env.ZH_RELEASE_NOTES,
+            extract('## 主要更新', '(?:\\n关联 Issue：|\\n## )'),
+          )
+          fs.writeFileSync(
+            process.env.EN_RELEASE_NOTES,
+            extract('## Key Changes', '(?:\\nRelated Issue:|\\n## |$)'),
+          )
+          NODE
+
+          APPSTORE_API_KEY_PATH="$submit_dir/api-key.json" \
+          ruby -rjson -e '
+            File.write(
+              ENV.fetch("APPSTORE_API_KEY_PATH"),
+              JSON.generate({
+                key_id: ENV.fetch("APPSTORE_API_KEY_ID"),
+                issuer_id: ENV.fetch("APPSTORE_ISSUER_ID"),
+                key: ENV.fetch("APPSTORE_API_PRIVATE_KEY"),
+                in_house: false
+              })
+            )
+          '
+          chmod 600 "$submit_dir/api-key.json"
+
+          cat > "$submit_dir/Gemfile" <<'RUBY'
+          source "https://rubygems.org"
+          gem "fastlane", "2.230.0"
+          RUBY
+          cat > "$submit_dir/Fastfile" <<'RUBY'
+          default_platform(:ios)
+
+          platform :ios do
+            lane :submit_release do
+              deliver(
+                api_key_path: File.join(ENV.fetch("SUBMIT_DIR"), "api-key.json"),
+                app_identifier: "dev.leeef.leeefReader",
+                app_version: ENV.fetch("APP_VERSION"),
+                build_number: ENV.fetch("IOS_BUNDLE_VERSION"),
+                platform: "ios",
+                skip_binary_upload: true,
+                skip_screenshots: true,
+                force: true,
+                submit_for_review: true,
+                automatic_release: true,
+                phased_release: false,
+                reset_ratings: false,
+                run_precheck_before_submit: true,
+                precheck_include_in_app_purchases: false,
+                release_notes: {
+                  "zh-Hans" => File.read(File.join(ENV.fetch("SUBMIT_DIR"), "release-notes-zh-Hans.txt")).strip,
+                  "en-US" => File.read(File.join(ENV.fetch("SUBMIT_DIR"), "release-notes-en-US.txt")).strip
+                },
+                submission_information: {
+                  export_compliance_uses_encryption: false
+                }
+              )
+            end
+          end
+          RUBY
+
+          export BUNDLE_GEMFILE="$submit_dir/Gemfile"
+          bundle config set path "$RUNNER_TEMP/fastlane-bundle"
+          bundle install --jobs 4 --retry 3
+          (
+            cd "$submit_dir"
+            SUBMIT_DIR="$submit_dir" bundle exec fastlane ios submit_release
+          )
+      - name: Remove App Store API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/app-store-submit/api-key.json"
