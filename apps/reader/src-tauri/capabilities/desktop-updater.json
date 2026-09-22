@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-updater",
+  "description": "Capability for signed desktop updates",
+  "windows": ["main"],
+  "webviews": ["*"],
+  "permissions": ["updater:default"],
+  "platforms": ["macOS", "windows", "linux"]
+}

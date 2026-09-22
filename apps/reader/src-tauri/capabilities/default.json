@@ -9,7 +9,6 @@
     "core:path:default",
     "opener:default",
     "process:allow-restart",
-    "updater:default",
     "native-bridge:default"
   ]
 }
