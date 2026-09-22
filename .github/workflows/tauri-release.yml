@@ -403,7 +403,6 @@ jobs:
           APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
-          APPSTORE_SUPPORT_URL: https://github.com/tianma-if/leeef-reader/issues
         run: |
           set -euo pipefail
           submit_dir="$RUNNER_TEMP/app-store-submit"
@@ -466,8 +465,8 @@ jobs:
 
             fs.writeFileSync(path.join(localeDir, 'description.txt'), `${description[1].trim()}\\n`)
             fs.writeFileSync(path.join(localeDir, 'keywords.txt'), `${field(keywordsLabel)}\\n`)
-            const supportUrl = new URL(process.env.APPSTORE_SUPPORT_URL)
-            fs.writeFileSync(path.join(localeDir, 'support_url.txt'), `${supportUrl.href}\\n`)
+            // App Store Connect carries supportUrl forward from the prior version.
+            // Its public API currently rejects otherwise valid supportUrl PATCH requests.
           }
 
           writeStoreMetadata(
@@ -500,7 +499,7 @@ jobs:
 
           cat > "$submit_dir/Gemfile" <<'RUBY'
           source "https://rubygems.org"
-          gem "fastlane", "2.230.0"
+          gem "fastlane", "2.240.1"
           RUBY
           cat > "$submit_dir/fastlane/Fastfile" <<'RUBY'
           default_platform(:ios)
