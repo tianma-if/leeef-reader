@@ -14,6 +14,7 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    error::Error as _,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -36,6 +37,33 @@ const DISCOVERY_PORT: u16 = 43781;
 const PAIRING_TTL: Duration = Duration::from_secs(300);
 const PAIRING_ALPHABET: &[u8] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const RECOVERY_AAD: &[u8] = b"leeef-recovery-v1";
+
+fn request_error(error: reqwest::Error) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        message.push_str(": ");
+        message.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    message
+}
+
+async fn send_webdav_request(
+    request: reqwest::RequestBuilder,
+) -> Result<reqwest::Response, String> {
+    let retry = request.try_clone();
+    match request.send().await {
+        Ok(response) => Ok(response),
+        Err(first_error) => {
+            let first_error = request_error(first_error);
+            let retry = retry.ok_or(first_error.clone())?;
+            retry.send().await.map_err(|retry_error| {
+                format!("{first_error}; 重试失败：{}", request_error(retry_error))
+            })
+        }
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -656,7 +684,7 @@ impl RemoteBackend {
                 if let Some(username) = username {
                     request = request.basic_auth(username, password.as_deref());
                 }
-                let response = request.send().await.map_err(|e| e.to_string())?;
+                let response = send_webdav_request(request).await?;
                 if response.status() == StatusCode::NOT_FOUND {
                     return Ok(None);
                 }
@@ -664,7 +692,7 @@ impl RemoteBackend {
                     return Err(format!("WebDAV 读取失败：{}", response.status()));
                 }
                 Ok(Some(
-                    response.bytes().await.map_err(|e| e.to_string())?.to_vec(),
+                    response.bytes().await.map_err(request_error)?.to_vec(),
                 ))
             }
             Self::S3 { .. } => self.s3_request(Method::GET, path, &[]).await,
@@ -692,7 +720,7 @@ impl RemoteBackend {
                 if let Some(username) = username {
                     request = request.basic_auth(username, password.as_deref());
                 }
-                let response = request.send().await.map_err(|e| e.to_string())?;
+                let response = send_webdav_request(request).await?;
                 if !response.status().is_success() {
                     return Err(format!("WebDAV 写入失败：{}", response.status()));
                 }
@@ -854,12 +882,14 @@ async fn ensure_webdav_parents(
         if let Some(username) = username {
             request = request.basic_auth(username, password);
         }
-        let response = request.send().await.map_err(|e| e.to_string())?;
-        if !(response.status().is_success()
-            || response.status() == StatusCode::METHOD_NOT_ALLOWED
-            || response.status() == StatusCode::CONFLICT)
+        let response = send_webdav_request(request).await?;
+        let status = response.status();
+        response.bytes().await.map_err(request_error)?;
+        if !(status.is_success()
+            || status == StatusCode::METHOD_NOT_ALLOWED
+            || status == StatusCode::CONFLICT)
         {
-            return Err(format!("WebDAV 创建目录失败：{}", response.status()));
+            return Err(format!("WebDAV 创建目录失败：{status}"));
         }
     }
     Ok(())
