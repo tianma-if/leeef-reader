@@ -50,3 +50,14 @@ pub struct SaveTextFileRequest {
 pub struct SaveTextFileResponse {
     pub saved: bool,
 }
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MobileUpdateStatus {
+    pub platform: String,
+    pub state: String,
+    pub current_version: Option<String>,
+    pub available_version: Option<String>,
+    pub bytes_downloaded: Option<u64>,
+    pub total_bytes: Option<u64>,
+}

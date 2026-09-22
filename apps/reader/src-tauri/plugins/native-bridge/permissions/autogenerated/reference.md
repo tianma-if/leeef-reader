@@ -10,6 +10,10 @@ Native capture used by mobile slide turns
 - `allow-probe-webview-ready`
 - `allow-pick-books`
 - `allow-save-text-file`
+- `allow-check-mobile-update`
+- `allow-start-mobile-update`
+- `allow-complete-mobile-update`
+- `allow-open-mobile-store`
 
 ## Permission Table
 
@@ -42,6 +46,84 @@ Enables the capture_webview_region command without any pre-configured scope.
 <td>
 
 Denies the capture_webview_region command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:allow-check-mobile-update`
+
+</td>
+<td>
+
+Enables the check_mobile_update command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:deny-check-mobile-update`
+
+</td>
+<td>
+
+Denies the check_mobile_update command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:allow-complete-mobile-update`
+
+</td>
+<td>
+
+Enables the complete_mobile_update command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:deny-complete-mobile-update`
+
+</td>
+<td>
+
+Denies the complete_mobile_update command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:allow-open-mobile-store`
+
+</td>
+<td>
+
+Enables the open_mobile_store command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:deny-open-mobile-store`
+
+</td>
+<td>
+
+Denies the open_mobile_store command without any pre-configured scope.
 
 </td>
 </tr>
@@ -146,6 +228,32 @@ Enables the set_cover_progress command without any pre-configured scope.
 <td>
 
 Denies the set_cover_progress command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:allow-start-mobile-update`
+
+</td>
+<td>
+
+Enables the start_mobile_update command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-bridge:deny-start-mobile-update`
+
+</td>
+<td>
+
+Denies the start_mobile_update command without any pre-configured scope.
 
 </td>
 </tr>

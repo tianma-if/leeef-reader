@@ -95,9 +95,14 @@ Online features need a network and credentials you supply. Leeef does not sell A
 
 These are not in the current GitHub Release:
 
-- Signed iOS and Windows installers
+- Signed Windows installers
 - Complete S3 / WebDAV book-data sync and add QR scanning to the existing pairing-code flow
-- Sparkle (macOS) and Play auto-update
+
+## Updates
+
+- macOS checks the signed GitHub Release manifest on launch and every five minutes. It downloads and verifies the Tauri updater bundle in the background, then asks before restarting.
+- Android uses Google Play Flexible Update. Play asks for download consent, continues in the background, and Leeef Reader asks before restarting to finish installation.
+- iOS checks the public App Store version and links to its App Store page when an update is available. Download and installation timing follows the user's iOS automatic-update setting; App Store apps cannot replace their own IPA.
 
 ## Tech stack
 

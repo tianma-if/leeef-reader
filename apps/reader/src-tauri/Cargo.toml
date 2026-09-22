@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
+tauri-plugin-process = "2"
 tauri-plugin-native-bridge = { path = "./plugins/native-bridge" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -43,6 +44,9 @@ time = { version = "0.3", features = ["formatting", "macros"] }
 urlencoding = "2"
 axum = "0.8"
 rmcp = { version = "3.4", features = ["server", "macros", "transport-streamable-http-server", "schemars"] }
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2"
 
 [dev-dependencies]
 tempfile = "3"

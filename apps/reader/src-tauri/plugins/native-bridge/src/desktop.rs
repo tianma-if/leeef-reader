@@ -89,4 +89,20 @@ impl<R: Runtime> NativeBridge<R> {
         })?;
         Ok(SaveTextFileResponse { saved: true })
     }
+
+    pub fn check_mobile_update(&self) -> crate::Result<crate::models::MobileUpdateStatus> {
+        Err(crate::Error::UnsupportedPlatformError)
+    }
+
+    pub fn start_mobile_update(&self) -> crate::Result<crate::models::MobileUpdateStatus> {
+        Err(crate::Error::UnsupportedPlatformError)
+    }
+
+    pub fn complete_mobile_update(&self) -> crate::Result<()> {
+        Err(crate::Error::UnsupportedPlatformError)
+    }
+
+    pub fn open_mobile_store(&self) -> crate::Result<()> {
+        Err(crate::Error::UnsupportedPlatformError)
+    }
 }

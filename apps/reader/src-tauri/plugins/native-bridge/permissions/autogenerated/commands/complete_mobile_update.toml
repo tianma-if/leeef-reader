@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-complete-mobile-update"
+description = "Enables the complete_mobile_update command without any pre-configured scope."
+commands.allow = ["complete_mobile_update"]
+
+[[permission]]
+identifier = "deny-complete-mobile-update"
+description = "Denies the complete_mobile_update command without any pre-configured scope."
+commands.deny = ["complete_mobile_update"]

@@ -7,4 +7,8 @@ permissions = [
   "allow-probe-webview-ready",
   "allow-pick-books",
   "allow-save-text-file",
+  "allow-check-mobile-update",
+  "allow-start-mobile-update",
+  "allow-complete-mobile-update",
+  "allow-open-mobile-store",
 ]

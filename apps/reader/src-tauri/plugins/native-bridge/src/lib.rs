@@ -38,7 +38,11 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::uncover_webview,
             commands::probe_webview_ready,
             commands::pick_books,
-            commands::save_text_file
+            commands::save_text_file,
+            commands::check_mobile_update,
+            commands::start_mobile_update,
+            commands::complete_mobile_update,
+            commands::open_mobile_store
         ])
         .setup(|app, api| {
             #[cfg(mobile)]

@@ -66,3 +66,27 @@ pub(crate) async fn save_text_file<R: Runtime>(
         app.native_bridge().save_text_file(payload)
     }
 }
+
+#[command]
+pub(crate) async fn check_mobile_update<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<crate::models::MobileUpdateStatus> {
+    app.native_bridge().check_mobile_update()
+}
+
+#[command]
+pub(crate) async fn start_mobile_update<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<crate::models::MobileUpdateStatus> {
+    app.native_bridge().start_mobile_update()
+}
+
+#[command]
+pub(crate) async fn complete_mobile_update<R: Runtime>(app: AppHandle<R>) -> Result<()> {
+    app.native_bridge().complete_mobile_update()
+}
+
+#[command]
+pub(crate) async fn open_mobile_store<R: Runtime>(app: AppHandle<R>) -> Result<()> {
+    app.native_bridge().open_mobile_store()
+}

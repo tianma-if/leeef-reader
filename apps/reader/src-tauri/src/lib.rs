@@ -343,8 +343,12 @@ fn settings_recovery_import(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_native_bridge::init())
         .setup(|app| {
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
             let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
             std::fs::create_dir_all(&root)?;
             let state = db::open(root)?;

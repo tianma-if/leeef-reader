@@ -30,6 +30,14 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import com.google.android.play.core.appupdate.AppUpdateInfo
+import com.google.android.play.core.appupdate.AppUpdateManager
+import com.google.android.play.core.appupdate.AppUpdateManagerFactory
+import com.google.android.play.core.appupdate.AppUpdateOptions
+import com.google.android.play.core.install.InstallStateUpdatedListener
+import com.google.android.play.core.install.model.AppUpdateType
+import com.google.android.play.core.install.model.InstallStatus
+import com.google.android.play.core.install.model.UpdateAvailability
 import java.io.ByteArrayOutputStream
 
 @InvokeArg
@@ -66,10 +74,130 @@ class NativeBridgePlugin(private val activity: Activity) : Plugin(activity) {
     private var coverImage: ImageView? = null
     private var coverWidth = 0
     private var pendingTextExport: String? = null
+    private val appUpdateManager: AppUpdateManager by lazy {
+        AppUpdateManagerFactory.create(activity)
+    }
+    @Volatile private var updateInstallStatus = InstallStatus.UNKNOWN
+    @Volatile private var updateBytesDownloaded = 0L
+    @Volatile private var updateTotalBytes = 0L
+    private val updateListener = InstallStateUpdatedListener { state ->
+        updateInstallStatus = state.installStatus()
+        updateBytesDownloaded = state.bytesDownloaded()
+        updateTotalBytes = state.totalBytesToDownload()
+    }
 
     override fun load(webView: WebView) {
         webViewRef = webView
+        appUpdateManager.registerListener(updateListener)
         super.load(webView)
+    }
+
+    @Command
+    fun check_mobile_update(invoke: Invoke) {
+        appUpdateManager.appUpdateInfo
+            .addOnSuccessListener { info -> invoke.resolve(updatePayload(info)) }
+            .addOnFailureListener { error ->
+                Log.i(UPDATE_TAG, "Google Play update check unavailable", error)
+                invoke.resolve(baseUpdatePayload("unavailable"))
+            }
+    }
+
+    @Command
+    fun start_mobile_update(invoke: Invoke) {
+        appUpdateManager.appUpdateInfo
+            .addOnSuccessListener { info ->
+                if (
+                    info.updateAvailability() != UpdateAvailability.UPDATE_AVAILABLE ||
+                    !info.isUpdateTypeAllowed(AppUpdateType.FLEXIBLE)
+                ) {
+                    invoke.resolve(updatePayload(info))
+                    return@addOnSuccessListener
+                }
+                try {
+                    val started = appUpdateManager.startUpdateFlowForResult(
+                        info,
+                        activity,
+                        AppUpdateOptions.newBuilder(AppUpdateType.FLEXIBLE).build(),
+                        UPDATE_REQUEST_CODE,
+                    )
+                    invoke.resolve(
+                        updatePayload(info).put(
+                            "state",
+                            if (started) "awaitingConsent" else "available",
+                        ),
+                    )
+                } catch (error: Exception) {
+                    invoke.reject("无法启动 Google Play 更新：${error.message}")
+                }
+            }
+            .addOnFailureListener { error ->
+                invoke.reject("无法检查 Google Play 更新：${error.message}")
+            }
+    }
+
+    @Command
+    fun complete_mobile_update(invoke: Invoke) {
+        appUpdateManager.completeUpdate()
+            .addOnSuccessListener { invoke.resolve() }
+            .addOnFailureListener { error ->
+                invoke.reject("无法完成 Google Play 更新：${error.message}")
+            }
+    }
+
+    @Command
+    fun open_mobile_store(invoke: Invoke) {
+        val market = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${activity.packageName}"))
+        val web = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("https://play.google.com/store/apps/details?id=${activity.packageName}"),
+        )
+        try {
+            activity.startActivity(market)
+        } catch (_: Exception) {
+            activity.startActivity(web)
+        }
+        invoke.resolve()
+    }
+
+    private fun updatePayload(info: AppUpdateInfo): JSObject {
+        val installStatus = when {
+            info.installStatus() != InstallStatus.UNKNOWN -> info.installStatus()
+            updateInstallStatus != InstallStatus.UNKNOWN -> updateInstallStatus
+            else -> InstallStatus.UNKNOWN
+        }
+        val state = when (installStatus) {
+            InstallStatus.PENDING -> "pending"
+            InstallStatus.DOWNLOADING -> "downloading"
+            InstallStatus.DOWNLOADED -> "downloaded"
+            InstallStatus.INSTALLING -> "installing"
+            InstallStatus.FAILED -> "failed"
+            InstallStatus.CANCELED -> "canceled"
+            else -> when (info.updateAvailability()) {
+                UpdateAvailability.UPDATE_AVAILABLE ->
+                    if (info.isUpdateTypeAllowed(AppUpdateType.FLEXIBLE)) "available" else "unavailable"
+                UpdateAvailability.DEVELOPER_TRIGGERED_UPDATE_IN_PROGRESS -> "downloading"
+                else -> "idle"
+            }
+        }
+        return baseUpdatePayload(state)
+    }
+
+    private fun baseUpdatePayload(state: String): JSObject {
+        val version = try {
+            activity.packageManager.getPackageInfo(activity.packageName, 0).versionName
+        } catch (_: Exception) {
+            null
+        }
+        return JSObject()
+            .put("platform", "android")
+            .put("state", state)
+            .put("currentVersion", version)
+            .put("availableVersion", null)
+            .put(
+                "bytesDownloaded",
+                if (updateBytesDownloaded > 0L) updateBytesDownloaded else null,
+            )
+            .put("totalBytes", if (updateTotalBytes > 0L) updateTotalBytes else null)
     }
 
     @Command
@@ -478,5 +606,7 @@ class NativeBridgePlugin(private val activity: Activity) : Plugin(activity) {
 
     companion object {
         private const val CAPTURE_TAG = "LeeefCapture"
+        private const val UPDATE_TAG = "LeeefUpdate"
+        private const val UPDATE_REQUEST_CODE = 0x4C45
     }
 }

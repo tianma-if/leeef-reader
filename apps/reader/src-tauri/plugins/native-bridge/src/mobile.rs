@@ -67,4 +67,23 @@ impl<R: Runtime> NativeBridge<R> {
     ) -> crate::Result<SaveTextFileResponse> {
         Ok(self.0.run_mobile_plugin("save_text_file", payload)?)
     }
+
+    pub fn check_mobile_update(&self) -> crate::Result<crate::models::MobileUpdateStatus> {
+        Ok(self.0.run_mobile_plugin("check_mobile_update", ())?)
+    }
+
+    pub fn start_mobile_update(&self) -> crate::Result<crate::models::MobileUpdateStatus> {
+        Ok(self.0.run_mobile_plugin("start_mobile_update", ())?)
+    }
+
+    pub fn complete_mobile_update(&self) -> crate::Result<()> {
+        self.0
+            .run_mobile_plugin::<()>("complete_mobile_update", ())?;
+        Ok(())
+    }
+
+    pub fn open_mobile_store(&self) -> crate::Result<()> {
+        self.0.run_mobile_plugin::<()>("open_mobile_store", ())?;
+        Ok(())
+    }
 }

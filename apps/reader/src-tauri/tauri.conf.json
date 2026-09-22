@@ -28,6 +28,7 @@
   "bundle": {
     "active": true,
     "targets": ["dmg", "app"],
+    "createUpdaterArtifacts": true,
     "macOS": {
       "minimumSystemVersion": "12.0"
     },
@@ -46,5 +47,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMxNjI5QjJDQ0U5QzkzNEQKUldSTms1ek9MSnRpTVVHQlQrSk9WV29UN1hRTHBvVmdUdnk1VG16NVFqcUFFMEVwaHY2UmRoaUcK",
+      "endpoints": [
+        "https://github.com/tianma-if/leeef-reader/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

@@ -307,6 +307,42 @@
           "markdownDescription": "Denies the capture_webview_region command without any pre-configured scope."
         },
         {
+          "description": "Enables the check_mobile_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-check-mobile-update",
+          "markdownDescription": "Enables the check_mobile_update command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the check_mobile_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-check-mobile-update",
+          "markdownDescription": "Denies the check_mobile_update command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the complete_mobile_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-complete-mobile-update",
+          "markdownDescription": "Enables the complete_mobile_update command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the complete_mobile_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-complete-mobile-update",
+          "markdownDescription": "Denies the complete_mobile_update command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_mobile_store command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-mobile-store",
+          "markdownDescription": "Enables the open_mobile_store command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_mobile_store command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-mobile-store",
+          "markdownDescription": "Denies the open_mobile_store command without any pre-configured scope."
+        },
+        {
           "description": "Enables the pick_books command without any pre-configured scope.",
           "type": "string",
           "const": "allow-pick-books",
@@ -355,6 +391,18 @@
           "markdownDescription": "Denies the set_cover_progress command without any pre-configured scope."
         },
         {
+          "description": "Enables the start_mobile_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-mobile-update",
+          "markdownDescription": "Enables the start_mobile_update command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_mobile_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-mobile-update",
+          "markdownDescription": "Denies the start_mobile_update command without any pre-configured scope."
+        },
+        {
           "description": "Enables the uncover_webview command without any pre-configured scope.",
           "type": "string",
           "const": "allow-uncover-webview",
@@ -367,10 +415,10 @@
           "markdownDescription": "Denies the uncover_webview command without any pre-configured scope."
         },
         {
-          "description": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`\n- `allow-set-cover-progress`\n- `allow-uncover-webview`\n- `allow-probe-webview-ready`\n- `allow-pick-books`\n- `allow-save-text-file`",
+          "description": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`\n- `allow-set-cover-progress`\n- `allow-uncover-webview`\n- `allow-probe-webview-ready`\n- `allow-pick-books`\n- `allow-save-text-file`\n- `allow-check-mobile-update`\n- `allow-start-mobile-update`\n- `allow-complete-mobile-update`\n- `allow-open-mobile-store`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`\n- `allow-set-cover-progress`\n- `allow-uncover-webview`\n- `allow-probe-webview-ready`\n- `allow-pick-books`\n- `allow-save-text-file`"
+          "markdownDescription": "Native capture used by mobile slide turns\n#### This default permission set includes:\n\n- `allow-capture-webview-region`\n- `allow-set-cover-progress`\n- `allow-uncover-webview`\n- `allow-probe-webview-ready`\n- `allow-pick-books`\n- `allow-save-text-file`\n- `allow-check-mobile-update`\n- `allow-start-mobile-update`\n- `allow-complete-mobile-update`\n- `allow-open-mobile-store`"
         }
       ]
     }

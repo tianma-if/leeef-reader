@@ -16,6 +16,7 @@ class SaveTextFileArgs: Decodable {
 
 class NativeBridgePlugin: Plugin {
   private weak var webView: WKWebView?
+  private var appStoreURL = URL(string: "https://apps.apple.com/app/id6805425493")!
 
   @objc public override func load(webview: WKWebView) {
     self.webView = webview
@@ -91,6 +92,85 @@ class NativeBridgePlugin: Plugin {
 
   @objc public func probe_webview_ready(_ invoke: Invoke) {
     invoke.resolve(["ready": true])
+  }
+
+  @objc public func check_mobile_update(_ invoke: Invoke) {
+    guard let lookupURL = URL(string: "https://itunes.apple.com/lookup?id=6805425493") else {
+      return invoke.resolve(updatePayload(state: "unavailable"))
+    }
+    let request = URLRequest(
+      url: lookupURL,
+      cachePolicy: .reloadRevalidatingCacheData,
+      timeoutInterval: 15
+    )
+    URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
+      guard
+        error == nil,
+        let data,
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let results = object["results"] as? [[String: Any]],
+        let result = results.first,
+        let storeVersion = result["version"] as? String
+      else {
+        return invoke.resolve(self?.updatePayload(state: "unavailable") ?? [
+          "platform": "ios",
+          "state": "unavailable",
+        ])
+      }
+      if let storeURL = result["trackViewUrl"] as? String, let url = URL(string: storeURL) {
+        self?.appStoreURL = url
+      }
+      let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+      let available = storeVersion.compare(currentVersion, options: .numeric) == .orderedDescending
+      invoke.resolve(
+        self?.updatePayload(
+          state: available ? "available" : "idle",
+          availableVersion: available ? storeVersion : nil
+        ) ?? ["platform": "ios", "state": "unavailable"]
+      )
+    }.resume()
+  }
+
+  @objc public func start_mobile_update(_ invoke: Invoke) {
+    openAppStore(invoke)
+  }
+
+  @objc public func complete_mobile_update(_ invoke: Invoke) {
+    openAppStore(invoke)
+  }
+
+  @objc public func open_mobile_store(_ invoke: Invoke) {
+    openAppStore(invoke)
+  }
+
+  private func openAppStore(_ invoke: Invoke) {
+    DispatchQueue.main.async { [weak self] in
+      guard let url = self?.appStoreURL else {
+        return invoke.reject("App Store URL unavailable")
+      }
+      UIApplication.shared.open(url, options: [:]) { opened in
+        if opened {
+          invoke.resolve()
+        } else {
+          invoke.reject("无法打开 App Store")
+        }
+      }
+    }
+  }
+
+  private func updatePayload(
+    state: String,
+    availableVersion: String? = nil
+  ) -> [String: Any] {
+    var payload: [String: Any] = [
+      "platform": "ios",
+      "state": state,
+      "currentVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0",
+    ]
+    if let availableVersion {
+      payload["availableVersion"] = availableVersion
+    }
+    return payload
   }
 }
 

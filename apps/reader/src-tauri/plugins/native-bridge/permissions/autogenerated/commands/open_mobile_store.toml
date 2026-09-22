@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-open-mobile-store"
+description = "Enables the open_mobile_store command without any pre-configured scope."
+commands.allow = ["open_mobile_store"]
+
+[[permission]]
+identifier = "deny-open-mobile-store"
+description = "Denies the open_mobile_store command without any pre-configured scope."
+commands.deny = ["open_mobile_store"]
