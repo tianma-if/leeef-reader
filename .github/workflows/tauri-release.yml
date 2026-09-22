@@ -454,7 +454,7 @@ jobs:
             const field = (label) => {
               const match = source.match(new RegExp(`^- ${label}[：:]?\\s*(.+)$`, 'm'))
               if (!match) throw new Error(`Missing App Store metadata field: ${label}`)
-              return `${match[1].trim()}\\n`
+              return match[1].trim()
             }
             const description = source.match(
               new RegExp(`## ${descriptionHeading}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`),
@@ -464,8 +464,10 @@ jobs:
             }
 
             fs.writeFileSync(path.join(localeDir, 'description.txt'), `${description[1].trim()}\\n`)
-            fs.writeFileSync(path.join(localeDir, 'keywords.txt'), field(labels.keywords))
-            fs.writeFileSync(path.join(localeDir, 'support_url.txt'), field(labels.supportUrl))
+            fs.writeFileSync(path.join(localeDir, 'keywords.txt'), `${field(labels.keywords)}\\n`)
+            const supportUrl = new URL(field(labels.supportUrl))
+            if (!supportUrl.pathname.endsWith('/')) supportUrl.pathname += '/'
+            fs.writeFileSync(path.join(localeDir, 'support_url.txt'), `${supportUrl.href}\\n`)
           }
 
           writeStoreMetadata(

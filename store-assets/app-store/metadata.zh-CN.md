@@ -6,7 +6,7 @@
 - 次类别：效率
 - 促销文本：在手机与电脑间延续阅读。支持六种电子书格式、离线书库、仿真翻页、书摘笔记与自选云同步。
 - 关键词：电子书,阅读器,EPUB,PDF,MOBI,TXT,书摘,笔记,翻译,书架,WebDAV,S3,同步
-- 支持 URL：https://edgeever.org/contact
+- 支持 URL：https://edgeever.org/contact/
 - 营销 URL：https://edgeever.org
 - 隐私政策 URL：https://gist.github.com/tianma-if/98290c0fdb7f9a689724e86a2185a37f
 - 版权：2026 郑州冰桂网络科技有限公司
