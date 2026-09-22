@@ -416,8 +416,12 @@ jobs:
           RELEASE_BODY="$submit_dir/release.md" \
           ZH_RELEASE_NOTES="$submit_dir/release-notes-zh-Hans.txt" \
           EN_RELEASE_NOTES="$submit_dir/release-notes-en-US.txt" \
+          ZH_STORE_METADATA="$GITHUB_WORKSPACE/store-assets/app-store/metadata.zh-CN.md" \
+          EN_STORE_METADATA="$GITHUB_WORKSPACE/store-assets/app-store/metadata.en-US.md" \
+          FASTLANE_METADATA_DIR="$submit_dir/fastlane/metadata" \
           node <<'NODE'
           const fs = require('node:fs')
+          const path = require('node:path')
 
           const body = fs.readFileSync(process.env.RELEASE_BODY, 'utf8')
           const extract = (start, end) => {
@@ -440,6 +444,41 @@ jobs:
           fs.writeFileSync(
             process.env.EN_RELEASE_NOTES,
             extract('## Key Changes', '(?:\\nRelated Issue:|\\n## |$)'),
+          )
+
+          const writeStoreMetadata = (sourcePath, locale, labels, descriptionHeading) => {
+            const source = fs.readFileSync(sourcePath, 'utf8')
+            const localeDir = path.join(process.env.FASTLANE_METADATA_DIR, locale)
+            fs.mkdirSync(localeDir, { recursive: true })
+
+            const field = (label) => {
+              const match = source.match(new RegExp(`^- ${label}[：:]?\\s*(.+)$`, 'm'))
+              if (!match) throw new Error(`Missing App Store metadata field: ${label}`)
+              return `${match[1].trim()}\\n`
+            }
+            const description = source.match(
+              new RegExp(`## ${descriptionHeading}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`),
+            )
+            if (!description || !description[1].trim()) {
+              throw new Error(`Missing App Store description: ${locale}`)
+            }
+
+            fs.writeFileSync(path.join(localeDir, 'description.txt'), `${description[1].trim()}\\n`)
+            fs.writeFileSync(path.join(localeDir, 'keywords.txt'), field(labels.keywords))
+            fs.writeFileSync(path.join(localeDir, 'support_url.txt'), field(labels.supportUrl))
+          }
+
+          writeStoreMetadata(
+            process.env.ZH_STORE_METADATA,
+            'zh-Hans',
+            { keywords: '关键词', supportUrl: '支持 URL' },
+            '描述',
+          )
+          writeStoreMetadata(
+            process.env.EN_STORE_METADATA,
+            'en-US',
+            { keywords: 'Keywords', supportUrl: 'Support URL' },
+            'Description',
           )
           NODE
 
