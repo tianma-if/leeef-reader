@@ -8,6 +8,8 @@ import {
   TrendingUp,
 } from 'lucide-react'
 import { api, type Book, type Session } from '../api'
+import { countReadingDays } from './readingDays'
+import { useLibraryRefresh } from '../lib/useLibraryRefresh'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 export function StatsScreen() {
@@ -23,10 +25,16 @@ export function StatsScreen() {
     )
   }, [])
 
+  useLibraryRefresh(async () => {
+    const [nextSessions, nextBooks] = await Promise.all([api.listSessions(), api.listBooks()])
+    setSessions(nextSessions)
+    setBooks(nextBooks)
+  })
+
   const totalSeconds = sessions.reduce((sum, item) => sum + item.durationSeconds, 0)
   const totalMinutes = Math.round(totalSeconds / 60)
   const totalHours = (totalMinutes / 60).toFixed(1)
-  const days = new Set(sessions.map((item) => item.startedAt.slice(0, 10))).size
+  const days = countReadingDays(sessions)
   const finishedBooks = books.filter((book) => book.progress >= 0.999).length
 
   const byBook = useMemo(() => {

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   BookOpen,
   Check,
@@ -33,6 +33,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { CoverImage } from './CoverImage'
+import { useLibraryRefresh } from '../lib/useLibraryRefresh'
+import { importBatch, type ImportFailure } from './importBatch'
 
 type Props = {
   onOpen: (book: Book) => void
@@ -60,6 +62,9 @@ export function LibraryScreen({ onOpen }: Props) {
   const [filter, setFilter] = useState<FilterKey>('all')
   const [tag, setTag] = useState('all')
   const [busy, setBusy] = useState(false)
+  const importing = useRef(false)
+  const [importProgress, setImportProgress] = useState({ completed: 0, total: 0 })
+  const [importFailures, setImportFailures] = useState<ImportFailure<File>[]>([])
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     return (localStorage.getItem('leeef_library_view') as ViewMode) || 'grid'
   })
@@ -100,14 +105,16 @@ export function LibraryScreen({ onOpen }: Props) {
     void reload().catch((cause) => toast.error(String(cause)))
   }, [])
 
+  useLibraryRefresh(reload)
+
   const importPicked = async (files: File[]) => {
-    if (!files.length) {
-      setBusy(false)
-      return
-    }
+    if (!files.length || importing.current) return
+    importing.current = true
     setBusy(true)
+    setImportFailures([])
+    setImportProgress({ completed: 0, total: files.length })
     try {
-      for (const file of files) {
+      const result = await importBatch(files, async (file) => {
         const source = new Uint8Array(await file.arrayBuffer())
         const prepared = prepareBookFile(file, source)
         await api.importBook({
@@ -118,12 +125,18 @@ export function LibraryScreen({ onOpen }: Props) {
           mediaType: prepared.mediaType,
           cover: prepared.cover,
         })
+      }, (completed) => setImportProgress({ completed, total: files.length }))
+      setImportFailures(result.failures)
+      if (result.failures.length) {
+        toast.error(`导入完成：成功 ${result.succeeded} 本，失败 ${result.failures.length} 本`)
+      } else {
+        toast.success(`已导入 ${result.succeeded} 本书`)
       }
-      await reload()
-      toast.success(`已导入 ${files.length} 本书`)
+      await reload().catch((cause) => toast.error(`导入结果已保存，刷新书架失败：${String(cause)}`))
     } catch (cause) {
       toast.error(String(cause))
     } finally {
+      importing.current = false
       setBusy(false)
     }
   }
@@ -137,6 +150,7 @@ export function LibraryScreen({ onOpen }: Props) {
       const files = (picked ?? []).map(
         (item) => new File([new Blob([decodeBase64(item.data)])], item.name),
       )
+      if (!files.length) setBusy(false)
       await importPicked(files)
     } catch (cause) {
       setBusy(false)
@@ -262,9 +276,9 @@ export function LibraryScreen({ onOpen }: Props) {
           multiple
           disabled={busy}
           onChange={(event) => {
-            const files = event.target.files
+            const files = [...(event.target.files ?? [])]
             event.target.value = ''
-            if (files) void importPicked([...files])
+            void importPicked(files)
           }}
         />
       </label>
@@ -285,6 +299,7 @@ export function LibraryScreen({ onOpen }: Props) {
         desktop
           ? (event) => {
               event.preventDefault()
+              if (busy || importing.current) return
               const files = [...event.dataTransfer.files].filter((file) =>
                 /\.(epub|txt|mobi|azw3|fb2|pdf)$/i.test(file.name),
               )
@@ -293,6 +308,28 @@ export function LibraryScreen({ onOpen }: Props) {
           : undefined
       }
     >
+      {busy && importProgress.total > 0 ? (
+        <p role="status" className="mb-3 text-sm text-muted-foreground">
+          正在导入 {importProgress.completed} / {importProgress.total} 本…
+        </p>
+      ) : null}
+      {importFailures.length > 0 ? (
+        <section aria-label="导入失败的文件" className="mb-4 rounded-lg border p-3 text-sm">
+          <p>以下 {importFailures.length} 本未能导入，其余文件已处理：</p>
+          <ul className="my-2 max-h-40 overflow-y-auto space-y-1">
+            {importFailures.map(({ item, error }, index) => (
+              <li key={index} className="break-words">{item.name}：{error}</li>
+            ))}
+          </ul>
+          <Button size="sm" variant="outline" disabled={busy}
+            onClick={() => void importPicked(importFailures.map(({ item }) => item))}>
+            重试失败文件
+          </Button>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setImportFailures([])}>
+            关闭
+          </Button>
+        </section>
+      ) : null}
       <header className="mb-4 flex items-center justify-between gap-3">
         <h1 className="font-heading text-2xl">书架</h1>
         <div className="flex items-center gap-2">

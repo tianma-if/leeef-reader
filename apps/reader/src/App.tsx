@@ -17,6 +17,7 @@ import { SettingsScreen } from './settings/SettingsScreen'
 import { StatsScreen } from './stats/StatsScreen'
 import { UpdateCoordinator } from './update/UpdateCoordinator'
 import './App.css'
+import { useLibraryRefresh } from './lib/useLibraryRefresh'
 
 const AiScreen = lazy(() =>
   import('./ai/AiScreen').then((module) => ({ default: module.AiScreen })),
@@ -38,6 +39,8 @@ function App() {
   const [open, setOpen] = useState<Book | null>(null)
   const [openLocator, setOpenLocator] = useState<string | undefined>()
   const [books, setBooks] = useState<Book[]>([])
+
+  useLibraryRefresh(() => api.listBooks().then(setBooks))
 
   useEffect(() => {
     void api.listBooks().then(setBooks).catch(() => undefined)

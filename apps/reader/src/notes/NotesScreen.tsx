@@ -30,6 +30,7 @@ import {
 } from './exportExcerpts'
 import { saveTextExport } from './saveExport'
 import { Textarea } from '@/components/ui/textarea'
+import { useLibraryRefresh } from '../lib/useLibraryRefresh'
 
 type Props = { onOpenBook: (bookId: string, locator?: string) => void }
 
@@ -50,6 +51,12 @@ export function NotesScreen({ onOpenBook }: Props) {
       })
       .catch((cause) => toast.error(String(cause)))
   }, [])
+
+  useLibraryRefresh(async () => {
+    const [nextItems, nextBooks] = await Promise.all([api.listExcerpts(), api.listBooks()])
+    setItems(nextItems)
+    setBooks(nextBooks)
+  })
 
   const visible = useMemo(() => {
     return items.filter((item) => {
@@ -101,7 +108,7 @@ export function NotesScreen({ onOpenBook }: Props) {
         <div>
           <h1 className="font-heading text-2xl">笔记与书摘</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            共 {items.length} 条记录，支持双向同步与导出
+            共 {items.length} 条记录，支持 Markdown / TXT 导出、书库同步与 EdgeEver 推送
           </p>
         </div>
         {allDocuments.length > 0 ? (
@@ -332,7 +339,7 @@ export function NotesScreen({ onOpenBook }: Props) {
           <DialogHeader>
             <DialogTitle>删除书摘笔记？</DialogTitle>
             <DialogDescription>
-              确定要删除这条摘录吗？如果配置了云端同步，删除记录也会同步至其它设备。
+              确定要删除这条摘录吗？开启书库同步后，删除也会同步到其它设备；启用 EdgeEver 同步后，对应笔记也会更新。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -280,6 +280,7 @@ pub fn open(root: PathBuf) -> Result<AppState, String> {
         }
     };
 
+    crate::library_sync::initialize(&db)?;
     Ok(AppState {
         db: Arc::new(Mutex::new(db)),
         root,
@@ -1088,12 +1089,17 @@ pub fn set_book_tag(state: &AppState, book_id: &str, tag_id: &str, on: bool) -> 
 }
 
 pub fn record_session(state: &AppState, book_id: &str, seconds: i64) -> Result<(), String> {
+    if seconds <= 0 {
+        return Err("阅读时长必须大于零".into());
+    }
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let ts = now();
+    let ended = ts.parse::<i64>().map_err(|e| e.to_string())?;
+    let started = ended.saturating_sub(seconds).max(0).to_string();
     db.execute(
         "INSERT INTO reading_sessions(id, book_id, device_id, started_at, ended_at, duration_seconds, is_deleted, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?4, ?5, 0, ?4)",
-        params![Uuid::new_v4().to_string(), book_id, state.device_id, ts, seconds],
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?5)",
+        params![Uuid::new_v4().to_string(), book_id, state.device_id, started, ts, seconds],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -1177,7 +1183,8 @@ pub fn library_stats(state: &AppState) -> Result<LibraryStats, String> {
         excerpts: count("SELECT count(*) FROM excerpts WHERE is_deleted = 0")?,
         bookmarks: count("SELECT count(*) FROM bookmarks WHERE is_deleted = 0")?,
         pending_sync_operations: count(
-            "SELECT count(*) FROM sync_operations WHERE applied_at IS NULL",
+            "SELECT count(*) FROM library_sync_records WHERE modified_at >
+             COALESCE((SELECT CAST(value AS INTEGER) FROM kv WHERE key='library_last_uploaded_revision'), -1)",
         )?,
     })
 }
@@ -1257,6 +1264,30 @@ pub fn audit(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_records_its_actual_duration_and_rejects_empty_intervals() {
+        let root = tempfile::tempdir().unwrap();
+        let state = open(root.path().to_path_buf()).unwrap();
+        let book = import_book(
+            &state,
+            "test.txt",
+            b"book",
+            "Book",
+            None,
+            "text/plain",
+            None,
+        )
+        .unwrap();
+        record_session(&state, &book.id, 30).unwrap();
+        let sessions = list_sessions(&state).unwrap();
+        assert_eq!(sessions.len(), 1);
+        let start = sessions[0].started_at.parse::<i64>().unwrap();
+        let end = sessions[0].ended_at.parse::<i64>().unwrap();
+        assert_eq!(end - start, 30);
+        assert!(record_session(&state, &book.id, 0).is_err());
+        assert!(record_session(&state, &book.id, -1).is_err());
+    }
 
     #[test]
     fn excerpt_storage_preserves_internal_line_breaks() {

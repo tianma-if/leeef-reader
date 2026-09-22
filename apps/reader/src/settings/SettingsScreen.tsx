@@ -45,6 +45,7 @@ import {
 import { Slider } from '@/components/ui/slider'
 import { Textarea } from '@/components/ui/textarea'
 import { FontPicker } from '../reader/FontPicker'
+import { LibraryBackup } from './LibraryBackup'
 
 const desktop = !/Android|iPhone|iPad/i.test(navigator.userAgent)
 
@@ -402,7 +403,7 @@ export function SettingsScreen() {
               云端存储与多端同步后端
             </CardTitle>
             <CardDescription>
-              配置 S3 兼容对象存储或 WebDAV 空间，实现进度与设置的跨设备自动同步
+              配置 S3 兼容对象存储或 WebDAV 空间，同步阅读设置与服务配置；开启书库同步后，还会同步书籍、进度、书摘和分类
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -502,6 +503,37 @@ export function SettingsScreen() {
           </CardContent>
         </Card>
       ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">书籍与阅读数据同步</CardTitle>
+          <CardDescription>
+            使用已配置的 S3 / WebDAV 同步书籍、封面、进度、书摘、书签、分类与阅读时长。
+            首次开启会上传本地书库，已配对设备会自动下载。所有内容在上传前加密。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Label htmlFor="library-sync">同步范围</Label>
+          <Select value={value.syncLibrary ? 'library' : 'settings'}
+            onValueChange={(choice) => patch({ syncLibrary: choice === 'library' })}>
+            <SelectTrigger id="library-sync"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="settings">仅配置</SelectItem>
+              <SelectItem value="library">配置、书籍与阅读数据</SelectItem>
+            </SelectContent>
+          </Select>
+          <Label htmlFor="library-auto-sync">本机自动同步</Label>
+          <Select value={value.autoSync === false ? 'manual' : 'auto'}
+            onValueChange={(choice) => patch({ autoSync: choice === 'auto' })}>
+            <SelectTrigger id="library-auto-sync"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">自动同步</SelectItem>
+              <SelectItem value="manual">仅手动同步</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">保存后生效。自动同步在应用运行时每 30 秒检查一次；离线修改保留在本地，联网后重试。</p>
+        </CardContent>
+      </Card>
 
       {/* 5. EdgeEver 书摘同步 */}
       {desktop ? (
@@ -618,7 +650,7 @@ export function SettingsScreen() {
             <Share2 className="size-4 text-primary" />
             设备配对与状态
           </CardTitle>
-          <CardDescription>生成配对码或加入其它设备，实现配置无缝漫游</CardDescription>
+          <CardDescription>生成配对码或加入其它设备，共享配置与已开启同步的书库</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between gap-3 p-3 bg-muted/40 rounded-lg text-xs">
@@ -649,7 +681,7 @@ export function SettingsScreen() {
                       toast.success(
                         status.appliedValues
                           ? `已应用 ${status.appliedValues} 项更新`
-                          : '配置已是最新',
+                          : '已是最新',
                       )
                     })
                     .catch((cause) => toast.error(String(cause)))
@@ -714,15 +746,17 @@ export function SettingsScreen() {
         </CardContent>
       </Card>
 
+      <LibraryBackup />
+
       {/* 7. 灾难恢复 */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <KeyRound className="size-4 text-primary" />
-            灾难恢复包
+            同步配置恢复包
           </CardTitle>
           <CardDescription>
-            恢复包包含同步空间密钥与当前配置，使用独立密码加密保存
+            恢复包包含同步空间密钥与当前配置，不含书籍、进度或笔记，请另行保留这些数据。恢复包使用独立密码加密保存
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">

@@ -1,5 +1,7 @@
+mod backup;
 mod db;
 mod edgeever;
+mod library_sync;
 mod mcp;
 mod trusted_sync;
 
@@ -339,6 +341,49 @@ fn settings_recovery_import(
     Ok(runtime.status(&state))
 }
 
+#[tauri::command]
+async fn library_backup_export(
+    state: State<'_, AppState>,
+    password: String,
+) -> Result<String, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || backup::export(&state, &password))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn library_backup_preview(
+    state: State<'_, AppState>,
+    package: String,
+    password: String,
+) -> Result<backup::Preview, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || backup::preview(&state, &package, &password))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn library_backup_restore(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    runtime: State<'_, trusted_sync::SyncRuntime>,
+    package: String,
+    password: String,
+    prefer_backup: bool,
+) -> Result<usize, String> {
+    let state = state.inner().clone();
+    let changed = tauri::async_runtime::spawn_blocking(move || {
+        backup::restore(&state, &package, &password, prefer_backup)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let _ = app.emit("library-synced", ());
+    runtime.trigger();
+    Ok(changed)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -397,7 +442,10 @@ pub fn run() {
             settings_sync_status,
             settings_sync_now,
             settings_recovery_export,
-            settings_recovery_import
+            settings_recovery_import,
+            library_backup_export,
+            library_backup_preview,
+            library_backup_restore
         ])
         .run(tauri::generate_context!())
         .expect("error while running Leeef Reader");

@@ -75,7 +75,7 @@ impl<R: Runtime> NativeBridge<R> {
             .and_then(|value| value.to_str())
             .unwrap_or("txt");
         let mut dialog = rfd::AsyncFileDialog::new()
-            .set_title("导出书摘")
+            .set_title("保存导出文件")
             .set_file_name(&payload.filename)
             .add_filter("文本文件", &[extension]);
         if let Some(window) = window.as_ref() {

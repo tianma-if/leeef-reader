@@ -28,6 +28,7 @@ use tokio_util::sync::CancellationToken;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::db::{self, AppState};
+use crate::library_sync::{self, Snapshot};
 
 const SPACE_KEY: &str = "trusted_sync_space";
 const DEVICES_KEY: &str = "trusted_sync_devices";
@@ -194,7 +195,7 @@ impl SyncRuntime {
 
 pub fn start_background(app: AppHandle, state: AppState, runtime: SyncRuntime) {
     tauri::async_runtime::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(15 * 60));
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         tokio::time::sleep(Duration::from_secs(2)).await;
         loop {
@@ -236,8 +237,15 @@ async fn run_and_publish(app: &AppHandle, state: &AppState, runtime: &SyncRuntim
         }
     }
 
-    let result = synchronize(state).await;
-    let mut changed = false;
+    let configuration = synchronize(state).await;
+    let configuration_changed = configuration.as_ref().is_ok_and(|count| *count > 0);
+    let library = if configuration.is_ok() {
+        synchronize_library(state).await
+    } else {
+        Ok(0)
+    };
+    let library_changed = library.as_ref().is_ok_and(|count| *count > 0);
+    let result = configuration.and_then(|count| library.map(|applied| count + applied));
     if let Ok(mut status) = runtime.status.lock() {
         status.running = false;
         status.paired = load_space(state).ok().flatten().is_some();
@@ -245,7 +253,6 @@ async fn run_and_publish(app: &AppHandle, state: &AppState, runtime: &SyncRuntim
         status.auto_sync = auto_sync_enabled(state);
         match result {
             Ok(applied) => {
-                changed = applied > 0;
                 status.last_success_at = Some(now_millis());
                 status.last_error = None;
                 status.applied_values = applied;
@@ -254,8 +261,11 @@ async fn run_and_publish(app: &AppHandle, state: &AppState, runtime: &SyncRuntim
         }
         let _ = app.emit("settings-sync-status", status.clone());
     }
-    if changed {
+    if configuration_changed {
         let _ = app.emit("settings-synced", ());
+    }
+    if library_changed {
+        let _ = app.emit("library-synced", ());
     }
 }
 
@@ -474,6 +484,156 @@ async fn synchronize(state: &AppState) -> Result<usize, String> {
         .put(&own_path, &encrypt_document(&merged, &space.key_bytes()?)?)
         .await?;
     Ok(changed)
+}
+
+async fn publish_library(
+    state: &AppState,
+    space: &SpaceState,
+    backend: &RemoteBackend,
+) -> Result<(), String> {
+    let key = space.key_bytes()?;
+    let fingerprint = backend_fingerprint(&settings_object(state)?);
+    // Capture records before enumerating files. A concurrent new import is included
+    // in the next snapshot; this manifest never advertises a file before upload.
+    let records = library_sync::records(state)?;
+    let mut assets = Vec::new();
+    for (asset, objects) in library_sync::local_assets(state)? {
+        for (hash, path) in objects {
+            let cache_key = format!("library-upload:{}:{fingerprint}:{hash}", space.id);
+            if db::kv_get(state, &cache_key)?.is_none() {
+                let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+                if db::sha256_hex(&bytes) != hash {
+                    return Err("本地书籍文件已变化，请重新导入后同步".into());
+                }
+                let encrypted = encrypt_document(&URL_SAFE_NO_PAD.encode(&bytes), &key)?;
+                backend
+                    .put(
+                        &format!("trusted/{}/library/objects/{hash}", space.id),
+                        &encrypted,
+                    )
+                    .await?;
+                db::kv_set(state, &cache_key, "1")?;
+            }
+        }
+        assets.push(asset);
+    }
+    if records.iter().any(|record| {
+        record.table == "books"
+            && !record.deleted
+            && record.data["is_deleted"].as_i64() != Some(1)
+            && !assets
+                .iter()
+                .any(|asset| record.data["sha256"].as_str() == Some(&asset.book_hash))
+    }) {
+        return Err("书库文件尚未齐全，补全文件后将继续同步".into());
+    }
+    let snapshot = Snapshot {
+        version: 1,
+        space_id: space.id.clone(),
+        device_id: state.device_id.clone(),
+        devices: load_devices(state)?,
+        records,
+        assets,
+    };
+    let uploaded_revision = snapshot
+        .records
+        .iter()
+        .map(|record| record.modified_at)
+        .max()
+        .unwrap_or(0);
+    backend
+        .put(
+            &format!(
+                "trusted/{}/library/devices/{}.json",
+                space.id, state.device_id
+            ),
+            &encrypt_document(&snapshot, &key)?,
+        )
+        .await?;
+    db::kv_set(
+        state,
+        "library_last_uploaded_revision",
+        &uploaded_revision.to_string(),
+    )
+}
+
+async fn synchronize_library(state: &AppState) -> Result<usize, String> {
+    if settings_object(state)?
+        .get("syncLibrary")
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return Ok(0);
+    }
+    let Some(space) = load_space(state)? else {
+        return Ok(0);
+    };
+    let backend = configured_backend(state)?;
+    let key = space.key_bytes()?;
+    publish_library(state, &space, &backend).await?;
+    let mut devices: BTreeSet<String> = load_devices(state)?.into_iter().collect();
+    devices.insert(state.device_id.clone());
+    let mut visited = BTreeSet::new();
+    let mut snapshots = Vec::new();
+    while let Some(device) = devices
+        .iter()
+        .find(|device| !visited.contains(*device))
+        .cloned()
+    {
+        visited.insert(device.clone());
+        if uuid::Uuid::parse_str(&device).is_err() {
+            return Err("同步设备标识无效".into());
+        }
+        if device == state.device_id {
+            continue;
+        }
+        let path = format!("trusted/{}/library/devices/{device}.json", space.id);
+        let Some(bytes) = backend.get(&path).await? else {
+            continue;
+        };
+        let snapshot: Snapshot = decrypt_document(&bytes, &key)?;
+        if snapshot.version != 1 || snapshot.space_id != space.id || snapshot.device_id != device {
+            return Err("书库同步文档版本或身份不匹配".into());
+        }
+        devices.extend(snapshot.devices.iter().cloned());
+        if devices.len() > 256 {
+            return Err("同步设备数量超出支持范围".into());
+        }
+        snapshots.push(snapshot);
+    }
+    let records = library_sync::latest_records(&snapshots);
+    let mut assets = BTreeMap::new();
+    for snapshot in &snapshots {
+        for asset in &snapshot.assets {
+            assets
+                .entry(asset.book_hash.clone())
+                .or_insert_with(|| asset.clone());
+        }
+    }
+    // Existing locally imported copies are reused rather than downloaded again.
+    let local_hashes: BTreeSet<String> = library_sync::local_assets(state)?
+        .into_iter()
+        .flat_map(|(_, objects)| objects.into_iter().map(|(hash, _)| hash))
+        .collect();
+    for asset in assets.values() {
+        for hash in std::iter::once(&asset.book_hash).chain(asset.cover_hash.iter()) {
+            let path = library_sync::asset_path(state, hash)?;
+            if path.is_file() || local_hashes.contains(hash) {
+                continue;
+            }
+            let encrypted = backend
+                .get(&format!("trusted/{}/library/objects/{hash}", space.id))
+                .await?
+                .ok_or("远端书籍文件尚未上传完成，请稍后重试")?;
+            let encoded: String = decrypt_document(&encrypted, &key)?;
+            let bytes = URL_SAFE_NO_PAD.decode(encoded).map_err(|e| e.to_string())?;
+            library_sync::store_asset(state, hash, &bytes)?;
+        }
+    }
+    save_devices(state, &devices.into_iter().collect::<Vec<_>>())?;
+    // The next snapshot relays merged versions with their original clocks.
+    // Finish network I/O before committing so a failed upload never hides applied changes.
+    library_sync::merge(state, &records, &assets.into_values().collect::<Vec<_>>())
 }
 
 fn configuration_path(space_id: &str, device_id: &str) -> String {
@@ -1568,7 +1728,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let router = Router::new()
             .route("/{*path}", get(read).put(write))
-            .with_state(documents);
+            .with_state(documents.clone());
         tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
 
         let desktop = state("desktop-sync");
@@ -1620,5 +1780,73 @@ mod tests {
         assert_eq!(phone_settings["theme"], "sepia");
         assert_eq!(phone_settings["syncEndpoint"], format!("{endpoint}/next"));
         synchronize(&phone).await.unwrap();
+
+        let mut settings = settings_object(&desktop).unwrap();
+        settings.insert("syncLibrary".into(), Value::Bool(true));
+        save_settings(&desktop, Value::Object(settings)).unwrap();
+        let book = db::import_book(
+            &desktop,
+            "test.txt",
+            b"private book content",
+            "Book",
+            None,
+            "text/plain",
+            Some(b"cover bytes"),
+        )
+        .unwrap();
+        db::save_progress(&desktop, &book.id, "chapter-3", 0.3, None, None).unwrap();
+        synchronize(&desktop).await.unwrap();
+        synchronize_library(&desktop).await.unwrap();
+        synchronize(&phone).await.unwrap();
+        let object_path = format!(
+            "next/trusted/{}/library/objects/{}",
+            load_space(&desktop).unwrap().unwrap().id,
+            book.sha256
+        );
+        let ciphertext = documents.lock().unwrap().remove(&object_path).unwrap();
+        assert!(!String::from_utf8_lossy(&ciphertext).contains("private book content"));
+        assert!(synchronize_library(&phone).await.is_err());
+        assert!(db::list_books(&phone).unwrap().is_empty());
+        documents.lock().unwrap().insert(object_path, ciphertext);
+        assert!(synchronize_library(&phone).await.unwrap() > 0);
+        let phone_book = db::list_books(&phone).unwrap().remove(0);
+        assert_eq!(
+            db::book_bytes(&phone, &phone_book.id).unwrap(),
+            b"private book content"
+        );
+        assert_eq!(
+            db::book_cover(&phone, &phone_book.id).unwrap(),
+            b"cover bytes"
+        );
+        assert_eq!(phone_book.locator.as_deref(), Some("chapter-3"));
+        let excerpt = db::upsert_excerpt(
+            &phone,
+            &phone_book.id,
+            "chapter-3",
+            "quote",
+            Some("offline note"),
+            "yellow",
+        )
+        .unwrap();
+        db::save_progress(&phone, &phone_book.id, "chapter-1", 0.1, None, None).unwrap();
+        synchronize_library(&phone).await.unwrap();
+        synchronize_library(&desktop).await.unwrap();
+        assert_eq!(
+            db::list_excerpts(&desktop, Some(&book.id)).unwrap()[0]
+                .note
+                .as_deref(),
+            Some("offline note")
+        );
+        assert_eq!(
+            db::list_books(&desktop).unwrap()[0].locator.as_deref(),
+            Some("chapter-1")
+        );
+        db::delete_excerpt(&phone, &excerpt).unwrap();
+        synchronize_library(&phone).await.unwrap();
+        synchronize_library(&desktop).await.unwrap();
+        assert!(db::list_excerpts(&desktop, Some(&book.id))
+            .unwrap()
+            .is_empty());
+        assert_eq!(synchronize_library(&desktop).await.unwrap(), 0);
     }
 }

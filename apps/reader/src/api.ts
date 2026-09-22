@@ -71,6 +71,7 @@ export type Settings = {
   syncAccessKey?: string
   syncSecretKey?: string
   syncPrefix?: string
+  syncLibrary?: boolean
   autoSync?: boolean
   chinese?: 'original' | 'simplified' | 'traditional'
   edgeEverEnabled?: boolean
@@ -96,6 +97,8 @@ export type SettingsSyncStatus = {
   lastError?: string
   appliedValues: number
 }
+
+export type BackupPreview = { books: number; excerpts: number; bookmarks: number; bytes: number; matchingBooks: number }
 
 export type PairingOffer = {
   code: string
@@ -225,6 +228,11 @@ export const api = {
       password,
       replaceExisting,
     }),
+  libraryBackupExport: (password: string) => invoke<string>('library_backup_export', { password }),
+  libraryBackupPreview: (packageText: string, password: string) =>
+    invoke<BackupPreview>('library_backup_preview', { package: packageText, password }),
+  libraryBackupRestore: (packageText: string, password: string, preferBackup: boolean) =>
+    invoke<number>('library_backup_restore', { package: packageText, password, preferBackup }),
   saveTextFile: (filename: string, content: string) =>
     invoke<{ saved: boolean }>('plugin:native-bridge|save_text_file', {
       payload: { filename, content },

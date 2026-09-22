@@ -66,7 +66,7 @@ The previous Flutter client does not auto-update to this app, and libraries are 
 - **Finger-following slide on the phone**: Mobile paginated mode captures the outgoing page, jumps the live view underneath, and slides the overlay. Capture failure falls back to a plain next/prev. Desktop paginated mode uses foliate animation; both ends also offer continuous scrolling.
 - **Reading chrome you can live with**: Font size, line height, one or two columns, paper / sepia / night, and Simplified / Traditional Chinese conversion.
 - **Excerpts, bookmarks, and notes**: Highlights and bookmarks stay attached to the book; the notes tab filters by book, type, and color.
-- **Reading stats**: Time spent, days, streak, books finished, and a weekly heatmap.
+- **Reading stats**: Time spent, reading days, books finished, and time spent by book.
 - **OPDS catalogs**: Browse and download from OPDS feeds you configure.
 - **Bring-your-own AI**: Desktop settings take an OpenAI-compatible endpoint, API key, and model (OpenAI, DeepSeek, OpenRouter, xAI, and similar). Chat streams in-process. The model can list and search the local library; writes wait for confirmation.
 - **In-process MCP**: Start the library MCP server from Settings. It binds loopback HTTP against the same `leeef.sqlite` the reader uses. Agents can list books, extract text, search excerpts, and apply confirmed writes.
@@ -90,6 +90,10 @@ Read tools include `list_books`, `search_books`, `get_book`, `get_book_content`,
 - An exported `.leeef-recovery` package contains the encrypted bootstrap material needed to recover the sync space when no trusted device remains. Keep its independent password outside Leeef.
 
 Online features need a network and credentials you supply. Leeef does not sell AI or cloud storage in the app.
+
+## In development (not yet released)
+
+The current working tree adds encrypted S3/WebDAV library synchronization, password-protected library backups, and AI help for selected passages. Library sync is opt-in; existing installations continue syncing configuration only until it is enabled. See [implementation and validation notes](docs/reader-improvements.md) for scope, limits, and testing status.
 
 ## Roadmap
 

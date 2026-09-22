@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type PointerEvent } from 'react'
 import { listen } from '@tauri-apps/api/event'
+import { toast } from 'sonner'
 import {
   api,
   isMobile,
@@ -29,6 +30,11 @@ import {
   type TurnGestureIntent,
 } from './turnGestureArena'
 import { useReaderChrome } from './useReaderChrome'
+import { createReadingTimer } from './readingTimer'
+import { useLibraryRefresh } from '../lib/useLibraryRefresh'
+import type { ReadingSource } from '../ai/selectionAgent'
+
+const ReaderAiPanel = lazy(() => import('./ReaderAiPanel').then((module) => ({ default: module.ReaderAiPanel })))
 
 type Props = {
   book: Book
@@ -83,7 +89,6 @@ const waitForSize = (element: HTMLElement) =>
 export function ReaderView({ book, onClose, initialLocator }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<FoliateViewElement | null>(null)
-  const started = useRef(Date.now())
   const excerptsRef = useRef<Excerpt[]>([])
   const settingsRef = useRef<Settings>({})
   const saveTimer = useRef<number>(0)
@@ -117,6 +122,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   const [excerpts, setExcerpts] = useState<Excerpt[]>([])
   const [settings, setSettings] = useState<Settings>({})
   const [selection, setSelection] = useState<SelectionState | null>(null)
+  const [aiSource, setAiSource] = useState<ReadingSource | null>(null)
   const mobile = isMobile()
   const chrome = useReaderChrome()
   const chromeRef = useRef(chrome)
@@ -203,6 +209,19 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     setSelection(null)
   }
 
+  const lastSuggestedLocator = useRef('')
+  useLibraryRefresh(async () => {
+    await reloadMarks()
+    const remote = (await api.listBooks()).find((item) => item.id === book.id)
+    if (remote?.locator && remote.locator !== locator && remote.locator !== lastSuggestedLocator.current) {
+      lastSuggestedLocator.current = remote.locator
+      toast('另一台设备更新了阅读位置', {
+        description: remote.chapterTitle || `进度 ${Math.round(remote.progress * 100)}%`,
+        action: { label: '接续阅读', onClick: () => goTo(remote.locator!) },
+      })
+    }
+  })
+
   useEffect(() => {
     excerptsRef.current = excerpts
   }, [excerpts])
@@ -213,6 +232,23 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     if (!host) return
     let cancelled = false
     let view: FoliateViewElement | null = null
+    let ready = false
+    const readingTimer = createReadingTimer((seconds) => api.recordSession(book.id, seconds))
+    const flushReadingTime = () => {
+      void readingTimer.flush().catch(() => toast.error('阅读时长保存失败，将在下次记录时重试'))
+    }
+    const onVisibility = () => {
+      readingTimer.setActive(ready && document.visibilityState === 'visible')
+      flushReadingTime()
+    }
+    const onPageHide = () => {
+      readingTimer.setActive(false)
+      flushReadingTime()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', onPageHide)
+    window.addEventListener('pageshow', onVisibility)
+    const readingInterval = window.setInterval(flushReadingTime, 30_000)
 
     const start = async () => {
       const [loaded, source] = await Promise.all([
@@ -332,7 +368,11 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         showTextStart: !(initialLocator || book.locator),
       })
       paintHighlights(view)
-      if (!cancelled) setStatus('')
+      if (!cancelled) {
+        setStatus('')
+        ready = true
+        readingTimer.setActive(document.visibilityState === 'visible')
+      }
     }
 
     start().catch((cause) => {
@@ -346,8 +386,12 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       cancelled = true
       window.clearTimeout(prepareTimer.current)
       window.clearTimeout(saveTimer.current)
-      const seconds = Math.round((Date.now() - started.current) / 1000)
-      if (seconds >= 5) void api.recordSession(book.id, seconds)
+      window.clearInterval(readingInterval)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', onPageHide)
+      window.removeEventListener('pageshow', onVisibility)
+      readingTimer.setActive(false)
+      flushReadingTime()
       getTurner().dispose()
       viewRef.current = null
       view?.close()
@@ -591,6 +635,15 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       {selection ? (
         <SelectionPopup
           selection={selection}
+          onAiExplain={() => {
+            if (selection.text.length > 16_000) {
+              toast.error('选中文字过长，请缩小到 16,000 字以内再提问')
+              return
+            }
+            setAiSource({ bookTitle: title, chapter, quote: selection.text, locator: selection.cfi })
+            setSelection(null)
+            chrome.hide()
+          }}
           onCopy={() => {
             void navigator.clipboard.writeText(selection.text)
             setSelection(null)
@@ -639,6 +692,16 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
             })
           }}
         />
+      ) : null}
+      {aiSource ? (
+        <Suspense fallback={<p role="status" className="reader-error">正在加载阅读助手…</p>}>
+          <ReaderAiPanel key={`${book.id}:${aiSource.locator}`} bookId={book.id} source={aiSource}
+            settings={settings} onClose={() => setAiSource(null)} onSaved={async () => {
+              await reloadMarks()
+              void viewRef.current?.addAnnotation({ value: aiSource.locator, color: '#488bc2' })
+            }}
+            onGo={(target) => { goTo(target); setAiSource(null) }} />
+        </Suspense>
       ) : null}
       {error ? <p className="reader-error">{error}</p> : null}
     </div>
