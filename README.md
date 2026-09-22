@@ -70,7 +70,7 @@ The previous Flutter client does not auto-update to this app, and libraries are 
 - **OPDS catalogs**: Browse and download from OPDS feeds you configure.
 - **Bring-your-own AI**: Desktop settings take an OpenAI-compatible endpoint, API key, and model (OpenAI, DeepSeek, OpenRouter, xAI, and similar). Chat streams in-process. The model can list and search the local library; writes wait for confirmation.
 - **In-process MCP**: Start the library MCP server from Settings. It binds loopback HTTP against the same `leeef.sqlite` the reader uses. Agents can list books, extract text, search excerpts, and apply confirmed writes.
-- **Desktop credentials, phone pairing**: Object storage, AI, and similar secrets are filled in on the computer. The phone shows a pairing code instead of those forms.
+- **Desktop credentials, phone pairing**: Object storage, AI, and similar secrets are filled in on the computer. The phone accepts a one-time LAN pairing code instead of showing those forms, then keeps portable settings synchronized.
 - **Open local data**: The library is standard SQLite. Core mutations record a `sync_operation` in the same transaction so a future own-cloud sync has a real log, not a side channel.
 
 ## MCP
@@ -85,8 +85,8 @@ Read tools include `list_books`, `search_books`, `get_book`, `get_book_content`,
 ## Data, AI, and sync
 
 - Books and reading data stay on the device by default.
-- AI is optional and bring-your-own. Keys never have to leave the machine you typed them on.
-- The intended multi-device model is **your** S3-compatible bucket or WebDAV, plus LAN pairing so phones receive configuration without typing secrets. The pairing and object-storage engine is still being brought onto this Tauri client; settings and `sync_operations` are already in place. See [trusted-device-sync.md](docs/trusted-device-sync.md) for the protocol.
+- AI is optional and bring-your-own. Keys leave the desktop only when you explicitly pair a trusted device, and the configuration document is encrypted before upload.
+- The multi-device model uses **your** S3-compatible bucket or WebDAV. LAN pairing transfers the encrypted sync-space key and the first configuration snapshot; later settings changes converge through per-device encrypted configuration documents. Book and reading-data object synchronization is still being brought onto this Tauri client. See [trusted-device-sync.md](docs/trusted-device-sync.md) for the protocol.
 
 Online features need a network and credentials you supply. Leeef does not sell AI or cloud storage in the app.
 
@@ -95,7 +95,7 @@ Online features need a network and credentials you supply. Leeef does not sell A
 These are not in the current GitHub Release:
 
 - Signed iOS and Windows installers
-- Complete S3 / WebDAV sync and QR pairing on this client
+- Complete S3 / WebDAV book-data sync and add QR scanning to the existing pairing-code flow
 - Sparkle (macOS) and Play auto-update
 
 ## Tech stack

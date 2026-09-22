@@ -53,6 +53,21 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    const synchronizeOnResume = () => {
+      if (document.visibilityState !== 'visible') return
+      void api.settingsSyncStatus()
+        .then((status) => status.paired && status.autoSync ? api.settingsSyncNow() : undefined)
+        .catch(() => undefined)
+    }
+    document.addEventListener('visibilitychange', synchronizeOnResume)
+    window.addEventListener('online', synchronizeOnResume)
+    return () => {
+      document.removeEventListener('visibilitychange', synchronizeOnResume)
+      window.removeEventListener('online', synchronizeOnResume)
+    }
+  }, [])
+
   if (open) {
     return (
       <ReaderView

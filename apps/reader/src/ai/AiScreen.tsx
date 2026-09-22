@@ -1,4 +1,5 @@
 import { useChat } from '@ai-sdk/react'
+import { listen } from '@tauri-apps/api/event'
 import {
   getToolName,
   isToolUIPart,
@@ -26,6 +27,11 @@ export function AiScreen() {
 
   useEffect(() => {
     void api.getSettings().then(setSettings)
+    let stop: (() => void) | undefined
+    void listen('settings-synced', () => {
+      void api.getSettings().then(setSettings)
+    }).then((unlisten) => { stop = unlisten })
+    return () => stop?.()
   }, [])
 
   if (settings == null) {

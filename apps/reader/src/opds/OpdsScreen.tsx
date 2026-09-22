@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import { api, type Settings } from '../api'
 import { Button } from '@/components/ui/button'
@@ -13,10 +14,16 @@ export function OpdsScreen() {
   const [items, setItems] = useState<FeedItem[]>([])
 
   useEffect(() => {
-    void api.getSettings().then((value) => {
+    const applySettings = (value: Settings) => {
       setSettings(value)
       if (value.opdsCatalogs?.[0]?.url) setUrl(value.opdsCatalogs[0].url)
-    })
+    }
+    void api.getSettings().then(applySettings)
+    let stop: (() => void) | undefined
+    void listen('settings-synced', () => {
+      void api.getSettings().then(applySettings)
+    }).then((unlisten) => { stop = unlisten })
+    return () => stop?.()
   }, [])
 
   const load = async () => {

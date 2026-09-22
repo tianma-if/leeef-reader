@@ -1,6 +1,7 @@
 mod db;
 mod edgeever;
 mod mcp;
+mod trusted_sync;
 
 use db::AppState;
 use serde::Deserialize;
@@ -253,8 +254,14 @@ fn get_settings(state: State<AppState>) -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn save_settings(state: State<AppState>, value: serde_json::Value) -> Result<(), String> {
-    db::kv_set(&state, "settings", &value.to_string())
+fn save_settings(
+    state: State<AppState>,
+    runtime: State<trusted_sync::SyncRuntime>,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    trusted_sync::save_settings(&state, value)?;
+    runtime.trigger();
+    Ok(())
 }
 
 #[tauri::command]
@@ -278,10 +285,37 @@ fn mcp_status(app: tauri::AppHandle, state: State<AppState>) -> Result<mcp::McpS
 }
 
 #[tauri::command]
-fn pairing_code(state: State<AppState>) -> Result<String, String> {
-    let code = format!("{:06}", (uuid::Uuid::new_v4().as_u128() % 1_000_000) as u32);
-    db::kv_set(&state, "pairing_code", &code)?;
-    Ok(code)
+async fn pairing_start(
+    state: State<'_, AppState>,
+    runtime: State<'_, trusted_sync::SyncRuntime>,
+) -> Result<trusted_sync::PairingOffer, String> {
+    trusted_sync::start_pairing(state.inner().clone(), runtime.inner().clone()).await
+}
+
+#[tauri::command]
+async fn pairing_join(
+    state: State<'_, AppState>,
+    runtime: State<'_, trusted_sync::SyncRuntime>,
+    code: String,
+) -> Result<trusted_sync::SyncStatus, String> {
+    trusted_sync::join_pairing(&state, &runtime, &code).await
+}
+
+#[tauri::command]
+fn settings_sync_status(
+    state: State<AppState>,
+    runtime: State<trusted_sync::SyncRuntime>,
+) -> trusted_sync::SyncStatus {
+    runtime.status(&state)
+}
+
+#[tauri::command]
+async fn settings_sync_now(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    runtime: State<'_, trusted_sync::SyncRuntime>,
+) -> Result<trusted_sync::SyncStatus, String> {
+    trusted_sync::sync_now(&app, &state, &runtime).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -293,7 +327,10 @@ pub fn run() {
             let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
             std::fs::create_dir_all(&root)?;
             let state = db::open(root)?;
+            let runtime = trusted_sync::SyncRuntime::default();
+            trusted_sync::start_background(app.handle().clone(), state.clone(), runtime.clone());
             app.manage(state);
+            app.manage(runtime);
             app.manage(mcp::McpHandle::default());
             Ok(())
         })
@@ -330,7 +367,10 @@ pub fn run() {
             mcp_start,
             mcp_stop,
             mcp_status,
-            pairing_code
+            pairing_start,
+            pairing_join,
+            settings_sync_status,
+            settings_sync_now
         ])
         .run(tauri::generate_context!())
         .expect("error while running Leeef Reader");

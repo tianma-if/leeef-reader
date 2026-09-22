@@ -64,6 +64,14 @@ export type Settings = {
   opdsCatalogs?: { name: string; url: string }[]
   syncBackend?: 's3' | 'webdav' | ''
   syncEndpoint?: string
+  syncUsername?: string
+  syncPassword?: string
+  syncBucket?: string
+  syncRegion?: string
+  syncAccessKey?: string
+  syncSecretKey?: string
+  syncPrefix?: string
+  autoSync?: boolean
   chinese?: 'original' | 'simplified' | 'traditional'
   edgeEverEnabled?: boolean
   edgeEverEndpoint?: string
@@ -77,6 +85,21 @@ export type EdgeEverSyncResult = {
   skipped: number
   failed: number
   errors: string[]
+}
+
+export type SettingsSyncStatus = {
+  paired: boolean
+  configured: boolean
+  autoSync: boolean
+  running: boolean
+  lastSuccessAt?: number
+  lastError?: string
+  appliedValues: number
+}
+
+export type PairingOffer = {
+  code: string
+  expiresAt: number
 }
 
 const asBytes = (raw: ArrayBuffer | Uint8Array | number[]): Uint8Array<ArrayBuffer> =>
@@ -189,7 +212,10 @@ export const api = {
     invoke<{ running: boolean; endpoint?: string; token?: string; databasePath: string }>(
       'mcp_status',
     ),
-  pairingCode: () => invoke<string>('pairing_code'),
+  pairingStart: () => invoke<PairingOffer>('pairing_start'),
+  pairingJoin: (code: string) => invoke<SettingsSyncStatus>('pairing_join', { code }),
+  settingsSyncStatus: () => invoke<SettingsSyncStatus>('settings_sync_status'),
+  settingsSyncNow: () => invoke<SettingsSyncStatus>('settings_sync_now'),
 }
 
 export const isAndroid = () => /Android/i.test(navigator.userAgent)

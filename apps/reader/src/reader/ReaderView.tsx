@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import {
   api,
   isMobile,
@@ -353,6 +354,22 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       view?.remove()
     }
   }, [book.id, initialLocator])
+
+  useEffect(() => {
+    let stop: (() => void) | undefined
+    void listen('settings-synced', () => {
+      void api.getSettings().then((next) => {
+        settingsRef.current = next
+        setSettings(next)
+        const view = viewRef.current
+        if (view) {
+          applyViewLayout(view, next, mobile)
+          void applyReadingFont(view, next)
+        }
+      })
+    }).then((unlisten) => { stop = unlisten })
+    return () => stop?.()
+  }, [mobile])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

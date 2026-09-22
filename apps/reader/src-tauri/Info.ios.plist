@@ -4,5 +4,12 @@
 <dict>
   <key>ITSAppUsesNonExemptEncryption</key>
   <false/>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Leeef 使用局域网安全配对你的阅读设备。</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
 </dict>
 </plist>
