@@ -373,6 +373,10 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler: "2.7.2"
       - name: Resolve App Store version and build
         env:
           IOS_BUILD_NUMBER: ${{ inputs.ios_build_number }}
@@ -490,7 +494,6 @@ jobs:
           RUBY
 
           export BUNDLE_GEMFILE="$submit_dir/Gemfile"
-          gem install bundler -v 2.7.2 --no-document
           bundle _2.7.2_ config set path "$RUNNER_TEMP/fastlane-bundle"
           bundle _2.7.2_ install --jobs 4 --retry 3
           (
