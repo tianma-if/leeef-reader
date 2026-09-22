@@ -109,7 +109,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
-          APPSTORE_SUPPORT_URL: https://github.com/tianma-if/leeef-reader/issues
         run: |
           gh release upload "$RELEASE_TAG" \
             "$RUNNER_TEMP/macos-dist/"* \
@@ -404,6 +403,7 @@ jobs:
           APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          APPSTORE_SUPPORT_URL: https://github.com/tianma-if/leeef-reader/issues
         run: |
           set -euo pipefail
           submit_dir="$RUNNER_TEMP/app-store-submit"
