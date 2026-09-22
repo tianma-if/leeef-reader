@@ -1,4 +1,4 @@
-import { Bookmark, ChevronLeft, PanelLeft } from 'lucide-react'
+import { Bookmark, ChevronLeft, PanelRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 type Props = {
@@ -67,8 +67,8 @@ export function ReaderChrome({
           <Bookmark className={bookmarked ? 'fill-current' : undefined} />
         </Button>
         {!mobile ? (
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="目录" onClick={onOpenSidebar}>
-            <PanelLeft />
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="目录与书签" onClick={onOpenSidebar}>
+            <PanelRight />
           </Button>
         ) : null}
       </header>

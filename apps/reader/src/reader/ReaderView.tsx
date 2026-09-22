@@ -595,19 +595,38 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
             void navigator.clipboard.writeText(selection.text)
             setSelection(null)
           }}
-          onHighlight={() => {
+          onHighlight={(color = '#c4a35a') => {
             void api
               .createExcerpt({
                 bookId: book.id,
                 locator: selection.cfi,
                 quote: selection.text,
-                color: '#c4a35a',
+                color,
               })
               .then(async () => {
                 await reloadMarks()
                 void viewRef.current?.addAnnotation({
                   value: selection.cfi,
-                  color: '#c4a35a',
+                  color,
+                })
+                setSelection(null)
+                viewRef.current?.deselect()
+              })
+          }}
+          onSaveNote={(note, color = '#c4a35a') => {
+            void api
+              .createExcerpt({
+                bookId: book.id,
+                locator: selection.cfi,
+                quote: selection.text,
+                note: note.trim() || undefined,
+                color,
+              })
+              .then(async () => {
+                await reloadMarks()
+                void viewRef.current?.addAnnotation({
+                  value: selection.cfi,
+                  color,
                 })
                 setSelection(null)
                 viewRef.current?.deselect()

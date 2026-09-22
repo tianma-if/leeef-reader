@@ -101,7 +101,7 @@ function App() {
           )
         })}
       </nav>
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {tab === 'library' ? (
           <LibraryScreen
             onOpen={(book) => {
@@ -125,7 +125,7 @@ function App() {
         {tab === 'opds' ? <OpdsScreen /> : null}
         {tab === 'ai' ? (
           <Suspense fallback={<p className="text-muted-foreground px-4 pt-8">加载 AI…</p>}>
-            <AiScreen />
+            <AiScreen onNavigateToSettings={() => setTab('settings')} />
           </Suspense>
         ) : null}
         {tab === 'settings' ? <SettingsScreen /> : null}
