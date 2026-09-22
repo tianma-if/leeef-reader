@@ -406,7 +406,7 @@ jobs:
         run: |
           set -euo pipefail
           submit_dir="$RUNNER_TEMP/app-store-submit"
-          mkdir -p "$submit_dir"
+          mkdir -p "$submit_dir/fastlane"
 
           gh release view "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
@@ -461,7 +461,7 @@ jobs:
           source "https://rubygems.org"
           gem "fastlane", "2.230.0"
           RUBY
-          cat > "$submit_dir/Fastfile" <<'RUBY'
+          cat > "$submit_dir/fastlane/Fastfile" <<'RUBY'
           default_platform(:ios)
 
           platform :ios do
