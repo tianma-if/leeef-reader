@@ -109,6 +109,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          APPSTORE_SUPPORT_URL: https://github.com/tianma-if/leeef-reader/issues
         run: |
           gh release upload "$RELEASE_TAG" \
             "$RUNNER_TEMP/macos-dist/"* \
@@ -446,7 +447,7 @@ jobs:
             extract('## Key Changes', '(?:\\nRelated Issue:|\\n## |$)'),
           )
 
-          const writeStoreMetadata = (sourcePath, locale, labels, descriptionHeading) => {
+          const writeStoreMetadata = (sourcePath, locale, keywordsLabel, descriptionHeading) => {
             const source = fs.readFileSync(sourcePath, 'utf8')
             const localeDir = path.join(process.env.FASTLANE_METADATA_DIR, locale)
             fs.mkdirSync(localeDir, { recursive: true })
@@ -464,22 +465,21 @@ jobs:
             }
 
             fs.writeFileSync(path.join(localeDir, 'description.txt'), `${description[1].trim()}\\n`)
-            fs.writeFileSync(path.join(localeDir, 'keywords.txt'), `${field(labels.keywords)}\\n`)
-            const supportUrl = new URL(field(labels.supportUrl))
-            if (!supportUrl.pathname.endsWith('/')) supportUrl.pathname += '/'
+            fs.writeFileSync(path.join(localeDir, 'keywords.txt'), `${field(keywordsLabel)}\\n`)
+            const supportUrl = new URL(process.env.APPSTORE_SUPPORT_URL)
             fs.writeFileSync(path.join(localeDir, 'support_url.txt'), `${supportUrl.href}\\n`)
           }
 
           writeStoreMetadata(
             process.env.ZH_STORE_METADATA,
             'zh-Hans',
-            { keywords: '关键词', supportUrl: '支持 URL' },
+            '关键词',
             '描述',
           )
           writeStoreMetadata(
             process.env.EN_STORE_METADATA,
             'en-US',
-            { keywords: 'Keywords', supportUrl: 'Support URL' },
+            'Keywords',
             'Description',
           )
           NODE

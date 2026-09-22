@@ -6,7 +6,7 @@
 - Secondary category: Productivity
 - Promotional text: Keep reading across phone and desktop with six ebook formats, an offline library, page curl, notes, and your own cloud.
 - Keywords: ebook,reader,EPUB,PDF,MOBI,TXT,highlights,notes,translate,library,WebDAV,S3,sync
-- Support URL: https://edgeever.org/contact/
+- Support URL: https://github.com/tianma-if/leeef-reader/issues
 - Marketing URL: https://edgeever.org
 - Privacy policy URL: https://gist.github.com/tianma-if/98290c0fdb7f9a689724e86a2185a37f
 - Copyright: 2026 Zhengzhou Binggui Network Technology Co., Ltd.
