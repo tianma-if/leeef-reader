@@ -31,7 +31,7 @@ on:
         description: Which signed jobs to run
         required: true
         type: choice
-        options: [all, macos, android, ios]
+        options: [all, macos, android, ios, appstore-submit]
         default: all
 
 permissions:
@@ -351,8 +351,48 @@ jobs:
           api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
           wait-for-processing: true
+  ios-submit:
+    needs: ios
+    if: >-
+      always() &&
+      github.repository == 'tianma-if/leeef-reader' &&
+      inputs.submit_appstore &&
+      (inputs.platforms == 'all' || inputs.platforms == 'ios' || inputs.platforms == 'appstore-submit') &&
+      (inputs.platforms == 'appstore-submit' || needs.ios.result == 'success')
+    name: Submit iOS version for App Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: app-store
+    defaults:
+      run:
+        working-directory: apps/reader
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Resolve App Store version and build
+        env:
+          IOS_BUILD_NUMBER: ${{ inputs.ios_build_number }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ -n "$IOS_BUILD_NUMBER" ]; then
+            bundle_version="$IOS_BUILD_NUMBER"
+          else
+            bundle_version="$(node -e '
+              const parts = require("./package.json").version.split(".").map(Number);
+              if (parts.length !== 3 || parts.some((n) => !Number.isInteger(n))) {
+                throw new Error("package.json version must be X.Y.Z");
+              }
+              console.log(parts[0] * 1000000 + parts[1] * 1000 + parts[2]);
+            ')"
+          fi
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+          echo "IOS_BUNDLE_VERSION=$bundle_version" >> "$GITHUB_ENV"
+          echo "Submitting App Store version=$version build=$bundle_version"
       - name: Submit App Store version for review
-        if: inputs.submit_appstore
         env:
           APPSTORE_API_KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
           APPSTORE_ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
@@ -450,11 +490,12 @@ jobs:
           RUBY
 
           export BUNDLE_GEMFILE="$submit_dir/Gemfile"
-          bundle config set path "$RUNNER_TEMP/fastlane-bundle"
-          bundle install --jobs 4 --retry 3
+          gem install bundler -v 2.7.2 --no-document
+          bundle _2.7.2_ config set path "$RUNNER_TEMP/fastlane-bundle"
+          bundle _2.7.2_ install --jobs 4 --retry 3
           (
             cd "$submit_dir"
-            SUBMIT_DIR="$submit_dir" bundle exec fastlane ios submit_release
+            SUBMIT_DIR="$submit_dir" bundle _2.7.2_ exec fastlane ios submit_release
           )
       - name: Remove App Store API key
         if: always()
