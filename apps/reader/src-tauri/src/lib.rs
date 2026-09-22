@@ -322,6 +322,29 @@ async fn settings_sync_now(
 }
 
 #[tauri::command]
+fn library_history(
+    state: State<AppState>,
+    before_id: Option<i64>,
+    kind: Option<String>,
+) -> Result<Vec<library_sync::HistoryEntry>, String> {
+    library_sync::history(&state, before_id, kind.as_deref())
+}
+
+#[tauri::command]
+fn library_history_restore(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    runtime: State<trusted_sync::SyncRuntime>,
+    id: i64,
+    expected: Option<library_sync::Revision>,
+) -> Result<(), String> {
+    library_sync::restore_history(&state, id, expected)?;
+    let _ = app.emit("library-synced", ());
+    runtime.trigger();
+    Ok(())
+}
+
+#[tauri::command]
 fn settings_recovery_export(state: State<AppState>, password: String) -> Result<String, String> {
     trusted_sync::export_recovery(&state, &password)
 }
@@ -440,6 +463,8 @@ pub fn run() {
             pairing_start,
             pairing_join,
             settings_sync_status,
+            library_history,
+            library_history_restore,
             settings_sync_now,
             settings_recovery_export,
             settings_recovery_import,

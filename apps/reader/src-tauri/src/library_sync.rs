@@ -5,7 +5,7 @@ use crate::db::{self, AppState};
 use rusqlite::{params, params_from_iter, types::Value as SqlValue, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::{collections::BTreeMap, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 
 struct Table {
     name: &'static str,
@@ -205,12 +205,27 @@ pub fn initialize(db: &Connection) -> Result<(), String> {
             ("UPDATE", "NEW", 0),
             ("DELETE", "OLD", 1),
         ] {
+            let archive = if matches!(table.name, "excerpts" | "reading_progresses")
+                && event != "INSERT"
+            {
+                // Upgrade existing journals as well as new databases. Keep the previous
+                // local version before edits/deletions, including offline mutations.
+                db.execute_batch(&format!(
+                    "DROP TRIGGER IF EXISTS library_sync_{}_{event}",
+                    table.name
+                ))
+                .map_err(|e| e.to_string())?;
+                format!("INSERT OR IGNORE INTO library_sync_conflicts SELECT * FROM library_sync_records WHERE entity_table='{}' AND entity_key={};", table.name, key_sql(table, "OLD"))
+            } else {
+                String::new()
+            };
             let key = key_sql(table, row);
             let data = data_sql(table, row);
             // A monotonic clock survives same-millisecond edits and clock rollback.
             let sql = format!("CREATE TRIGGER IF NOT EXISTS library_sync_{}_{event}
               AFTER {event} ON {} WHEN (SELECT applying FROM library_sync_control WHERE id=1)=0
               BEGIN
+                {archive}
                 INSERT INTO library_sync_records VALUES ('{}', {key},
                   MAX(CAST(strftime('%s','now') AS INTEGER)*1000 + CAST(substr(strftime('%f','now'),4,3) AS INTEGER),
                       COALESCE((SELECT MAX(modified_at)+1 FROM library_sync_records),0)),
@@ -227,6 +242,9 @@ pub fn initialize(db: &Connection) -> Result<(), String> {
             (SELECT value FROM kv WHERE key='device_id'),0,{} FROM {} r", table.name, key_sql(table,"r"), data_sql(table,"r"), table.name);
         db.execute(&sql, []).map_err(|e| e.to_string())?;
     }
+    // Older clients already retain the content of soft-deleted excerpts in
+    // their journal; expose it for recovery even without a pre-delete version.
+    db.execute("INSERT OR IGNORE INTO library_sync_conflicts SELECT * FROM library_sync_records WHERE entity_table='excerpts' AND (deleted=1 OR json_extract(data_json,'$.is_deleted')=1)", []).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -257,6 +275,11 @@ pub fn records(state: &AppState) -> Result<Vec<Record>, String> {
         })
     })
     .collect()
+}
+
+pub fn pending_count(state: &AppState) -> Result<usize, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.query_row("SELECT COUNT(*) FROM library_sync_records WHERE modified_at>COALESCE((SELECT CAST(value AS INTEGER) FROM kv WHERE key='library_last_uploaded_revision'),0)", [], |r| r.get(0)).map_err(|e| e.to_string())
 }
 
 pub fn valid_hash(hash: &str) -> bool {
@@ -399,6 +422,17 @@ fn localize(db: &Connection, table: &Table, data: &Value) -> Result<Map<String, 
 pub fn merge(state: &AppState, incoming: &[Record], assets: &[Asset]) -> Result<usize, String> {
     let mut db = state.db.lock().map_err(|e| e.to_string())?;
     let tx = db.transaction().map_err(|e| e.to_string())?;
+    let changed = merge_transaction(&tx, state, incoming, assets)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(changed)
+}
+
+fn merge_transaction(
+    tx: &Connection,
+    state: &AppState,
+    incoming: &[Record],
+    assets: &[Asset],
+) -> Result<usize, String> {
     tx.execute_batch(
         "PRAGMA defer_foreign_keys=ON; UPDATE library_sync_control SET applying=1 WHERE id=1;",
     )
@@ -407,10 +441,11 @@ pub fn merge(state: &AppState, incoming: &[Record], assets: &[Asset]) -> Result<
     for table in TABLES {
         for record in incoming.iter().filter(|r| r.table == table.name) {
             validate(record, table)?;
-            let current: Option<(i64,String,String)> = tx.query_row("SELECT modified_at,device_id,data_json FROM library_sync_records WHERE entity_table=?1 AND entity_key=?2",params![record.table,record.key],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional().map_err(|e|e.to_string())?;
-            if let Some((time, device, data)) = current {
-                let differs =
-                    serde_json::from_str::<Value>(&data).map_err(|e| e.to_string())? != record.data;
+            let current: Option<(i64,String,String,bool)> = tx.query_row("SELECT modified_at,device_id,data_json,deleted FROM library_sync_records WHERE entity_table=?1 AND entity_key=?2",params![record.table,record.key],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|e|e.to_string())?;
+            if let Some((time, device, data, deleted)) = current {
+                let differs = deleted != record.deleted
+                    || serde_json::from_str::<Value>(&data).map_err(|e| e.to_string())?
+                        != record.data;
                 if (record.modified_at, record.device_id.as_str()) <= (time, device.as_str()) {
                     if differs && matches!(table.name, "excerpts" | "reading_progresses") {
                         tx.execute("INSERT OR IGNORE INTO library_sync_conflicts VALUES(?1,?2,?3,?4,?5,?6)", params![record.table,record.key,record.modified_at,record.device_id,record.deleted,record.data.to_string()]).map_err(|e|e.to_string())?;
@@ -493,23 +528,130 @@ pub fn merge(state: &AppState, incoming: &[Record], assets: &[Asset]) -> Result<
     }
     tx.execute("UPDATE library_sync_control SET applying=0 WHERE id=1", [])
         .map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())?;
     Ok(changed)
 }
 
-pub fn latest_records(snapshots: &[Snapshot]) -> Vec<Record> {
-    let mut winners: BTreeMap<(String, String), Record> = BTreeMap::new();
-    for snapshot in snapshots {
-        for record in &snapshot.records {
-            let key = (record.table.clone(), record.key.clone());
-            if winners.get(&key).is_none_or(|old| {
-                (record.modified_at, &record.device_id) > (old.modified_at, &old.device_id)
-            }) {
-                winners.insert(key, record.clone());
-            }
-        }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Revision {
+    modified_at: i64,
+    device_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEntry {
+    id: i64,
+    book_title: String,
+    restorable: bool,
+    record: Record,
+    current: Option<Record>,
+}
+
+fn read_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<Record> {
+    let json: String = row.get(5)?;
+    let data = serde_json::from_str(&json).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(e))
+    })?;
+    Ok(Record {
+        table: row.get(0)?,
+        key: row.get(1)?,
+        modified_at: row.get(2)?,
+        device_id: row.get(3)?,
+        deleted: row.get(4)?,
+        data,
+    })
+}
+
+fn current_record(db: &Connection, record: &Record) -> Result<Option<Record>, String> {
+    db.query_row(
+        "SELECT * FROM library_sync_records WHERE entity_table=?1 AND entity_key=?2",
+        params![record.table, record.key],
+        read_record,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+pub fn history(
+    state: &AppState,
+    before_id: Option<i64>,
+    kind: Option<&str>,
+) -> Result<Vec<HistoryEntry>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    if kind.is_some_and(|k| !matches!(k, "excerpts" | "reading_progresses")) {
+        return Err("不支持的历史类型".into());
     }
-    winners.into_values().collect()
+    // Rowid cursor remains stable when new versions are archived during browsing.
+    let mut stmt = db.prepare("SELECT *,rowid FROM library_sync_conflicts WHERE entity_table IN ('excerpts','reading_progresses') AND (?1 IS NULL OR rowid<?1) AND (?2 IS NULL OR entity_table=?2) ORDER BY rowid DESC LIMIT 30").map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![before_id, kind], |row| {
+            Ok((row.get::<_, i64>(6)?, read_record(row)?))
+        })
+        .map_err(|e| e.to_string())?;
+    rows.map(|row| {
+        let (id, record) = row.map_err(|e| e.to_string())?;
+        let book: Option<(String, bool)> = db
+            .query_row(
+                "SELECT title,is_deleted=0 FROM books WHERE sha256=?1",
+                [record.data["book_id"].as_str().unwrap_or("")],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let current = current_record(&db, &record)?;
+        Ok(HistoryEntry {
+            id,
+            book_title: book
+                .as_ref()
+                .map(|b| b.0.clone())
+                .unwrap_or_else(|| "已移除的书籍".into()),
+            restorable: book.is_some_and(|b| b.1),
+            record,
+            current,
+        })
+    })
+    .collect()
+}
+
+pub fn restore_history(
+    state: &AppState,
+    id: i64,
+    expected: Option<Revision>,
+) -> Result<(), String> {
+    let mut db = state.db.lock().map_err(|e| e.to_string())?;
+    let tx = db.transaction().map_err(|e| e.to_string())?;
+    let mut record = tx.query_row("SELECT * FROM library_sync_conflicts WHERE rowid=?1 AND entity_table IN ('excerpts','reading_progresses')", [id], read_record).optional().map_err(|e| e.to_string())?.ok_or("历史版本不存在，请刷新后重试")?;
+    let actual = current_record(&tx, &record)?.map(|r| Revision {
+        modified_at: r.modified_at,
+        device_id: r.device_id,
+    });
+    if actual != expected {
+        return Err("当前记录已有新修改，请刷新历史并重新确认恢复".into());
+    }
+    let available: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM books WHERE sha256=?1 AND is_deleted=0)",
+            [record.data["book_id"].as_str().unwrap_or("")],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !available {
+        return Err("请先恢复或重新导入这本书，再恢复历史版本".into());
+    }
+    // Recovery is a fresh local mutation, never a rollback of the sync clock.
+    record.modified_at = tx.query_row("SELECT MAX(CAST(strftime('%s','now') AS INTEGER)*1000, COALESCE((SELECT MAX(modified_at)+1 FROM library_sync_records),0), COALESCE((SELECT MAX(modified_at)+1 FROM library_sync_conflicts),0))", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+    record.device_id = state.device_id.clone();
+    record.deleted = false;
+    if record.table == "excerpts" {
+        record.data["is_deleted"] = Value::from(0);
+    }
+    if record.table == "reading_progresses" {
+        record.data["device_id"] = Value::from(state.device_id.clone());
+    }
+    record.data["updated_at"] = Value::from((record.modified_at / 1000).to_string());
+    merge_transaction(&tx, state, &[record], &[])?;
+    tx.commit().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -527,6 +669,175 @@ mod tests {
             None,
         )
         .unwrap()
+    }
+
+    fn revision(entry: &HistoryEntry) -> Option<Revision> {
+        entry.current.as_ref().map(|r| Revision {
+            modified_at: r.modified_at,
+            device_id: r.device_id.clone(),
+        })
+    }
+
+    #[test]
+    fn restores_deleted_excerpt_as_new_version_and_syncs_without_losing_current_history() {
+        let root = tempfile::tempdir().unwrap();
+        let other_root = tempfile::tempdir().unwrap();
+        let state = db::open(root.path().into()).unwrap();
+        let other = db::open(other_root.path().into()).unwrap();
+        let local = book(&state);
+        let id = db::upsert_excerpt(
+            &state,
+            &local.id,
+            "cfi",
+            "quote",
+            Some("original"),
+            "yellow",
+        )
+        .unwrap();
+        db::update_excerpt(&state, &id, None, Some("edited"), "yellow").unwrap();
+        db::delete_excerpt(&state, &id).unwrap();
+        let old_snapshot = records(&state).unwrap();
+        merge(&other, &old_snapshot, &[]).unwrap();
+        assert!(db::list_excerpts(&state, None).unwrap().is_empty());
+        let entry = history(&state, None, Some("excerpts"))
+            .unwrap()
+            .into_iter()
+            .find(|e| e.record.data["note"] == "original")
+            .unwrap();
+        let old_revision = revision(&entry).unwrap();
+        restore_history(&state, entry.id, Some(old_revision.clone())).unwrap();
+        assert_eq!(
+            db::list_excerpts(&state, None).unwrap()[0].note.as_deref(),
+            Some("original")
+        );
+        let restored = records(&state)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.table == "excerpts")
+            .unwrap();
+        assert!(restored.modified_at > old_revision.modified_at);
+        assert_eq!(restored.device_id, state.device_id);
+        assert!(history(&state, None, None)
+            .unwrap()
+            .iter()
+            .any(|e| e.record.data["is_deleted"] == 1));
+        merge(&other, &records(&state).unwrap(), &[]).unwrap();
+        assert_eq!(
+            db::list_excerpts(&other, None).unwrap()[0].note.as_deref(),
+            Some("original")
+        );
+        merge(&state, &old_snapshot, &[]).unwrap();
+        assert_eq!(db::list_excerpts(&state, None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn restore_rejects_stale_preview_and_missing_book_atomically() {
+        let root = tempfile::tempdir().unwrap();
+        let state = db::open(root.path().into()).unwrap();
+        let local = book(&state);
+        db::save_progress(&state, &local.id, "first", 0.1, None, None).unwrap();
+        db::save_progress(&state, &local.id, "second", 0.2, None, None).unwrap();
+        let entry = history(&state, None, None).unwrap().remove(0);
+        db::save_progress(&state, &local.id, "third", 0.3, None, None).unwrap();
+        assert!(restore_history(&state, entry.id, revision(&entry))
+            .unwrap_err()
+            .contains("新修改"));
+        assert_eq!(
+            db::list_books(&state).unwrap()[0].locator.as_deref(),
+            Some("third")
+        );
+        let fresh = history(&state, None, None)
+            .unwrap()
+            .into_iter()
+            .find(|e| e.id == entry.id)
+            .unwrap();
+        restore_history(&state, fresh.id, revision(&fresh)).unwrap();
+        assert_eq!(
+            db::list_books(&state).unwrap()[0].locator.as_deref(),
+            Some("first")
+        );
+        state
+            .db
+            .lock()
+            .unwrap()
+            .execute("UPDATE books SET is_deleted=1 WHERE id=?1", [&local.id])
+            .unwrap();
+        let deleted = history(&state, None, None).unwrap().remove(0);
+        assert!(!deleted.restorable);
+        assert!(restore_history(&state, deleted.id, revision(&deleted))
+            .unwrap_err()
+            .contains("重新导入"));
+        // A rejected transaction must not disable future local journaling.
+        db::save_progress(&state, &local.id, "fourth", 0.4, None, None).unwrap();
+        assert!(records(&state)
+            .unwrap()
+            .iter()
+            .any(|r| r.data["locator"] == "fourth"));
+    }
+
+    #[test]
+    fn history_cursor_filter_and_upgrade_preserve_recoverable_content() {
+        let root = tempfile::tempdir().unwrap();
+        let state = db::open(root.path().into()).unwrap();
+        let local = book(&state);
+        for n in 0..36 {
+            db::save_progress(
+                &state,
+                &local.id,
+                &n.to_string(),
+                n as f64 / 100.0,
+                None,
+                None,
+            )
+            .unwrap();
+        }
+        let first = history(&state, None, None).unwrap();
+        assert_eq!(first.len(), 30);
+        db::save_progress(&state, &local.id, "new", 0.9, None, None).unwrap();
+        let second = history(&state, Some(first.last().unwrap().id), None).unwrap();
+        assert_eq!(second.len(), 5);
+        assert!(second.iter().all(|b| !first.iter().any(|a| a.id == b.id)));
+        let id = db::upsert_excerpt(&state, &local.id, "cfi", "legacy", None, "yellow").unwrap();
+        db::delete_excerpt(&state, &id).unwrap();
+        {
+            let db = state.db.lock().unwrap();
+            db.execute(
+                "DELETE FROM library_sync_conflicts WHERE entity_table='excerpts'",
+                [],
+            )
+            .unwrap();
+            initialize(&db).unwrap();
+            initialize(&db).unwrap();
+        }
+        let legacy = history(&state, None, Some("excerpts")).unwrap();
+        assert_eq!(legacy.len(), 1);
+        restore_history(&state, legacy[0].id, revision(&legacy[0])).unwrap();
+        assert_eq!(db::list_excerpts(&state, None).unwrap()[0].quote, "legacy");
+        assert!(history(&state, None, Some("books")).is_err());
+        assert!(restore_history(&state, i64::MAX, None).is_err());
+    }
+
+    #[test]
+    fn hard_deletion_preserves_identical_payload_as_a_recoverable_version() {
+        let root = tempfile::tempdir().unwrap();
+        let state = db::open(root.path().into()).unwrap();
+        let local = book(&state);
+        db::upsert_excerpt(&state, &local.id, "cfi", "retained", None, "yellow").unwrap();
+        let mut remote = records(&state)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.table == "excerpts")
+            .unwrap();
+        remote.modified_at += 100;
+        remote.deleted = true;
+        merge(&state, &[remote], &[]).unwrap();
+        assert!(db::list_excerpts(&state, None).unwrap().is_empty());
+        let entry = history(&state, None, None).unwrap().remove(0);
+        restore_history(&state, entry.id, revision(&entry)).unwrap();
+        assert_eq!(
+            db::list_excerpts(&state, None).unwrap()[0].quote,
+            "retained"
+        );
     }
 
     #[test]

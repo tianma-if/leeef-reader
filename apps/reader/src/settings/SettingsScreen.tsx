@@ -9,7 +9,6 @@ import {
   KeyRound,
   NotebookPen,
   Palette,
-  RefreshCw,
   Save,
   Share2,
   Volume2,
@@ -46,6 +45,7 @@ import { Slider } from '@/components/ui/slider'
 import { Textarea } from '@/components/ui/textarea'
 import { FontPicker } from '../reader/FontPicker'
 import { LibraryBackup } from './LibraryBackup'
+import { SyncCenter } from './SyncCenter'
 
 const desktop = !/Android|iPhone|iPad/i.test(navigator.userAgent)
 
@@ -116,20 +116,29 @@ export function SettingsScreen() {
     })
     void api.mcpDatabasePath().then(setDbPath)
     void api.mcpStatus().then(setMcp).catch(() => undefined)
-    void api.settingsSyncStatus().then(setSyncStatus).catch(() => undefined)
+    let disposed = false
+    let statusEvents = 0
     let unlistenStatus: UnlistenFn | undefined
     let unlistenSettings: UnlistenFn | undefined
     void listen<SettingsSyncStatus>('settings-sync-status', (event) => {
-      setSyncStatus(event.payload)
+      statusEvents++
+      if (!disposed) setSyncStatus(event.payload)
     }).then((stop) => {
+      if (disposed) { stop(); return }
       unlistenStatus = stop
-    })
+      const observed = statusEvents
+      void api.settingsSyncStatus().then((status) => {
+        if (!disposed && observed === statusEvents) setSyncStatus(status)
+      }).catch((cause) => toast.error(`无法读取同步状态：${String(cause)}`))
+    }).catch((cause) => toast.error(`无法订阅同步状态：${String(cause)}`))
     void listen('settings-synced', () => {
       void api.getSettings().then(setValue)
     }).then((stop) => {
-      unlistenSettings = stop
+      if (disposed) stop()
+      else unlistenSettings = stop
     })
     return () => {
+      disposed = true
       unlistenStatus?.()
       unlistenSettings?.()
     }
@@ -138,7 +147,11 @@ export function SettingsScreen() {
   const patch = (next: Partial<Settings>) => setValue((current) => ({ ...current, ...next }))
 
   const handleSave = () => {
-    void api.saveSettings(value).then(() => toast.success('设置已保存，正在同步'))
+    void api.saveSettings(value).then(async () => {
+      const status = await api.settingsSyncStatus()
+      setSyncStatus(status)
+      toast.success(status.autoSync && status.paired ? '设置已保存，正在同步' : '设置已保存')
+    }).catch((cause) => toast.error(String(cause)))
   }
 
   const handleJoinExecute = () => {
@@ -653,45 +666,7 @@ export function SettingsScreen() {
           <CardDescription>生成配对码或加入其它设备，共享配置与已开启同步的书库</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center justify-between gap-3 p-3 bg-muted/40 rounded-lg text-xs">
-            <div className="space-y-0.5">
-              <p className="font-semibold text-foreground">
-                {syncStatus?.paired ? '已加入同步空间' : '尚未加入同步空间'}
-              </p>
-              <p className="text-muted-foreground">
-                {syncStatus?.paired
-                  ? syncStatus.lastError
-                    ? `同步异常：${syncStatus.lastError}`
-                    : syncStatus.lastSuccessAt
-                      ? `最近同步：${new Date(syncStatus.lastSuccessAt).toLocaleString()}`
-                      : '等待首次同步'
-                  : '配置仅保存在本地设备'}
-              </p>
-            </div>
-            {syncStatus?.paired ? (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={syncStatus.running}
-                onClick={() => {
-                  void api
-                    .settingsSyncNow()
-                    .then((status) => {
-                      setSyncStatus(status)
-                      toast.success(
-                        status.appliedValues
-                          ? `已应用 ${status.appliedValues} 项更新`
-                          : '已是最新',
-                      )
-                    })
-                    .catch((cause) => toast.error(String(cause)))
-                }}
-              >
-                <RefreshCw className="size-3 mr-1" />
-                立即同步
-              </Button>
-            ) : null}
-          </div>
+          <SyncCenter status={syncStatus} onStatus={setSyncStatus} />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="grid gap-2 rounded-lg border p-3">
@@ -705,7 +680,10 @@ export function SettingsScreen() {
                     setPairBusy(true)
                     void api
                       .pairingStart()
-                      .then(setPair)
+                      .then(async (offer) => {
+                      setPair(offer)
+                      setSyncStatus(await api.settingsSyncStatus())
+                    })
                       .catch((cause) => toast.error(String(cause)))
                       .finally(() => setPairBusy(false))
                   }}

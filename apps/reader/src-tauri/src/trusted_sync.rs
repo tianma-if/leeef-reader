@@ -138,7 +138,7 @@ struct RecoveryPayload {
     configuration: ConfigurationDocument,
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncStatus {
     pub paired: bool,
@@ -148,6 +148,49 @@ pub struct SyncStatus {
     pub last_success_at: Option<u64>,
     pub last_error: Option<String>,
     pub applied_values: usize,
+    pub last_attempt_at: Option<u64>,
+    pub library_enabled: bool,
+    pub pending_records: Option<usize>,
+    pub progress: SyncProgress,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncProgress {
+    pub phase: String,
+    pub completed: usize,
+    pub total: usize,
+    pub current_item: Option<String>,
+}
+
+type ProgressReporter<'a> = &'a (dyn Fn(SyncProgress) + Send + Sync);
+
+fn progress(
+    report: ProgressReporter<'_>,
+    phase: &str,
+    completed: usize,
+    total: usize,
+    item: Option<String>,
+) {
+    report(SyncProgress {
+        phase: phase.into(),
+        completed,
+        total,
+        current_item: item,
+    });
+}
+
+fn book_label(records: &[library_sync::Record], hash: &str, cover: bool) -> String {
+    let title = records
+        .iter()
+        .find(|r| r.table == "books" && r.data["sha256"].as_str() == Some(hash))
+        .and_then(|r| r.data["title"].as_str())
+        .unwrap_or("未命名书籍");
+    if cover {
+        format!("{title} · 封面")
+    } else {
+        title.to_owned()
+    }
 }
 
 #[derive(Clone)]
@@ -178,6 +221,18 @@ impl SyncRuntime {
             .lock()
             .map(|value| value.clone())
             .unwrap_or_default();
+        if status.last_attempt_at.is_none() {
+            if let Ok(Some(saved)) = db::kv_get(state, "sync_last_outcome") {
+                if let Ok(previous) = serde_json::from_str::<SyncStatus>(&saved) {
+                    status = previous;
+                }
+            }
+        }
+        status.library_enabled = settings_object(state)
+            .ok()
+            .and_then(|s| s.get("syncLibrary").and_then(Value::as_bool))
+            .unwrap_or(false);
+        status.pending_records = library_sync::pending_count(state).ok();
         status.paired = load_space(state).ok().flatten().is_some();
         status.configured = configured_backend(state).is_ok();
         status.auto_sync = auto_sync_enabled(state);
@@ -232,15 +287,38 @@ async fn run_and_publish(app: &AppHandle, state: &AppState, runtime: &SyncRuntim
             if status.running {
                 return;
             }
+            if load_space(state).ok().flatten().is_none() {
+                return;
+            }
+            if status.last_attempt_at.is_none() {
+                if let Ok(Some(saved)) = db::kv_get(state, "sync_last_outcome") {
+                    if let Ok(previous) = serde_json::from_str::<SyncStatus>(&saved) {
+                        *status = previous;
+                    }
+                }
+            }
             status.running = true;
             status.last_error = None;
+            status.applied_values = 0;
+            status.last_attempt_at = Some(now_millis());
+            status.progress = SyncProgress {
+                phase: "configuration".into(),
+                ..Default::default()
+            };
         }
     }
 
+    let _ = app.emit("settings-sync-status", runtime.status(state));
+    let report = |progress: SyncProgress| {
+        if let Ok(mut status) = runtime.status.lock() {
+            status.progress = progress;
+        }
+        let _ = app.emit("settings-sync-status", runtime.status(state));
+    };
     let configuration = synchronize(state).await;
     let configuration_changed = configuration.as_ref().is_ok_and(|count| *count > 0);
     let library = if configuration.is_ok() {
-        synchronize_library(state).await
+        synchronize_library_with_progress(state, &report).await
     } else {
         Ok(0)
     };
@@ -256,8 +334,22 @@ async fn run_and_publish(app: &AppHandle, state: &AppState, runtime: &SyncRuntim
                 status.last_success_at = Some(now_millis());
                 status.last_error = None;
                 status.applied_values = applied;
+                status.progress = SyncProgress {
+                    phase: "complete".into(),
+                    ..Default::default()
+                };
             }
             Err(error) => status.last_error = Some(error),
+        }
+        status.library_enabled = settings_object(state)
+            .ok()
+            .and_then(|s| s.get("syncLibrary").and_then(Value::as_bool))
+            .unwrap_or(false);
+        status.pending_records = library_sync::pending_count(state).ok();
+        // Publish the finished run before allowing another caller to start. Otherwise
+        // a racing run could be persisted as running and block a future app launch.
+        if let Ok(saved) = serde_json::to_string(&*status) {
+            let _ = db::kv_set(state, "sync_last_outcome", &saved);
         }
         let _ = app.emit("settings-sync-status", status.clone());
     }
@@ -490,32 +582,44 @@ async fn publish_library(
     state: &AppState,
     space: &SpaceState,
     backend: &RemoteBackend,
+    report: ProgressReporter<'_>,
 ) -> Result<(), String> {
     let key = space.key_bytes()?;
     let fingerprint = backend_fingerprint(&settings_object(state)?);
     // Capture records before enumerating files. A concurrent new import is included
     // in the next snapshot; this manifest never advertises a file before upload.
     let records = library_sync::records(state)?;
+    progress(report, "preparing", 0, 0, None);
+    let local_assets = library_sync::local_assets(state)?;
+    let mut uploads = BTreeMap::new();
     let mut assets = Vec::new();
-    for (asset, objects) in library_sync::local_assets(state)? {
+    for (asset, objects) in local_assets {
         for (hash, path) in objects {
             let cache_key = format!("library-upload:{}:{fingerprint}:{hash}", space.id);
             if db::kv_get(state, &cache_key)?.is_none() {
-                let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-                if db::sha256_hex(&bytes) != hash {
-                    return Err("本地书籍文件已变化，请重新导入后同步".into());
-                }
-                let encrypted = encrypt_document(&URL_SAFE_NO_PAD.encode(&bytes), &key)?;
-                backend
-                    .put(
-                        &format!("trusted/{}/library/objects/{hash}", space.id),
-                        &encrypted,
-                    )
-                    .await?;
-                db::kv_set(state, &cache_key, "1")?;
+                let label = book_label(&records, &asset.book_hash, hash != asset.book_hash);
+                uploads.entry(hash).or_insert((path, cache_key, label));
             }
         }
         assets.push(asset);
+    }
+    let total = uploads.len();
+    progress(report, "uploading", 0, total, None);
+    for (completed, (hash, (path, cache_key, label))) in uploads.into_iter().enumerate() {
+        progress(report, "uploading", completed, total, Some(label));
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        if db::sha256_hex(&bytes) != hash {
+            return Err("本地书籍文件已变化，请重新导入后同步".into());
+        }
+        let encrypted = encrypt_document(&URL_SAFE_NO_PAD.encode(&bytes), &key)?;
+        backend
+            .put(
+                &format!("trusted/{}/library/objects/{hash}", space.id),
+                &encrypted,
+            )
+            .await?;
+        db::kv_set(state, &cache_key, "1")?;
+        progress(report, "uploading", completed + 1, total, None);
     }
     if records.iter().any(|record| {
         record.table == "books"
@@ -541,6 +645,7 @@ async fn publish_library(
         .map(|record| record.modified_at)
         .max()
         .unwrap_or(0);
+    progress(report, "publishing", 0, 0, None);
     backend
         .put(
             &format!(
@@ -557,7 +662,15 @@ async fn publish_library(
     )
 }
 
+#[cfg(test)]
 async fn synchronize_library(state: &AppState) -> Result<usize, String> {
+    synchronize_library_with_progress(state, &|_| {}).await
+}
+
+async fn synchronize_library_with_progress(
+    state: &AppState,
+    report: ProgressReporter<'_>,
+) -> Result<usize, String> {
     if settings_object(state)?
         .get("syncLibrary")
         .and_then(Value::as_bool)
@@ -570,7 +683,8 @@ async fn synchronize_library(state: &AppState) -> Result<usize, String> {
     };
     let backend = configured_backend(state)?;
     let key = space.key_bytes()?;
-    publish_library(state, &space, &backend).await?;
+    publish_library(state, &space, &backend, report).await?;
+    progress(report, "discovering", 0, 0, None);
     let mut devices: BTreeSet<String> = load_devices(state)?.into_iter().collect();
     devices.insert(state.device_id.clone());
     let mut visited = BTreeSet::new();
@@ -601,7 +715,11 @@ async fn synchronize_library(state: &AppState) -> Result<usize, String> {
         }
         snapshots.push(snapshot);
     }
-    let records = library_sync::latest_records(&snapshots);
+    // Preserve losing remote versions as well as the winning version.
+    let records: Vec<_> = snapshots
+        .iter()
+        .flat_map(|s| s.records.iter().cloned())
+        .collect();
     let mut assets = BTreeMap::new();
     for snapshot in &snapshots {
         for asset in &snapshot.assets {
@@ -615,21 +733,32 @@ async fn synchronize_library(state: &AppState) -> Result<usize, String> {
         .into_iter()
         .flat_map(|(_, objects)| objects.into_iter().map(|(hash, _)| hash))
         .collect();
+    let mut downloads = BTreeMap::new();
     for asset in assets.values() {
         for hash in std::iter::once(&asset.book_hash).chain(asset.cover_hash.iter()) {
             let path = library_sync::asset_path(state, hash)?;
             if path.is_file() || local_hashes.contains(hash) {
                 continue;
             }
-            let encrypted = backend
-                .get(&format!("trusted/{}/library/objects/{hash}", space.id))
-                .await?
-                .ok_or("远端书籍文件尚未上传完成，请稍后重试")?;
-            let encoded: String = decrypt_document(&encrypted, &key)?;
-            let bytes = URL_SAFE_NO_PAD.decode(encoded).map_err(|e| e.to_string())?;
-            library_sync::store_asset(state, hash, &bytes)?;
+            downloads.entry(hash.clone()).or_insert_with(|| {
+                book_label(&records, &asset.book_hash, hash != &asset.book_hash)
+            });
         }
     }
+    let total = downloads.len();
+    progress(report, "downloading", 0, total, None);
+    for (completed, (hash, label)) in downloads.into_iter().enumerate() {
+        progress(report, "downloading", completed, total, Some(label));
+        let encrypted = backend
+            .get(&format!("trusted/{}/library/objects/{hash}", space.id))
+            .await?
+            .ok_or("远端书籍文件尚未上传完成，请稍后重试")?;
+        let encoded: String = decrypt_document(&encrypted, &key)?;
+        let bytes = URL_SAFE_NO_PAD.decode(encoded).map_err(|e| e.to_string())?;
+        library_sync::store_asset(state, &hash, &bytes)?;
+        progress(report, "downloading", completed + 1, total, None);
+    }
+    progress(report, "merging", 0, 0, None);
     save_devices(state, &devices.into_iter().collect::<Vec<_>>())?;
     // The next snapshot relays merged versions with their original clocks.
     // Finish network I/O before committing so a failed upload never hides applied changes.
@@ -1581,6 +1710,54 @@ mod tests {
     }
 
     #[test]
+    fn last_outcome_survives_restart_but_scope_and_pending_count_are_live() {
+        let root = tempfile::tempdir().unwrap();
+        let state = db::open(root.path().into()).unwrap();
+        let saved = SyncStatus {
+            last_attempt_at: Some(123),
+            last_success_at: Some(100),
+            last_error: Some("offline".into()),
+            progress: SyncProgress {
+                phase: "downloading".into(),
+                completed: 1,
+                total: 2,
+                current_item: Some("Book".into()),
+            },
+            ..Default::default()
+        };
+        db::kv_set(
+            &state,
+            "sync_last_outcome",
+            &serde_json::to_string(&saved).unwrap(),
+        )
+        .unwrap();
+        db::kv_set(
+            &state,
+            "settings",
+            r#"{"syncLibrary":true,"autoSync":false}"#,
+        )
+        .unwrap();
+        db::import_book(
+            &state,
+            "test.txt",
+            b"pending",
+            "Pending",
+            None,
+            "text/plain",
+            None,
+        )
+        .unwrap();
+        let status = SyncRuntime::default().status(&state);
+        assert_eq!(status.last_success_at, Some(100));
+        assert_eq!(status.last_error.as_deref(), Some("offline"));
+        assert_eq!(status.progress.current_item.as_deref(), Some("Book"));
+        assert!(!status.running);
+        assert!(status.library_enabled);
+        assert!(!status.auto_sync);
+        assert_eq!(status.pending_records, Some(1));
+    }
+
+    #[test]
     fn configuration_merge_uses_latest_value_per_field() {
         let state = state("merge");
         save_settings(
@@ -1796,7 +1973,23 @@ mod tests {
         .unwrap();
         db::save_progress(&desktop, &book.id, "chapter-3", 0.3, None, None).unwrap();
         synchronize(&desktop).await.unwrap();
-        synchronize_library(&desktop).await.unwrap();
+        let reports = Mutex::new(Vec::<SyncProgress>::new());
+        let report = |p| reports.lock().unwrap().push(p);
+        synchronize_library_with_progress(&desktop, &report)
+            .await
+            .unwrap();
+        assert!(reports
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| p.phase == "uploading" && p.completed == 2 && p.total == 2));
+        assert!(reports
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| p.current_item.as_deref() == Some("Book")));
+        assert_eq!(library_sync::pending_count(&desktop).unwrap(), 0);
+        reports.lock().unwrap().clear();
         synchronize(&phone).await.unwrap();
         let object_path = format!(
             "next/trusted/{}/library/objects/{}",
@@ -1805,10 +1998,32 @@ mod tests {
         );
         let ciphertext = documents.lock().unwrap().remove(&object_path).unwrap();
         assert!(!String::from_utf8_lossy(&ciphertext).contains("private book content"));
-        assert!(synchronize_library(&phone).await.is_err());
+        assert!(synchronize_library_with_progress(&phone, &report)
+            .await
+            .is_err());
+        assert_eq!(reports.lock().unwrap().last().unwrap().phase, "downloading");
+        assert!(reports
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .current_item
+            .is_some());
         assert!(db::list_books(&phone).unwrap().is_empty());
         documents.lock().unwrap().insert(object_path, ciphertext);
-        assert!(synchronize_library(&phone).await.unwrap() > 0);
+        reports.lock().unwrap().clear();
+        assert!(
+            synchronize_library_with_progress(&phone, &report)
+                .await
+                .unwrap()
+                > 0
+        );
+        assert!(reports
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| p.phase == "downloading" && p.completed == p.total && p.total > 0));
+        assert_eq!(reports.lock().unwrap().last().unwrap().phase, "merging");
         let phone_book = db::list_books(&phone).unwrap().remove(0);
         assert_eq!(
             db::book_bytes(&phone, &phone_book.id).unwrap(),

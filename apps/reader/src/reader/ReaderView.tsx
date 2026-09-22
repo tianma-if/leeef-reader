@@ -215,7 +215,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     const remote = (await api.listBooks()).find((item) => item.id === book.id)
     if (remote?.locator && remote.locator !== locator && remote.locator !== lastSuggestedLocator.current) {
       lastSuggestedLocator.current = remote.locator
-      toast('另一台设备更新了阅读位置', {
+      toast('阅读位置已有更新', {
         description: remote.chapterTitle || `进度 ${Math.round(remote.progress * 100)}%`,
         action: { label: '接续阅读', onClick: () => goTo(remote.locator!) },
       })

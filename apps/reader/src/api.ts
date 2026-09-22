@@ -96,6 +96,25 @@ export type SettingsSyncStatus = {
   lastSuccessAt?: number
   lastError?: string
   appliedValues: number
+  lastAttemptAt?: number
+  libraryEnabled: boolean
+  pendingRecords?: number
+  progress: { phase: string; completed: number; total: number; currentItem?: string }
+}
+
+export type LibraryRevision = { modifiedAt: number; deviceId: string }
+export type LibraryHistoryRecord = LibraryRevision & {
+  table: 'excerpts' | 'reading_progresses'
+  key: string
+  deleted: boolean
+  data: { quote?: string; note?: string | null; locator?: string; progress?: number; chapter_title?: string | null; is_deleted?: number }
+}
+export type LibraryHistoryEntry = {
+  id: number
+  bookTitle: string
+  restorable: boolean
+  record: LibraryHistoryRecord
+  current: LibraryHistoryRecord | null
 }
 
 export type BackupPreview = { books: number; excerpts: number; bookmarks: number; bytes: number; matchingBooks: number }
@@ -218,6 +237,8 @@ export const api = {
   pairingStart: () => invoke<PairingOffer>('pairing_start'),
   pairingJoin: (code: string, replaceExisting = false) =>
     invoke<SettingsSyncStatus>('pairing_join', { code, replaceExisting }),
+  libraryHistory: (beforeId: number | null = null, kind: 'excerpts' | 'reading_progresses' | null = null) => invoke<LibraryHistoryEntry[]>('library_history', { beforeId, kind }),
+  libraryHistoryRestore: (id: number, expected: LibraryRevision | null) => invoke<void>('library_history_restore', { id, expected }),
   settingsSyncStatus: () => invoke<SettingsSyncStatus>('settings_sync_status'),
   settingsSyncNow: () => invoke<SettingsSyncStatus>('settings_sync_now'),
   settingsRecoveryExport: (password: string) =>
