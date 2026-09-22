@@ -1,6 +1,6 @@
 [package]
 name = "leeef_reader"
-version = "2.4.0"
+version = "2.5.0"
 description = "Leeef Reader"
 authors = ["Leeef"]
 edition = "2021"
