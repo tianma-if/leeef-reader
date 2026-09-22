@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import { api, type PairingOffer, type Settings, type SettingsSyncStatus } from '../api'
@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
+import { Textarea } from '@/components/ui/textarea'
 import { FontPicker } from '../reader/FontPicker'
 
 const desktop = !/Android|iPhone|iPad/i.test(navigator.userAgent)
@@ -30,6 +31,10 @@ export function SettingsScreen() {
   const [pairCode, setPairCode] = useState('')
   const [pairBusy, setPairBusy] = useState(false)
   const [syncStatus, setSyncStatus] = useState<SettingsSyncStatus | null>(null)
+  const [recoveryPassword, setRecoveryPassword] = useState('')
+  const [recoveryPackage, setRecoveryPackage] = useState('')
+  const [recoveryBusy, setRecoveryBusy] = useState(false)
+  const recoveryFile = useRef<HTMLInputElement>(null)
   const [edgeEverBusy, setEdgeEverBusy] = useState(false)
   const [edgeEverNotebooks, setEdgeEverNotebooks] = useState<{ id: string; name: string }[]>([])
 
@@ -420,7 +425,8 @@ export function SettingsScreen() {
                 : '已配对，等待首次云端同步'
             : '尚未加入同步空间'}
         </p>
-        {desktop ? (
+        <div className="grid gap-2 rounded-lg border p-3">
+          <Label>让另一台设备加入</Label>
           <div className="flex flex-wrap items-center gap-3">
             <Button
               variant="outline"
@@ -439,23 +445,27 @@ export function SettingsScreen() {
               <strong className="font-mono tracking-[0.18em]">{pair.code}</strong>
             ) : null}
           </div>
-        ) : (
+        </div>
+        <div className="grid gap-2 rounded-lg border p-3">
+          <Label>加入已有设备</Label>
           <div className="flex items-end gap-2">
-            <div className="grid flex-1 gap-1.5">
-              <Label>桌面端配对码</Label>
-              <Input
-                value={pairCode}
-                maxLength={12}
-                autoCapitalize="characters"
-                className="font-mono uppercase tracking-widest"
-                onChange={(event) => setPairCode(event.target.value.toUpperCase())}
-              />
-            </div>
+            <Input
+              value={pairCode}
+              maxLength={12}
+              aria-label="已有设备配对码"
+              autoCapitalize="characters"
+              className="font-mono uppercase tracking-widest"
+              onChange={(event) => setPairCode(event.target.value.toUpperCase())}
+            />
             <Button
               disabled={pairBusy || pairCode.trim().length !== 12}
               onClick={() => {
+                const replaceExisting = Boolean(syncStatus?.paired)
+                if (replaceExisting && !window.confirm('加入其他同步空间会替换当前设备的同步关系，是否继续？')) {
+                  return
+                }
                 setPairBusy(true)
-                void api.pairingJoin(pairCode)
+                void api.pairingJoin(pairCode, replaceExisting)
                   .then(async (status) => {
                     setSyncStatus(status)
                     setValue(await api.getSettings())
@@ -465,10 +475,10 @@ export function SettingsScreen() {
                   .finally(() => setPairBusy(false))
               }}
             >
-              配对
+              加入
             </Button>
           </div>
-        )}
+        </div>
         {syncStatus?.paired ? (
           <Button
             variant="outline"
@@ -485,6 +495,110 @@ export function SettingsScreen() {
             立即同步配置
           </Button>
         ) : null}
+      </section>
+
+      <Separator className="my-6" />
+      <section className="grid gap-3">
+        <h2 className="text-lg">灾难恢复</h2>
+        <p className="text-muted-foreground text-sm">
+          恢复包包含同步空间密钥和当前配置，使用独立密码加密。请将文件和密码保存在可靠位置。
+        </p>
+        <div className="grid gap-1.5">
+          <Label>恢复密码</Label>
+          <Input
+            type="password"
+            value={recoveryPassword}
+            onChange={(event) => setRecoveryPassword(event.target.value)}
+            placeholder="至少 12 个字符"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            disabled={recoveryBusy || !syncStatus?.paired || recoveryPassword.length < 12}
+            onClick={() => {
+              setRecoveryBusy(true)
+              void api.settingsRecoveryExport(recoveryPassword)
+                .then(async (content) => {
+                  setRecoveryPackage(content)
+                  const saved = await api.saveTextFile(
+                    `leeef-recovery-${new Date().toISOString().slice(0, 10)}.leeef-recovery`,
+                    content,
+                  )
+                  if (saved.saved) toast.success('恢复包已导出')
+                })
+                .catch((cause) => toast.error(String(cause)))
+                .finally(() => setRecoveryBusy(false))
+            }}
+          >
+            导出加密恢复包
+          </Button>
+          <Button
+            variant="outline"
+            disabled={!recoveryPackage}
+            onClick={() => {
+              void navigator.clipboard.writeText(recoveryPackage)
+                .then(() => toast.success('恢复包已复制'))
+                .catch((cause) => toast.error(String(cause)))
+            }}
+          >
+            复制恢复包
+          </Button>
+          <Button variant="outline" onClick={() => recoveryFile.current?.click()}>
+            选择恢复包文件
+          </Button>
+          <input
+            ref={recoveryFile}
+            type="file"
+            className="hidden"
+            accept=".leeef-recovery,application/json,text/plain"
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) {
+                void file.text()
+                  .then(setRecoveryPackage)
+                  .catch((cause) => toast.error(String(cause)))
+              }
+              event.target.value = ''
+            }}
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label>恢复包内容</Label>
+          <Textarea
+            value={recoveryPackage}
+            onChange={(event) => setRecoveryPackage(event.target.value)}
+            placeholder="选择恢复包文件，或粘贴从密码管理器取出的内容"
+            className="min-h-28 font-mono text-xs"
+          />
+        </div>
+        <Button
+          disabled={recoveryBusy || !recoveryPackage.trim() || recoveryPassword.length < 12}
+          onClick={() => {
+            const replaceExisting = Boolean(syncStatus?.paired)
+            if (replaceExisting && !window.confirm('导入恢复包会替换当前同步空间和可同步配置，是否继续？')) {
+              return
+            }
+            setRecoveryBusy(true)
+            void api.settingsRecoveryImport(recoveryPackage, recoveryPassword, replaceExisting)
+              .then(async (status) => {
+                let latest = status
+                try {
+                  latest = await api.settingsSyncNow()
+                } catch {
+                  // The encrypted local snapshot is still a successful recovery;
+                  // automatic sync will retry when the backend is reachable.
+                }
+                setSyncStatus(latest)
+                setValue(await api.getSettings())
+                toast.success(latest.lastSuccessAt ? '恢复完成，已合并云端最新配置' : '恢复包已导入，联网后将继续同步')
+              })
+              .catch((cause) => toast.error(String(cause)))
+              .finally(() => setRecoveryBusy(false))
+          }}
+        >
+          从恢复包恢复
+        </Button>
       </section>
 
       <Separator className="my-6" />

@@ -213,9 +213,22 @@ export const api = {
       'mcp_status',
     ),
   pairingStart: () => invoke<PairingOffer>('pairing_start'),
-  pairingJoin: (code: string) => invoke<SettingsSyncStatus>('pairing_join', { code }),
+  pairingJoin: (code: string, replaceExisting = false) =>
+    invoke<SettingsSyncStatus>('pairing_join', { code, replaceExisting }),
   settingsSyncStatus: () => invoke<SettingsSyncStatus>('settings_sync_status'),
   settingsSyncNow: () => invoke<SettingsSyncStatus>('settings_sync_now'),
+  settingsRecoveryExport: (password: string) =>
+    invoke<string>('settings_recovery_export', { password }),
+  settingsRecoveryImport: (packageText: string, password: string, replaceExisting: boolean) =>
+    invoke<SettingsSyncStatus>('settings_recovery_import', {
+      package: packageText,
+      password,
+      replaceExisting,
+    }),
+  saveTextFile: (filename: string, content: string) =>
+    invoke<{ saved: boolean }>('plugin:native-bridge|save_text_file', {
+      payload: { filename, content },
+    }),
 }
 
 export const isAndroid = () => /Android/i.test(navigator.userAgent)

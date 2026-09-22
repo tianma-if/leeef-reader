@@ -1,7 +1,8 @@
 use aes_gcm::{
-    aead::{Aead, KeyInit},
+    aead::{Aead, KeyInit, Payload as AeadPayload},
     Aes256Gcm, Nonce,
 };
+use argon2::{Algorithm, Argon2, Params as Argon2Params, Version as Argon2Version};
 use axum::{extract::State as AxumState, http::StatusCode, routing::post, Json, Router};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hkdf::Hkdf;
@@ -34,6 +35,7 @@ const PREVIOUS_BACKEND_KEY: &str = "trusted_sync_previous_backend";
 const DISCOVERY_PORT: u16 = 43781;
 const PAIRING_TTL: Duration = Duration::from_secs(300);
 const PAIRING_ALPHABET: &[u8] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+const RECOVERY_AAD: &[u8] = b"leeef-recovery-v1";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,6 +86,27 @@ struct EncryptedDocument {
     version: u8,
     nonce: String,
     ciphertext: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RecoveryEnvelope {
+    format: String,
+    version: u8,
+    kdf: String,
+    salt: String,
+    nonce: String,
+    ciphertext: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RecoveryPayload {
+    version: u8,
+    created_at: u64,
+    space: SpaceState,
+    devices: Vec<String>,
+    configuration: ConfigurationDocument,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -469,6 +492,137 @@ fn decrypt_document<T: for<'de> Deserialize<'de>>(
     serde_json::from_slice(&plaintext).map_err(|e| e.to_string())
 }
 
+pub fn export_recovery(state: &AppState, password: &str) -> Result<String, String> {
+    validate_recovery_password(password)?;
+    let space = load_space(state)?.ok_or_else(|| "请先建立或加入同步空间".to_string())?;
+    let mut devices = load_devices(state)?;
+    if !devices.contains(&state.device_id) {
+        devices.push(state.device_id.clone());
+    }
+    devices.sort();
+    devices.dedup();
+    let payload = RecoveryPayload {
+        version: 1,
+        created_at: now_millis(),
+        configuration: ConfigurationDocument {
+            version: 1,
+            space_id: space.id.clone(),
+            device_id: state.device_id.clone(),
+            entries: capture_configuration(state)?,
+        },
+        space,
+        devices,
+    };
+    let mut salt = [0_u8; 16];
+    let mut nonce = [0_u8; 12];
+    rand::thread_rng().fill_bytes(&mut salt);
+    rand::thread_rng().fill_bytes(&mut nonce);
+    let key = recovery_key(password, &salt)?;
+    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| e.to_string())?;
+    let plaintext = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
+    let ciphertext = cipher
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            AeadPayload {
+                msg: &plaintext,
+                aad: RECOVERY_AAD,
+            },
+        )
+        .map_err(|_| "无法加密恢复包".to_string())?;
+    serde_json::to_string_pretty(&RecoveryEnvelope {
+        format: "leeef-recovery".into(),
+        version: 1,
+        kdf: "argon2id-v1".into(),
+        salt: URL_SAFE_NO_PAD.encode(salt),
+        nonce: URL_SAFE_NO_PAD.encode(nonce),
+        ciphertext: URL_SAFE_NO_PAD.encode(ciphertext),
+    })
+    .map_err(|e| e.to_string())
+}
+
+pub fn import_recovery(
+    state: &AppState,
+    package: &str,
+    password: &str,
+    replace_existing: bool,
+) -> Result<usize, String> {
+    validate_recovery_password(password)?;
+    let envelope: RecoveryEnvelope =
+        serde_json::from_str(package.trim()).map_err(|_| "恢复包格式无效".to_string())?;
+    if envelope.format != "leeef-recovery" || envelope.version != 1 || envelope.kdf != "argon2id-v1"
+    {
+        return Err("不支持的恢复包版本".into());
+    }
+    let salt = URL_SAFE_NO_PAD
+        .decode(envelope.salt)
+        .map_err(|_| "恢复包格式无效".to_string())?;
+    let nonce = URL_SAFE_NO_PAD
+        .decode(envelope.nonce)
+        .map_err(|_| "恢复包格式无效".to_string())?;
+    let ciphertext = URL_SAFE_NO_PAD
+        .decode(envelope.ciphertext)
+        .map_err(|_| "恢复包格式无效".to_string())?;
+    if salt.len() != 16 || nonce.len() != 12 {
+        return Err("恢复包格式无效".into());
+    }
+    let key = recovery_key(password, &salt)?;
+    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| e.to_string())?;
+    let plaintext = cipher
+        .decrypt(
+            Nonce::from_slice(&nonce),
+            AeadPayload {
+                msg: &ciphertext,
+                aad: RECOVERY_AAD,
+            },
+        )
+        .map_err(|_| "恢复密码错误或恢复包已损坏".to_string())?;
+    let payload: RecoveryPayload =
+        serde_json::from_slice(&plaintext).map_err(|_| "恢复包内容无效".to_string())?;
+    if payload.version != 1 || payload.configuration.space_id != payload.space.id {
+        return Err("恢复包内容无效".into());
+    }
+    let _ = payload.space.key_bytes()?;
+    let replacing_space = load_space(state)?
+        .map(|current| current.id != payload.space.id)
+        .unwrap_or(false);
+    if replacing_space {
+        if !replace_existing {
+            return Err("当前设备已加入另一个同步空间；确认替换后才能导入".into());
+        }
+        db::kv_delete(state, PREVIOUS_BACKEND_KEY)?;
+    }
+    let mut devices = payload.devices;
+    if !devices.contains(&state.device_id) {
+        devices.push(state.device_id.clone());
+    }
+    devices.sort();
+    devices.dedup();
+    db::kv_set(
+        state,
+        SPACE_KEY,
+        &serde_json::to_string(&payload.space).map_err(|e| e.to_string())?,
+    )?;
+    save_devices(state, &devices)?;
+    apply_pairing_configuration(state, payload.configuration)
+}
+
+fn validate_recovery_password(password: &str) -> Result<(), String> {
+    if password.chars().count() < 12 {
+        return Err("恢复密码至少需要 12 个字符".into());
+    }
+    Ok(())
+}
+
+fn recovery_key(password: &str, salt: &[u8]) -> Result<[u8; 32], String> {
+    let params = Argon2Params::new(32 * 1024, 3, 1, Some(32)).map_err(|e| e.to_string())?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Argon2Version::V0x13, params);
+    let mut key = [0_u8; 32];
+    argon2
+        .hash_password_into(password.as_bytes(), salt, &mut key)
+        .map_err(|e| e.to_string())?;
+    Ok(key)
+}
+
 #[derive(Clone)]
 enum RemoteBackend {
     WebDav {
@@ -827,10 +981,15 @@ struct DiscoveryResponse {
 }
 
 pub async fn start_pairing(state: AppState, runtime: SyncRuntime) -> Result<PairingOffer, String> {
-    // A successful pairing must leave the new device with a usable route for
-    // later updates, so validate and seed the remote configuration first.
+    let already_paired = load_space(&state)?.is_some();
+    if !already_paired {
+        // The first pairing must leave the new device with a usable route for
+        // later updates. Existing trusted devices may still pair while the
+        // backend is temporarily offline.
+        let _ = configured_backend(&state)?;
+    }
     let _ = ensure_space(&state)?;
-    synchronize(&state).await?;
+    let _ = synchronize(&state).await;
     let code = pairing_code();
     let session_id = uuid::Uuid::new_v4().to_string();
     let cancellation = CancellationToken::new();
@@ -975,10 +1134,11 @@ pub async fn join_pairing(
     state: &AppState,
     runtime: &SyncRuntime,
     code: &str,
+    replace_existing: bool,
 ) -> Result<SyncStatus, String> {
     let code = code.trim().to_ascii_uppercase();
     if code.len() != 12 || !code.bytes().all(|item| PAIRING_ALPHABET.contains(&item)) {
-        return Err("请输入桌面端显示的 12 位配对码".into());
+        return Err("请输入已有设备显示的 12 位配对码".into());
     }
     let (offer, host_address) = discover_pairing_host(&code).await?;
     let client_secret = StaticSecret::random_from_rng(rand::rngs::OsRng);
@@ -1012,6 +1172,15 @@ pub async fn join_pairing(
     let shared = client_secret.diffie_hellman(&PublicKey::from(host_public));
     let key = derive_pairing_key(shared.as_bytes(), &code, &offer.session_id)?;
     let snapshot = decrypt_pairing_snapshot(&payload, &key)?;
+    let replacing_space = load_space(state)?
+        .map(|current| current.id != snapshot.space.id)
+        .unwrap_or(false);
+    if replacing_space {
+        if !replace_existing {
+            return Err("当前设备已加入另一个同步空间；确认替换后才能配对".into());
+        }
+        db::kv_delete(state, PREVIOUS_BACKEND_KEY)?;
+    }
     db::kv_set(
         state,
         SPACE_KEY,
@@ -1294,6 +1463,49 @@ mod tests {
         let right_key =
             derive_pairing_key(right_shared.as_bytes(), "23456789ABCD", "session").unwrap();
         assert_eq!(left_key, right_key);
+    }
+
+    #[test]
+    fn encrypted_recovery_package_restores_space_and_configuration() {
+        let source = state("recovery-source");
+        save_settings(
+            &source,
+            serde_json::json!({
+                "theme": "night",
+                "aiKey": "secret-key",
+                "syncBackend": "webdav",
+                "syncEndpoint": "https://dav.example.com/leeef"
+            }),
+        )
+        .unwrap();
+        let source_space = ensure_space(&source).unwrap();
+        let package = export_recovery(&source, "correct horse battery staple").unwrap();
+        assert!(!package.contains("secret-key"));
+
+        let restored = state("recovery-target");
+        save_settings(&restored, serde_json::json!({"autoSync": false})).unwrap();
+        assert!(
+            import_recovery(&restored, &package, "wrong password but long enough", false,).is_err()
+        );
+        import_recovery(&restored, &package, "correct horse battery staple", false).unwrap();
+        assert_eq!(load_space(&restored).unwrap().unwrap().id, source_space.id);
+        let settings = settings_object(&restored).unwrap();
+        assert_eq!(settings["theme"], "night");
+        assert_eq!(settings["aiKey"], "secret-key");
+        assert_eq!(settings["autoSync"], false);
+    }
+
+    #[test]
+    fn recovery_does_not_replace_another_space_without_confirmation() {
+        let source = state("recovery-replace-source");
+        save_settings(&source, serde_json::json!({"theme": "sepia"})).unwrap();
+        ensure_space(&source).unwrap();
+        let package = export_recovery(&source, "twelve-character-password").unwrap();
+
+        let target = state("recovery-replace-target");
+        ensure_space(&target).unwrap();
+        assert!(import_recovery(&target, &package, "twelve-character-password", false,).is_err());
+        assert!(import_recovery(&target, &package, "twelve-character-password", true,).is_ok());
     }
 
     #[tokio::test]

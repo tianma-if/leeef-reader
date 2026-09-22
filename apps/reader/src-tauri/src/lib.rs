@@ -6,7 +6,7 @@ mod trusted_sync;
 use db::AppState;
 use serde::Deserialize;
 use tauri::ipc::Response;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -297,8 +297,9 @@ async fn pairing_join(
     state: State<'_, AppState>,
     runtime: State<'_, trusted_sync::SyncRuntime>,
     code: String,
+    replace_existing: bool,
 ) -> Result<trusted_sync::SyncStatus, String> {
-    trusted_sync::join_pairing(&state, &runtime, &code).await
+    trusted_sync::join_pairing(&state, &runtime, &code, replace_existing).await
 }
 
 #[tauri::command]
@@ -316,6 +317,26 @@ async fn settings_sync_now(
     runtime: State<'_, trusted_sync::SyncRuntime>,
 ) -> Result<trusted_sync::SyncStatus, String> {
     trusted_sync::sync_now(&app, &state, &runtime).await
+}
+
+#[tauri::command]
+fn settings_recovery_export(state: State<AppState>, password: String) -> Result<String, String> {
+    trusted_sync::export_recovery(&state, &password)
+}
+
+#[tauri::command]
+fn settings_recovery_import(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    runtime: State<trusted_sync::SyncRuntime>,
+    package: String,
+    password: String,
+    replace_existing: bool,
+) -> Result<trusted_sync::SyncStatus, String> {
+    trusted_sync::import_recovery(&state, &package, &password, replace_existing)?;
+    runtime.trigger();
+    let _ = app.emit("settings-synced", ());
+    Ok(runtime.status(&state))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -370,7 +391,9 @@ pub fn run() {
             pairing_start,
             pairing_join,
             settings_sync_status,
-            settings_sync_now
+            settings_sync_now,
+            settings_recovery_export,
+            settings_recovery_import
         ])
         .run(tauri::generate_context!())
         .expect("error while running Leeef Reader");

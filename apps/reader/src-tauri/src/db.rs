@@ -1142,6 +1142,13 @@ pub fn kv_set(state: &AppState, key: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn kv_delete(state: &AppState, key: &str) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.execute("DELETE FROM kv WHERE key = ?1", params![key])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn database_path(state: &AppState) -> String {
     state
         .root
