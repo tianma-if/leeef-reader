@@ -579,13 +579,14 @@ jobs:
                 UI.user_error!("#{edit_version.version_string} is waiting for review but has no cancelable submission") unless submission
                 UI.important("Canceling submission #{submission.id} state=#{submission.state} so build #{build.version} can be attached")
                 submission.cancel_submission
+                editable = %w[PREPARE_FOR_SUBMISSION DEVELOPER_REJECTED]
                 20.times do
                   sleep(10)
                   edit_version = app.get_edit_app_store_version(platform: platform)
                   UI.important("version state after cancel=#{edit_version&.app_version_state}")
-                  break if edit_version&.app_version_state == "PREPARE_FOR_SUBMISSION"
+                  break if editable.include?(edit_version&.app_version_state)
                 end
-                unless edit_version&.app_version_state == "PREPARE_FOR_SUBMISSION"
+                unless editable.include?(edit_version&.app_version_state)
                   UI.user_error!("Version stayed #{edit_version&.app_version_state} after canceling review")
                 end
               end
