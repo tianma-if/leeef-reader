@@ -552,29 +552,41 @@ jobs:
 
           platform :ios do
             lane :submit_release do
-              deliver(
-                api_key_path: File.join(ENV.fetch("SUBMIT_DIR"), "api-key.json"),
-                app_identifier: "dev.leeef.leeefReader",
-                app_version: ENV.fetch("APP_VERSION"),
-                build_number: ENV.fetch("IOS_BUNDLE_VERSION"),
-                platform: "ios",
-                skip_binary_upload: true,
-                skip_screenshots: true,
-                force: true,
-                submit_for_review: true,
-                automatic_release: true,
-                phased_release: false,
-                reset_ratings: false,
-                run_precheck_before_submit: true,
-                precheck_include_in_app_purchases: false,
-                release_notes: {
-                  "zh-Hans" => File.read(File.join(ENV.fetch("SUBMIT_DIR"), "release-notes-zh-Hans.txt")).strip,
-                  "en-US" => File.read(File.join(ENV.fetch("SUBMIT_DIR"), "release-notes-en-US.txt")).strip
-                },
-                submission_information: {
-                  export_compliance_uses_encryption: false
-                }
-              )
+              attempts = 0
+              begin
+                attempts += 1
+                deliver(
+                  api_key_path: File.join(ENV.fetch("SUBMIT_DIR"), "api-key.json"),
+                  app_identifier: "dev.leeef.leeefReader",
+                  app_version: ENV.fetch("APP_VERSION"),
+                  build_number: ENV.fetch("IOS_BUNDLE_VERSION"),
+                  platform: "ios",
+                  skip_binary_upload: true,
+                  skip_screenshots: true,
+                  force: true,
+                  submit_for_review: true,
+                  automatic_release: true,
+                  phased_release: false,
+                  reset_ratings: false,
+                  run_precheck_before_submit: true,
+                  precheck_include_in_app_purchases: false,
+                  release_notes: {
+                    "zh-Hans" => File.read(File.join(ENV.fetch("SUBMIT_DIR"), "release-notes-zh-Hans.txt")).strip,
+                    "en-US" => File.read(File.join(ENV.fetch("SUBMIT_DIR"), "release-notes-en-US.txt")).strip
+                  },
+                  submission_information: {
+                    export_compliance_uses_encryption: false
+                  }
+                )
+              rescue StandardError => error
+                retryable = error.message.include?("could not be added")
+                if retryable && attempts < 8
+                  UI.important("App Store build is not attachable yet (attempt #{attempts}); waiting 60s")
+                  sleep(60)
+                  retry
+                end
+                raise
+              end
             end
           end
           RUBY
