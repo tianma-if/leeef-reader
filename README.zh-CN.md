@@ -86,21 +86,18 @@ Leeef 在 Tauri 进程内提供 [Model Context Protocol](https://modelcontextpro
 
 - 书籍和阅读数据默认只在本机。
 - AI 可选，接口和密钥由你提供，不必离开你输入它们的那台电脑。
-- 跨设备的目标模型是：**你自己的** S3 兼容存储或 WebDAV，再加上局域网配对，让手机拿到配置而不用手打密钥。配对与对象存储引擎仍在迁到当前 Tauri 客户端；设置项和 `sync_operations` 已经在。协议见 [trusted-device-sync.md](docs/trusted-device-sync.md)。
+- 跨设备使用**你自己的** S3 兼容存储或 WebDAV。局域网配对传同步空间密钥和第一份配置；之后的设置通过每台设备各自的加密配置合并。主动打开「书籍与阅读数据」后，还会同步加密的书籍、封面、分类、标签、书摘、书签、进度和阅读时长；不打开则仍只同步配置。协议见 [trusted-device-sync.md](docs/trusted-device-sync.md)。
+- 导出的 `.leeef-recovery` 用于所有可信设备都丢失时恢复同步空间。另有密码保护的 `.leeef-backup` 书库备份（书籍与封面合计不超过 128 MiB）。两份密码都不要只存在 Leeef 里。
+- 阅读时选中文字，可以用你配置的模型解释、翻译、概括，或把回答存成笔记。
 
 在线功能需要网络，以及你自行提供的第三方凭据。应用内不出售 AI 或云存储。
-
-## 开发中（尚未发布）
-
-当前工作区新增加密 S3/WebDAV 书库同步、密码保护的书库备份，以及选中文字后的 AI 阅读助手。书库同步需主动开启，现有用户默认仍只同步配置。功能范围、限制与验证情况见[开发与验收记录](docs/reader-improvements.md)。
 
 ## 路线图
 
 以下内容不在当前 GitHub Release 中：
 
-- 已签名的 iOS 与 Windows 安装包
-- 此客户端上完整的 S3 / WebDAV 同步与二维码配对
-- Sparkle（macOS）与 Play 自动更新
+- 已签名的 Windows 安装包
+- 配对流程上的二维码扫描、按需下载书籍，以及超过 128 MiB 的书库备份
 
 ## 技术栈
 

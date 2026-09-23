@@ -86,21 +86,18 @@ Read tools include `list_books`, `search_books`, `get_book`, `get_book_content`,
 
 - Books and reading data stay on the device by default.
 - AI is optional and bring-your-own. Keys leave the desktop only when you explicitly pair a trusted device, and the configuration document is encrypted before upload.
-- The multi-device model uses **your** S3-compatible bucket or WebDAV. LAN pairing transfers the encrypted sync-space key and the first configuration snapshot; later settings changes converge through per-device encrypted configuration documents. Book and reading-data object synchronization is still being brought onto this Tauri client. See [trusted-device-sync.md](docs/trusted-device-sync.md) for the protocol.
-- An exported `.leeef-recovery` package contains the encrypted bootstrap material needed to recover the sync space when no trusted device remains. Keep its independent password outside Leeef.
+- The multi-device model uses **your** S3-compatible bucket or WebDAV. LAN pairing transfers the encrypted sync-space key and the first configuration snapshot; later settings changes converge through per-device encrypted configuration documents. Turning on “books and reading data” also syncs encrypted books, covers, shelves, tags, excerpts, bookmarks, progress, and reading time. It stays off until you enable it. See [trusted-device-sync.md](docs/trusted-device-sync.md).
+- An exported `.leeef-recovery` package contains the encrypted bootstrap material needed to recover the sync space when no trusted device remains. A separate `.leeef-backup` is a password-protected copy of the library itself (books and covers up to 128 MiB). Keep both passwords outside Leeef.
+- Select text while reading to explain, translate, summarize, or save the reply as a note, using the same bring-your-own model.
 
 Online features need a network and credentials you supply. Leeef does not sell AI or cloud storage in the app.
-
-## In development (not yet released)
-
-The current working tree adds encrypted S3/WebDAV library synchronization, password-protected library backups, and AI help for selected passages. Library sync is opt-in; existing installations continue syncing configuration only until it is enabled. See [implementation and validation notes](docs/reader-improvements.md) for scope, limits, and testing status.
 
 ## Roadmap
 
 These are not in the current GitHub Release:
 
 - Signed Windows installers
-- Complete S3 / WebDAV book-data sync and add QR scanning to the existing pairing-code flow
+- QR scanning on the existing pairing-code flow, on-demand book download, and backups larger than 128 MiB
 
 ## Updates
 
