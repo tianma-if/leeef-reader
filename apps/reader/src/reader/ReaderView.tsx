@@ -110,7 +110,10 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   } | null>(null)
   const turner = useRef<CapturedPageTurn | null>(null)
   const turnQueue = useRef<TurnQueue | null>(null)
-  turnQueue.current ??= new TurnQueue(() => toast.error('翻页失败，请重试'))
+  turnQueue.current ??= new TurnQueue((error) => {
+    console.error('Page turn failed', error)
+    toast.error('翻页失败，请重试')
+  })
 
   const [title, setTitle] = useState(book.title)
   const [progress, setProgress] = useState(book.progress)

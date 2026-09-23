@@ -18,7 +18,9 @@ export const captureWebviewRegion = async (rect: CaptureRect, cover = false) => 
 }
 
 export const setCoverProgress = (progress: number, forward: boolean, duration = 0) =>
-  invoke('plugin:native-bridge|set_cover_progress', { payload: { progress, forward, duration } })
+  invoke('plugin:native-bridge|set_cover_progress', {
+    payload: { progress, forward, duration: Math.max(0, Math.round(duration)) },
+  })
 
 export const uncoverWebview = () => invoke('plugin:native-bridge|uncover_webview')
 
