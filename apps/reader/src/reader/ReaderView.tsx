@@ -13,6 +13,7 @@ import { applyReadingFont, applyViewLayout, highlightDraw, themeOf } from './boo
 import { normalizeSelectedText } from './selectionText'
 import { mountReadingFont } from './fontLoader'
 import { CapturedPageTurn } from './capturedTurn'
+import { TurnQueue } from './turnQueue'
 import { ReaderChrome } from './ReaderChrome'
 import { ReaderFooter } from './ReaderFooter'
 import { ReaderSidebar } from './ReaderSidebar'
@@ -108,6 +109,8 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     samples: { distance: number; time: number }[]
   } | null>(null)
   const turner = useRef<CapturedPageTurn | null>(null)
+  const turnQueue = useRef<TurnQueue | null>(null)
+  turnQueue.current ??= new TurnQueue(() => toast.error('翻页失败，请重试'))
 
   const [title, setTitle] = useState(book.title)
   const [progress, setProgress] = useState(book.progress)
@@ -137,12 +140,14 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       getContentRect: () => hostRef.current?.getBoundingClientRect() ?? null,
       navigate: async (forward) => {
         const view = viewRef.current
-        if (!view) return
+        if (!view) return false
+        const before = view.lastLocation?.cfi
         const renderer = view.renderer
         const hadAnimated = renderer?.hasAttribute('animated')
         renderer?.removeAttribute('animated')
         try {
           await (forward ? view.next() : view.prev())
+          return view.lastLocation?.cfi !== before
         } finally {
           if (hadAnimated) renderer?.setAttribute('animated', '')
         }
@@ -188,17 +193,15 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     const view = viewRef.current
     if (!view) return
     chromeRef.current.hide()
-    const useCapture =
-      isMobile() && (settingsRef.current.flow ?? 'paginated') === 'paginated'
-    if (useCapture) {
-      void getTurner()
-        .turn(forward)
-        .catch(() => {
-          void (forward ? view.next() : view.prev())
-        })
-      return
-    }
-    void (forward ? view.next() : view.prev())
+    if (dragRef.current?.claimed) return
+    turnQueue.current!.run(async () => {
+      if (viewRef.current !== view) return
+      const useCapture =
+        isMobile() && (settingsRef.current.flow ?? 'paginated') === 'paginated'
+      const started = useCapture && await getTurner().turn(forward)
+      if (!started && viewRef.current === view) await (forward ? view.next() : view.prev())
+      if (viewRef.current === view && useCapture) void getTurner().prepare()
+    })
   }
   const turnRef = useRef(turn)
   turnRef.current = turn
@@ -386,6 +389,8 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       cancelled = true
       window.clearTimeout(prepareTimer.current)
       window.clearTimeout(saveTimer.current)
+      turnQueue.current?.clear()
+      dragRef.current = null
       window.clearInterval(readingInterval)
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('pagehide', onPageHide)
@@ -393,6 +398,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       readingTimer.setActive(false)
       flushReadingTime()
       getTurner().dispose()
+      turner.current = null
       viewRef.current = null
       view?.close()
       view?.remove()
@@ -452,6 +458,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   }, [chrome, onClose, selection])
 
   const onGesturePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (!event.isPrimary || dragRef.current) return
     if (chrome.visible || chrome.sidebar) {
       chrome.hide()
       chrome.closeSidebar()
@@ -499,11 +506,11 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         return
       }
       if (claimed && mobile && paginated) {
+        if (turnQueue.current?.busy || !getTurner().startDrag(dx < 0)) return
         drag.claimed = true
         drag.forward = dx < 0
         drag.originX = drag.startX
         drag.visualOrigin = Math.max(0, drag.forward ? -dx : dx)
-        getTurner().startDrag(drag.forward)
       }
     }
     if (!drag.claimed) return
@@ -529,11 +536,14 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         event.type === 'pointercancel'
           ? false
           : shouldCommitTurn(progressValue, velocity, drag.width)
-      void getTurner()
-        .endDrag(commit)
-        .then((started) => {
-          if (!started && commit) turn(drag.forward)
-        })
+      const view = viewRef.current
+      const activeTurner = getTurner()
+      turnQueue.current!.run(async () => {
+        const started = await activeTurner.endDrag(commit)
+        if (viewRef.current !== view) return
+        if (!started && commit && view) await (drag.forward ? view.next() : view.prev())
+        void activeTurner.prepare()
+      })
       return
     }
     if (event.type === 'pointercancel') return

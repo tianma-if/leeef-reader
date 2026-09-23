@@ -17,8 +17,8 @@ export const captureWebviewRegion = async (rect: CaptureRect, cover = false) => 
   return raw instanceof ArrayBuffer ? new Uint8Array(raw) : new Uint8Array(raw)
 }
 
-export const setCoverProgress = (progress: number, forward: boolean) =>
-  invoke('plugin:native-bridge|set_cover_progress', { payload: { progress, forward } })
+export const setCoverProgress = (progress: number, forward: boolean, duration = 0) =>
+  invoke('plugin:native-bridge|set_cover_progress', { payload: { progress, forward, duration } })
 
 export const uncoverWebview = () => invoke('plugin:native-bridge|uncover_webview')
 

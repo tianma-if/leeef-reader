@@ -3,7 +3,7 @@ export const CENTER_MIN = 0.375
 export const CENTER_MAX = 0.625
 export const COMMIT_PROGRESS = 0.5
 export const FLICK_PROJECT_MS = 240
-export const SETTLE_MS = 450
+export const SETTLE_MS = 280
 export const SETTLE_FLOOR_MS = 90
 export const TAP_SLOP_PX = 12
 

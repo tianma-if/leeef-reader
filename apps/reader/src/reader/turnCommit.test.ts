@@ -47,7 +47,7 @@ describe('shouldClaimTurnGesture', () => {
 
 describe('settleDuration', () => {
   it('scales with remaining travel and never goes below the floor', () => {
-    expect(settleDuration(0, 1)).toBe(450)
+    expect(settleDuration(0, 1)).toBe(280)
     expect(settleDuration(0.9, 1)).toBeGreaterThanOrEqual(90)
     expect(settleDuration(0.99, 1)).toBe(90)
   })

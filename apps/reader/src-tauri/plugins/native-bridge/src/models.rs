@@ -16,6 +16,8 @@ pub struct CaptureWebviewRegionRequest {
 pub struct CoverProgressRequest {
     pub progress: f64,
     pub forward: bool,
+    #[serde(default)]
+    pub duration: u64,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

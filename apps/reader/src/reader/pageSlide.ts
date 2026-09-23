@@ -100,6 +100,7 @@ export class PageSlideRenderer {
   }
 
   dispose() {
+    this.sheet?.getAnimations().forEach((animation) => animation.cancel())
     this.sheet?.remove()
     this.sheet = null
     this.canvas = null

@@ -1,5 +1,7 @@
 package dev.leeef.native_bridge
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
@@ -18,6 +20,7 @@ import android.view.SurfaceView
 import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.DecelerateInterpolator
 import android.webkit.WebView
 import android.widget.ImageView
 import android.widget.PopupWindow
@@ -53,6 +56,7 @@ class CaptureWebviewRegionArgs {
 class CoverProgressArgs {
     var progress: Double = 0.0
     var forward: Boolean = true
+    var duration: Long = 0
 }
 
 @InvokeArg
@@ -338,11 +342,16 @@ class NativeBridgePlugin(private val activity: Activity) : Plugin(activity) {
                 }
                 if (args.cover) {
                     showCover(bitmap, windowRect)
+                    // The native cover already owns the pixels. Avoid JPEG, base64
+                    // and a large round trip through Rust/JS on every page turn.
+                    invoke.resolve(JSObject().put("data", ""))
+                    return@copyPixels
                 }
                 Thread {
                     val out = ByteArrayOutputStream()
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
                     val data = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+                    bitmap.recycle()
                     invoke.resolve(JSObject().put("data", data))
                 }.start()
             }
@@ -353,10 +362,30 @@ class NativeBridgePlugin(private val activity: Activity) : Plugin(activity) {
     fun set_cover_progress(invoke: Invoke) {
         val args = invoke.parseArgs(CoverProgressArgs::class.java)
         activity.runOnUiThread {
+            val image = coverImage
+            if (image == null) {
+                invoke.resolve()
+                return@runOnUiThread
+            }
             val width = coverWidth.toFloat()
-            val shift = if (args.forward) -args.progress.toFloat() * width else args.progress.toFloat() * width
-            coverImage?.translationX = shift
-            invoke.resolve()
+            val progress = args.progress.toFloat().coerceIn(0f, 1f)
+            val shift = (if (args.forward) -progress else progress) * width
+            image.animate().cancel()
+            if (args.duration <= 0) {
+                image.translationX = shift
+                invoke.resolve()
+            } else {
+                // Settle on the UI/render thread, with one IPC for the whole motion.
+                image.animate().translationX(shift)
+                    .setDuration(args.duration.coerceAtMost(450))
+                    .setInterpolator(DecelerateInterpolator(1.5f))
+                    .setListener(object : AnimatorListenerAdapter() {
+                        override fun onAnimationEnd(animation: Animator) {
+                            image.animate().setListener(null)
+                            invoke.resolve()
+                        }
+                    }).start()
+            }
         }
     }
 
@@ -371,36 +400,35 @@ class NativeBridgePlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun probe_webview_ready(invoke: Invoke) {
         val webView = webViewRef
-        val window = activity.window
-        if (webView == null || window == null) {
+        if (webView == null) {
             invoke.resolve(JSObject().put("ready", false))
             return
         }
         activity.runOnUiThread {
-            val sample = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
             val handler = Handler(Looper.getMainLooper())
-            val surfaceView = findSurfaceView(webView)
-            if (surfaceView != null && surfaceView.holder.surface.isValid) {
-                try {
-                    PixelCopy.request(surfaceView, sample, { result ->
-                        invoke.resolve(
-                            JSObject().put("ready", result == PixelCopy.SUCCESS && !isMostlyFlat(sample)),
-                        )
-                    }, handler)
-                    return@runOnUiThread
-                } catch (_: IllegalArgumentException) {
-                    // Fall through to a window copy.
+            var resolved = false
+            val timeout = Runnable {
+                if (!resolved) {
+                    resolved = true
+                    invoke.resolve(JSObject().put("ready", false))
                 }
             }
-            try {
-                PixelCopy.request(window, sample, { result ->
-                    invoke.resolve(
-                        JSObject().put("ready", result == PixelCopy.SUCCESS && !isMostlyFlat(sample)),
-                    )
-                }, handler)
-            } catch (_: IllegalArgumentException) {
-                invoke.resolve(JSObject().put("ready", false))
-            }
+            handler.postDelayed(timeout, 800)
+            // Pixel color sampling cannot distinguish a new page from an old
+            // page, and mistakes intentionally blank pages for unfinished ones.
+            webView.postVisualStateCallback(0, object : WebView.VisualStateCallback() {
+                override fun onComplete(requestId: Long) {
+                    webView.postOnAnimation {
+                        webView.postOnAnimation {
+                            if (!resolved) {
+                                resolved = true
+                                handler.removeCallbacks(timeout)
+                                invoke.resolve(JSObject().put("ready", true))
+                            }
+                        }
+                    }
+                }
+            })
         }
     }
 
@@ -411,6 +439,7 @@ class NativeBridgePlugin(private val activity: Activity) : Plugin(activity) {
         image.scaleType = ImageView.ScaleType.FIT_XY
         val popup = PopupWindow(image, windowRect.width(), windowRect.height(), false)
         popup.isClippingEnabled = false
+        popup.isTouchable = false
         popup.elevation = 128f
         val anchor = webViewRef ?: activity.window.decorView
         popup.showAtLocation(anchor, Gravity.NO_GRAVITY, windowRect.left, windowRect.top)
@@ -420,6 +449,8 @@ class NativeBridgePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     private fun removeCover() {
+        coverImage?.animate()?.cancel()
+        coverImage?.setImageDrawable(null)
         try {
             coverPopup?.dismiss()
         } catch (_: Exception) {
