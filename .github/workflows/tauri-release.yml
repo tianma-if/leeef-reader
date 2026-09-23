@@ -552,6 +552,29 @@ jobs:
 
           platform :ios do
             lane :submit_release do
+              key = JSON.parse(File.read(File.join(ENV.fetch("SUBMIT_DIR"), "api-key.json")))
+              Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.create(
+                key_id: key.fetch("key_id"),
+                issuer_id: key.fetch("issuer_id"),
+                key: key.fetch("key")
+              )
+              app = Spaceship::ConnectAPI::App.find("dev.leeef.leeefReader")
+              platform = Spaceship::ConnectAPI::Platform.map("ios")
+              build = Spaceship::ConnectAPI::Build.all(
+                app_id: app.id,
+                version: ENV.fetch("APP_VERSION"),
+                build_number: ENV.fetch("IOS_BUNDLE_VERSION"),
+                platform: platform
+              ).first
+              UI.user_error!("Build #{ENV.fetch("IOS_BUNDLE_VERSION")} for #{ENV.fetch("APP_VERSION")} was not found") unless build
+              UI.important("build #{build.app_version} (#{build.version}) state=#{build.processing_state} encryption=#{build.uses_non_exempt_encryption.inspect} expired=#{build.expired} missing_compliance=#{build.missing_export_compliance?}")
+              if build.uses_non_exempt_encryption.nil?
+                build.update(attributes: { usesNonExemptEncryption: false })
+                UI.success("Set usesNonExemptEncryption=false before selecting the build")
+              end
+              edit_version = app.get_edit_app_store_version(platform: platform)
+              UI.important("editable version=#{edit_version&.version_string} state=#{edit_version&.app_version_state}")
+
               attempts = 0
               begin
                 attempts += 1
@@ -580,7 +603,7 @@ jobs:
                 )
               rescue StandardError => error
                 retryable = error.message.include?("could not be added")
-                if retryable && attempts < 8
+                if retryable && attempts < 3
                   UI.important("App Store build is not attachable yet (attempt #{attempts}); waiting 60s")
                   sleep(60)
                   retry
