@@ -8,6 +8,7 @@ import {
   List as ListIcon,
   MoreVertical,
   Plus,
+  SlidersHorizontal,
   Tag as TagIcon,
   Trash2,
 } from 'lucide-react'
@@ -61,6 +62,8 @@ export function LibraryScreen({ onOpen }: Props) {
   const [sort, setSort] = useState<SortKey>('updated')
   const [filter, setFilter] = useState<FilterKey>('all')
   const [tag, setTag] = useState('all')
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const filtersActive = filter !== 'all' || sort !== 'updated' || tag !== 'all'
   const [busy, setBusy] = useState(false)
   const importing = useRef(false)
   const [importProgress, setImportProgress] = useState({ completed: 0, total: 0 })
@@ -375,65 +378,96 @@ export function LibraryScreen({ onOpen }: Props) {
         </div>
       </header>
 
-      {/* Filter and search bar */}
-      <div className="mb-5 flex flex-wrap gap-2">
-        <Input
-          className="min-w-44 flex-1"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="搜索书名或作者…"
-        />
-        <Select value={filter} onValueChange={(value) => setFilter(value as FilterKey)}>
-          <SelectTrigger className="w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部状态</SelectItem>
-            <SelectItem value="unread">未开始</SelectItem>
-            <SelectItem value="reading">阅读中</SelectItem>
-            <SelectItem value="done">已读完</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={sort} onValueChange={(value) => setSort(value as SortKey)}>
-          <SelectTrigger className="w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="updated">最近阅读</SelectItem>
-            <SelectItem value="title">按标题</SelectItem>
-            <SelectItem value="author">按作者</SelectItem>
-            <SelectItem value="progress">按进度</SelectItem>
-            <SelectItem value="created">导入时间</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={tag} onValueChange={setTag}>
-          <SelectTrigger className="w-28">
-            <SelectValue placeholder="标签" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部标签</SelectItem>
-            {tags.map((item) => (
-              <SelectItem key={item.id} value={item.name}>
-                {item.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="mb-5 space-y-2">
+        <div className="flex items-center gap-2">
+          <Input
+            className="min-w-0 flex-1"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索书名或作者…"
+            aria-label="搜索书名或作者"
+          />
+          <Button
+            type="button"
+            size="icon"
+            variant={filtersOpen || filtersActive ? 'secondary' : 'outline'}
+            className="relative shrink-0"
+            aria-expanded={filtersOpen}
+            aria-controls="library-filters"
+            title="筛选和排序"
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <SlidersHorizontal />
+            <span className="sr-only">{filtersOpen ? '收起筛选' : '筛选和排序'}</span>
+            {filtersActive ? (
+              <span className="absolute top-1 right-1 size-1.5 rounded-full bg-[#c4a35a]" aria-hidden />
+            ) : null}
+          </Button>
+        </div>
+        {filtersOpen ? (
+          <div id="library-filters" className="flex flex-wrap gap-2">
+            <Select value={filter} onValueChange={(value) => setFilter(value as FilterKey)}>
+              <SelectTrigger className="w-28" aria-label="阅读状态">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部状态</SelectItem>
+                <SelectItem value="unread">未开始</SelectItem>
+                <SelectItem value="reading">阅读中</SelectItem>
+                <SelectItem value="done">已读完</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={sort} onValueChange={(value) => setSort(value as SortKey)}>
+              <SelectTrigger className="w-28" aria-label="排序">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="updated">最近阅读</SelectItem>
+                <SelectItem value="title">按标题</SelectItem>
+                <SelectItem value="author">按作者</SelectItem>
+                <SelectItem value="progress">按进度</SelectItem>
+                <SelectItem value="created">导入时间</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={tag} onValueChange={setTag}>
+              <SelectTrigger className="w-28" aria-label="标签">
+                <SelectValue placeholder="标签" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部标签</SelectItem>
+                {tags.map((item) => (
+                  <SelectItem key={item.id} value={item.name}>
+                    {item.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
       </div>
 
       {/* Empty State */}
       {visible.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-          <div className="size-16 rounded-2xl bg-muted/60 flex items-center justify-center text-muted-foreground mb-4 shadow-inner">
-            <BookOpen className="size-8 stroke-[1.5]" />
+        books.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+            <div className="size-16 rounded-2xl bg-muted/60 flex items-center justify-center text-muted-foreground mb-4 shadow-inner">
+              <BookOpen className="size-8 stroke-[1.5]" />
+            </div>
+            <h3 className="text-base font-semibold mb-1">书架还是空的</h3>
+            <p className="text-muted-foreground text-xs max-w-sm mb-6 leading-relaxed">
+              支持导入 EPUB、TXT、MOBI、AZW3、FB2、PDF 电子书
+              {desktop ? '，也可以直接将文件拖拽到此窗口。' : '。'}
+            </p>
+            {importButton}
           </div>
-          <h3 className="text-base font-semibold mb-1">书架还是空的</h3>
-          <p className="text-muted-foreground text-xs max-w-sm mb-6 leading-relaxed">
-            支持导入 EPUB、TXT、MOBI、AZW3、FB2、PDF 电子书
-            {desktop ? '，也可以直接将文件拖拽到此窗口。' : '。'}
-          </p>
-          {importButton}
-        </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+            <h3 className="text-base font-semibold mb-1">没有匹配的书</h3>
+            <p className="text-muted-foreground text-xs max-w-sm leading-relaxed">
+              换个书名或作者，或调整筛选条件。
+            </p>
+          </div>
+        )
       ) : (
         groups.map((group) => (
           <section key={group.id} className="mb-8">
