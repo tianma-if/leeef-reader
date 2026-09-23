@@ -574,6 +574,21 @@ jobs:
               end
               edit_version = app.get_edit_app_store_version(platform: platform)
               UI.important("editable version=#{edit_version&.version_string} state=#{edit_version&.app_version_state}")
+              if edit_version&.app_version_state == "WAITING_FOR_REVIEW"
+                submission = app.get_in_progress_review_submission(platform: platform, includes: "items")
+                UI.user_error!("#{edit_version.version_string} is waiting for review but has no cancelable submission") unless submission
+                UI.important("Canceling submission #{submission.id} state=#{submission.state} so build #{build.version} can be attached")
+                submission.cancel_submission
+                20.times do
+                  sleep(10)
+                  edit_version = app.get_edit_app_store_version(platform: platform)
+                  UI.important("version state after cancel=#{edit_version&.app_version_state}")
+                  break if edit_version&.app_version_state == "PREPARE_FOR_SUBMISSION"
+                end
+                unless edit_version&.app_version_state == "PREPARE_FOR_SUBMISSION"
+                  UI.user_error!("Version stayed #{edit_version&.app_version_state} after canceling review")
+                end
+              end
 
               attempts = 0
               begin
