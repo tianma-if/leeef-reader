@@ -32,6 +32,7 @@ import {
 } from './turnGestureArena'
 import { useReaderChrome } from './useReaderChrome'
 import { createReadingTimer } from './readingTimer'
+import { createWheelTurnState, wheelTurnDirection } from './wheelTurn'
 import { useLibraryRefresh } from '../lib/useLibraryRefresh'
 import type { ReadingSource } from '../ai/selectionAgent'
 
@@ -208,6 +209,24 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   }
   const turnRef = useRef(turn)
   turnRef.current = turn
+
+  useEffect(() => {
+    if (mobile) return
+    const stage = hostRef.current
+    if (!stage) return
+    const wheelState = createWheelTurnState()
+    const onWheel = (event: WheelEvent) => {
+      if ((settingsRef.current.flow ?? 'paginated') !== 'paginated' || !viewRef.current) return
+      if (event.ctrlKey || event.metaKey) return
+      if (event.deltaY === 0 || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+      event.preventDefault()
+      const direction = wheelTurnDirection(wheelState, event, stage.clientHeight)
+      if (direction === null) return
+      turnRef.current(direction)
+    }
+    stage.addEventListener('wheel', onWheel, { passive: false })
+    return () => stage.removeEventListener('wheel', onWheel)
+  }, [mobile])
 
   const goTo = (target: string) => {
     void viewRef.current?.goTo(target)
