@@ -7,9 +7,11 @@
 
 开发入口：
 
+需要 Bun 1.3.14。
+
 ```bash
-npm install
-npm run tauri dev
+bun install
+bun run tauri dev
 ```
 
 Android 真机、翻页约定和原生桥见 [`docs/tauri-reader.md`](../../docs/tauri-reader.md)。

@@ -2,6 +2,7 @@
   "name": "leeef-reader",
   "private": true,
   "version": "2.6.0",
+  "packageManager": "bun@1.3.14",
   "type": "module",
   "scripts": {
     "dev": "vite",

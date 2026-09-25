@@ -77,7 +77,7 @@ keyAlias=...
 keyPassword=...
 ```
 
-然后运行 `npx tauri android build --aab --target aarch64`。该文件和密钥库已被 Git 忽略。
+然后运行 `bun run tauri android build --aab --target aarch64`。该文件和密钥库已被 Git 忽略。
 
 也可以不创建本地文件，改用 `ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、
 `ANDROID_KEY_ALIAS` 和 `ANDROID_KEY_PASSWORD` 环境变量；CI 与临时发布机推荐使用这种方式。
@@ -95,7 +95,7 @@ Leeef Reader 不申请 `android.permission.REQUEST_INSTALL_PACKAGES`。发布工
 - Variables：`APPSTORE_ISSUER_ID`、`APPSTORE_API_KEY_ID`。
 - Secrets：`APPSTORE_API_PRIVATE_KEY`（`.p8` 内容）、`APPSTORE_CERTIFICATES_FILE_BASE64`（Apple Distribution `.p12` 的 base64）、`APPSTORE_CERTIFICATES_PASSWORD`。
 
-API Key 至少需要 App Manager 权限。`tauri-release.yml` 的 iOS job 使用 `app-store` Environment：导入 Apple Distribution 证书，下载 bundle id `dev.leeef.leeefReader` 的 App Store provisioning profile，执行 `npx tauri ios build --export-method app-store-connect`，把 IPA 上传到 App Store Connect，从 GitHub Release 双语说明生成“版本更新内容”，关联精确版本与 build，提交审核，并设置为审核通过后自动发布。关闭 `upload_appstore` 可复用已经处理完成的 build；关闭 `submit_appstore` 才会停止在仅上传/TestFlight 状态。当前 Tauri 包没有 Flutter 时代的 Share Extension；不要再去下载 `dev.leeef.leeefReader.ShareExtension` 的 profile。
+API Key 至少需要 App Manager 权限。`tauri-release.yml` 的 iOS job 使用 `app-store` Environment：导入 Apple Distribution 证书，下载 bundle id `dev.leeef.leeefReader` 的 App Store provisioning profile，执行 `bun run tauri ios build --export-method app-store-connect`，把 IPA 上传到 App Store Connect，从 GitHub Release 双语说明生成“版本更新内容”，关联精确版本与 build，提交审核，并设置为审核通过后自动发布。关闭 `upload_appstore` 可复用已经处理完成的 build；关闭 `submit_appstore` 才会停止在仅上传/TestFlight 状态。当前 Tauri 包没有 Flutter 时代的 Share Extension；不要再去下载 `dev.leeef.leeefReader.ShareExtension` 的 profile。
 
 `CFBundleShortVersionString` 来自 `package.json` 版本。`CFBundleVersion` 默认是 `major * 1000000 + minor * 1000 + patch`（例如 2.2.0 → `2002000`），高于 Flutter 最后一次的 `25`。同一版本再次上传时用 `ios_build_number` 覆盖。工作流固定使用对应版本与 build 送审；上传成功、送审成功和正式上架是三个不同状态，发布审计必须分别记录。若 Apple 因缺少商店资料、协议或合规问卷拒绝送审，工作流必须失败并在 App Store Connect 补齐阻塞项后重跑，不能把仅上传成功当成发版完成。
 
@@ -103,7 +103,7 @@ iOS 客户端启动、回到前台以及持续运行期间每 6 小时查询公�
 
 ## macOS DMG 与自动更新
 
-macOS 正式包由 `tauri-release.yml` 执行 `npx tauri build --target universal-apple-darwin --bundles dmg,app`，使用 Developer ID 签名并通过 App Store Connect API 公证。`createUpdaterArtifacts` 同时生成 `.app.tar.gz` 与 `.sig`；工作流为 Intel 和 Apple Silicon 写入同一 universal 包的 `latest.json` 条目。
+macOS 正式包由 `tauri-release.yml` 执行 `bun run tauri build --target universal-apple-darwin --bundles dmg,app`，使用 Developer ID 签名并通过 App Store Connect API 公证。`createUpdaterArtifacts` 同时生成 `.app.tar.gz` 与 `.sig`；工作流为 Intel 和 Apple Silicon 写入同一 universal 包的 `latest.json` 条目。
 
 GitHub 的 `macos-distribution` Environment 配置：
 
@@ -128,7 +128,7 @@ gh secret set TAURI_SIGNING_PRIVATE_KEY \
 
 1. 确认 `main` 与 `origin/main` 一致且工作区干净；以上一个正式 Release 为基线整理中英文用户变更。
 2. 显式选择 SemVer 级别，同步更新 `package.json`、`tauri.conf.json`、`Cargo.toml` 与锁文件；确认移动端构建号严格递增。
-3. 等待当前源码提交的跨平台 CI 全部通过；该工作流执行 `apps/reader` 的 npm 测试/构建，以及 `apps/reader/src-tauri` 的 `cargo test --lib`。发布规划器会直接复用这一结果，不重复执行同一套门禁。
+3. 等待当前源码提交的跨平台 CI 全部通过；该工作流执行 `apps/reader` 的 Bun 测试/构建，以及 `apps/reader/src-tauri` 的 `cargo test --lib`。发布规划器会直接复用这一结果，不重复执行同一套门禁。
 4. 创建 `vX.Y.Z` Draft Release，使用同一 Tag 运行 `Tauri signed release`（默认 `platforms: all`），确认 macOS DMG/ZIP/`.app.tar.gz`/`.sig`/`latest.json` 与 Android APK/AAB 已上传且工作流成功。
 5. 立即公开 GitHub Release。Google Play production 与 App Store Connect 上传由 `tauri-release.yml` 直接执行，无需先经过测试渠道，也不得为此询问用户。建议检查真机导入、阅读、分享导入、后台音频、同步和 Android 更新流程；如未执行，如实记录，不阻塞正式上架或送审，也不得将其标记为通过。
 6. 在 Intel 与 Apple Silicon Mac 上验证 DMG 可挂载、拖入 Applications，并运行 `spctl --assess --type execute --verbose "Leeef Reader.app"`；从前一正式版本启动应用，确认新版 `.app.tar.gz` 静默下载并验签后出现“重启以更新”，重启后版本号已更新。该 macOS 验收仍按发布后行为执行，默认不覆盖安装开发者机器上的现有应用。

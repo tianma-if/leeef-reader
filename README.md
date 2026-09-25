@@ -115,10 +115,12 @@ These are not in the current GitHub Release:
 
 ## Quick start
 
+Install [Bun 1.3.14](https://bun.sh/docs/installation) first.
+
 ```sh
 cd apps/reader
-npm install
-npm run tauri dev
+bun install
+bun run tauri dev
 ```
 
 MCP tests:

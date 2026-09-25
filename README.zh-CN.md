@@ -109,10 +109,12 @@ Leeef 在 Tauri 进程内提供 [Model Context Protocol](https://modelcontextpro
 
 ## 快速开始
 
+先安装 [Bun 1.3.14](https://bun.sh/docs/installation)。
+
 ```sh
 cd apps/reader
-npm install
-npm run tauri dev
+bun install
+bun run tauri dev
 ```
 
 MCP 测试：

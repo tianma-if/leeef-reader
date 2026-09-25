@@ -31,8 +31,8 @@ TXT 先转 EPUB，再进同一阅读器。
 
 ```bash
 cd apps/reader
-npm install
-npm run tauri dev
+bun install
+bun run tauri dev
 ```
 
 ## Android 真机
@@ -43,7 +43,7 @@ npm run tauri dev
 cd apps/reader
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
 export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
-npx tauri android build --debug --apk --target aarch64 --ci
+bun run tauri android build --debug --apk --target aarch64 --ci
 adb -s fb091b3c install -r -t src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
 adb -s fb091b3c shell am start -n dev.leeef.leeef_reader/.MainActivity
 ```
@@ -58,8 +58,8 @@ App Store 继续使用既有 bundle id `dev.leeef.leeefReader`（见 `src-tauri/
 cd apps/reader
 # Xcode 27 需要 llvm-objcopy，否则 @_cdecl 符号会内化，链接失败。
 rustup component add llvm-tools
-npx tauri ios init --ci   # 仅在需要重新生成 Xcode 工程时
-npx tauri ios build --ci --export-method app-store-connect
+bun run tauri ios init --ci   # 仅在需要重新生成 Xcode 工程时
+bun run tauri ios build --ci --export-method app-store-connect
 ```
 
 正式发版由 `.github/workflows/tauri-release.yml` 的 iOS job 签名并上传到 App Store Connect。`CFBundleVersion` 默认按 `major * 1000000 + minor * 1000 + patch` 计算，必须高于 Flutter 时代最后一次的 `25`。重新上传同一版本时用 `ios_build_number` 覆盖。上传成功不等于审核通过或商店上架。
