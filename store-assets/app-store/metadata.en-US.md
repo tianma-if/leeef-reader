@@ -28,7 +28,7 @@ AI AND CLOUD STORAGE CONFIGURED ON DESKTOP, SYNCED TO IPHONE
 Connect your own object storage and AI service on a computer for cross-device sync, explanations, translation, chapter summaries, and reading questions. The iPhone app does not include object-storage, AI, or cloud TTS endpoint, key, or provider entry; credentials reach iOS after you scan a pairing QR code or through trusted-device / cloud sync.
 
 YOUR CLOUD, YOUR DATA
-Leeef stores data locally by default and requires no account. Optional S3 or WebDAV sync keeps books, progress, highlights, and shelves in step across iOS, Android, macOS, and Windows.
+Leeef stores data locally by default and requires no account. Optional S3 or WebDAV sync keeps books, progress, highlights, and shelves in step across your devices.
 
 Some online features require a network connection. S3/WebDAV uses storage you provide. Storage and AI credentials are configured on desktop and synced; they are not purchased or entered in the iOS app.
 
