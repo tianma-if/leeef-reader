@@ -87,6 +87,40 @@
   overflow: auto;
 }
 
+.reader-search-nav {
+  position: absolute;
+  left: 50%;
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--background) 92%, transparent);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+  transform: translateX(-50%);
+}
+
+.reader-shell:has(.reader-footer.is-hidden) .reader-search-nav {
+  bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+}
+
+.reader-shell:not(:has(.reader-footer.is-hidden)) .reader-search-nav {
+  bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+.reader-table-view table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.reader-table-view :is(td, th) {
+  border: 1px solid color-mix(in oklch, currentColor 25%, transparent);
+  padding: 0.35rem 0.5rem;
+  vertical-align: top;
+}
+
 .reader-band {
   position: absolute;
   z-index: 3;

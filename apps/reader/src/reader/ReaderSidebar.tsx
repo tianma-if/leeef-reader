@@ -29,6 +29,8 @@ type Props = {
   onPatch: (partial: Partial<Settings>) => void
   onSearch: (query: string, signal: AbortSignal) => Promise<SearchHit[]>
   onClearSearch: () => void
+  searchSeed?: { id: number; query: string } | null
+  onPickSearch?: (hits: SearchHit[], index: number) => void
   onGo: (locator: string) => void
   onAddBookmark: () => void
   onDeleteBookmark: (id: string) => void
@@ -127,15 +129,15 @@ function TocList({ toc, currentToc, locator, progress, onGo }: Pick<Props, 'toc'
   return toc.length ? renderItems(toc) : <p className="reader-nav-empty">这本书没有目录</p>
 }
 
-function SearchResults({ hits, searching, onGo }: { hits: SearchHit[] | null; searching: boolean; onGo: Props['onGo'] }) {
+function SearchResults({ hits, searching, onGo, onPick }: { hits: SearchHit[] | null; searching: boolean; onGo: Props['onGo']; onPick?: Props['onPickSearch'] }) {
   if (searching) return <p role="status" className="reader-nav-empty">正在搜索…</p>
   if (!hits) return null
   if (!hits.length) return <p role="status" className="reader-nav-empty">未找到匹配内容</p>
   return (
     <ul className="reader-mark-list">
-      {hits.map(({ cfi, excerpt, chapter }) => (
+      {hits.map(({ cfi, excerpt, chapter }, index) => (
         <li className="reader-mark-row" key={cfi}>
-          <button type="button" className="reader-list-link" onClick={() => onGo(cfi)}>
+          <button type="button" className="reader-list-link" onClick={() => onPick ? onPick(hits, index) : onGo(cfi)}>
             {chapter ? <span className="reader-mark-note">{chapter}</span> : null}
             <span>{excerpt.pre}<mark>{excerpt.match}</mark>{excerpt.post}</span>
           </button>
@@ -170,6 +172,30 @@ function ReaderSidebarBody(props: Props) {
   useEffect(() => {
     if (searchOpen) searchInput.current?.focus()
   }, [searchOpen])
+
+  useEffect(() => {
+    const seed = props.searchSeed
+    if (!seed) return
+    searchRequest.current?.abort()
+    const request = new AbortController()
+    searchRequest.current = request
+    setTab('toc')
+    setSearchOpen(true)
+    setQuery(seed.query)
+    setHits(null)
+    setSearching(true)
+    void props.onSearch(seed.query, request.signal).then((results) => {
+      if (!request.signal.aborted) setHits(results)
+    }).catch(() => {
+      if (!request.signal.aborted) {
+        setHits(null)
+        toast.error('搜索失败，请重试')
+      }
+    }).finally(() => {
+      if (!request.signal.aborted) setSearching(false)
+    })
+    return () => request.abort()
+  }, [props.searchSeed])
 
   const closeSearch = () => {
     searchRequest.current?.abort()
@@ -245,7 +271,7 @@ function ReaderSidebarBody(props: Props) {
       ) : null}
       <Tabs value={tab} onValueChange={changeTab} activationMode="manual" className="reader-nav-tabs">
         <TabsContent value="toc" className="reader-nav-scroll">
-          {searchInBook ? <SearchResults hits={hits} searching={searching} onGo={props.onGo} /> : (
+          {searchInBook ? <SearchResults hits={hits} searching={searching} onGo={props.onGo} onPick={props.onPickSearch} /> : (
             <TocList
               key={props.currentToc?.id ?? props.currentToc?.href}
               toc={props.toc}
@@ -271,7 +297,7 @@ function ReaderSidebarBody(props: Props) {
           ) : <p className="reader-nav-empty">{term ? '未找到匹配的书摘' : '还没有书摘，选中文字后点「存书摘」'}</p>}
         </TabsContent>
         <TabsContent value="bookmarks" className="reader-nav-scroll">
-          {searchInBook ? <SearchResults hits={hits} searching={searching} onGo={props.onGo} /> : props.bookmarks.length ? (
+          {searchInBook ? <SearchResults hits={hits} searching={searching} onGo={props.onGo} onPick={props.onPickSearch} /> : props.bookmarks.length ? (
             <ul className="reader-mark-list">
               {props.bookmarks.map((item) => {
                 const label = item.title?.trim() || '未命名书签'

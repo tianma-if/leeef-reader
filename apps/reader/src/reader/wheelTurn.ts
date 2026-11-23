@@ -28,10 +28,11 @@ export const wheelTurnDirection = (
   const multiplier = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? pageHeight : 1
   const x = event.deltaX * multiplier
   const y = event.deltaY * multiplier
-  if (!Number.isFinite(y) || Math.abs(y) <= Math.abs(x) || y === 0) return null
+  const dominant = Math.abs(x) > Math.abs(y) ? x : y
+  if (!Number.isFinite(dominant) || dominant === 0) return null
   if (state.consumed) return null
-  if (Math.sign(y) !== Math.sign(state.distance)) state.distance = 0
-  state.distance += y
+  if (Math.sign(dominant) !== Math.sign(state.distance)) state.distance = 0
+  state.distance += dominant
   if (Math.abs(state.distance) < WHEEL_TURN_DISTANCE_PX) return null
   state.consumed = true
   return state.distance > 0

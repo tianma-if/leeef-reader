@@ -14,6 +14,8 @@ declare global {
     }[]
     next?: (distance?: number) => void | Promise<void>
     prev?: (distance?: number) => void | Promise<void>
+    nextSection?: () => void | Promise<void>
+    prevSection?: () => void | Promise<void>
   }
 
   interface FoliateViewElement extends HTMLElement {
@@ -42,7 +44,16 @@ declare global {
       cfi?: string
       fraction?: number
       tocItem?: TocItem
+      location?: { current: number; next: number; total: number }
       range?: Range
+    }
+    history: {
+      back: () => void
+      forward: () => void
+      readonly canGoBack: boolean
+      readonly canGoForward: boolean
+      addEventListener: (type: 'index-change', listener: () => void) => void
+      removeEventListener: (type: 'index-change', listener: () => void) => void
     }
     renderer: FoliateRendererElement
     search: (opts: { query: string }) => AsyncIterable<FoliateSearchResult>

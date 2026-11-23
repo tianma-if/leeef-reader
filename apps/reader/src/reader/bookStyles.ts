@@ -50,6 +50,12 @@ img, svg, video { max-width: 100%; }
 `
 }
 
+/** Captured-sheet slide is opt-in. The default mobile turn is the paginator push. */
+export const usesCapturedSlide = (settings: Settings, mobile: boolean) =>
+  mobile
+  && (settings.flow ?? 'paginated') === 'paginated'
+  && (settings.pageTurn ?? 'push') === 'slide'
+
 export const applyViewLayout = (
   view: FoliateViewElement,
   settings: Settings,
@@ -63,11 +69,16 @@ export const applyViewLayout = (
   renderer.setAttribute('max-column-count', String(mobile ? 1 : (settings.columns ?? 1)))
   renderer.setAttribute('margin', `${mobile ? PAGE_MARGIN_PX.mobile : PAGE_MARGIN_PX.desktop}px`)
   renderer.setAttribute('max-block-size', '10000px')
-  if (paginated && mobile) {
+  if (usesCapturedSlide(settings, mobile)) {
     renderer.setAttribute('max-inline-size', '10000')
     view.setAttribute('no-swipe', '')
     renderer.setAttribute('no-swipe', '')
     renderer.removeAttribute('animated')
+  } else if (paginated && mobile) {
+    renderer.setAttribute('max-inline-size', '10000')
+    view.removeAttribute('no-swipe')
+    renderer.removeAttribute('no-swipe')
+    renderer.setAttribute('animated', '')
   } else if (paginated) {
     view.removeAttribute('no-swipe')
     renderer.removeAttribute('no-swipe')

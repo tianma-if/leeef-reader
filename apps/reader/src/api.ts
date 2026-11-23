@@ -56,6 +56,8 @@ export type Settings = {
   lineHeight?: number
   fontFamily?: string
   flow?: 'paginated' | 'scrolled'
+  /** Mobile paginated turn. `push` is the paginator strip; `slide` is the captured sheet. */
+  pageTurn?: 'push' | 'slide'
   columns?: 1 | 2
   ttsRate?: number
   aiEndpoint?: string

@@ -21,6 +21,8 @@ type TouchOptions = {
   paginated: () => boolean
   selecting: () => boolean
   prepareTurn: () => void
+  /** When false, horizontal drags stay with the paginator push instead of the captured sheet. */
+  captureTurns?: () => boolean
   startTurn: (forward: boolean) => boolean
   moveTurn: (progress: number) => void
   finishTurn: (forward: boolean, captured: boolean, commit: boolean) => void
@@ -56,6 +58,11 @@ export function bindReaderTouch(target: EventTarget, options: TouchOptions) {
   ) => target.addEventListener(type, callback as EventListener, { signal: options.signal, ...settings })
   const progressOf = (distance: number, origin: number, width: number) =>
     Math.min(1, Math.max(0, (distance - origin) / width))
+  const capturesTurn = () => options.captureTurns?.() !== false
+  const own = (event: Event) => {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+  }
 
   listen('touchstart', (event) => {
     ignoreClick = false
@@ -93,8 +100,8 @@ export function bindReaderTouch(target: EventTarget, options: TouchOptions) {
       intent: createTurnGestureIntent(edgeDirectionOf(x, bounds.width), now),
       samples: [{ distance: 0, time: now }],
     }
-    if (gesture.paginated && !gesture.selecting) options.prepareTurn()
-  }, { passive: true })
+    if (gesture.paginated && !gesture.selecting && capturesTurn()) options.prepareTurn()
+  }, { passive: true, capture: true })
 
   listen('touchmove', (event) => {
     const drag = gesture
@@ -105,6 +112,7 @@ export function bindReaderTouch(target: EventTarget, options: TouchOptions) {
     const dy = touch.screenY - drag.y
     const now = performance.now()
     if (drag.bookmarkPull) {
+      event.stopImmediatePropagation()
       if (event.cancelable) event.preventDefault()
       const pull = dy >= BOOKMARK_PULL_COMMIT_PX && dy > 2 * Math.abs(dx) ? 'ready' : 'pulling'
       if (pull !== drag.bookmarkPull) {
@@ -123,11 +131,13 @@ export function bindReaderTouch(target: EventTarget, options: TouchOptions) {
       }
       if (drag.canPullBookmark && dy >= BOOKMARK_PULL_START_PX && dy > 2 * Math.abs(dx)
         && options.canPullBookmark()) {
+        event.stopImmediatePropagation()
         if (event.cancelable) event.preventDefault()
         drag.bookmarkPull = dy >= BOOKMARK_PULL_COMMIT_PX ? 'ready' : 'pulling'
         options.previewBookmark(drag.bookmarkPull)
         return
       }
+      if (!capturesTurn()) return
       const wantsTurn = shouldClaimTurnGesture(drag.intent, { deltaX: dx, deltaY: dy, deltaT: now })
       if (!wantsTurn || Math.abs(dx) < TURN_FAST_CLAIM_DISTANCE_PX) return
       drag.claimed = true
@@ -135,12 +145,12 @@ export function bindReaderTouch(target: EventTarget, options: TouchOptions) {
       drag.visualOrigin = Math.abs(dx)
       drag.captured = options.startTurn(drag.forward)
     }
-    event.preventDefault()
+    own(event)
     const distance = drag.forward ? -dx : dx
     if (drag.captured) options.moveTurn(progressOf(distance, drag.visualOrigin, drag.width))
     drag.samples.push({ distance, time: now })
     if (drag.samples.length > 8) drag.samples.shift()
-  }, { passive: false })
+  }, { passive: false, capture: true })
 
   const finish = (event: TouchEvent) => {
     const drag = gesture
@@ -152,6 +162,7 @@ export function bindReaderTouch(target: EventTarget, options: TouchOptions) {
     const dy = (touch?.screenY ?? drag.y) - drag.y
     const now = performance.now()
     const cancelled = event.type === 'touchcancel'
+    if (drag.bookmarkPull || drag.claimed) event.stopImmediatePropagation()
     if (drag.bookmarkPull) {
       ignoreClick = true
       options.previewBookmark(null)
@@ -181,8 +192,8 @@ export function bindReaderTouch(target: EventTarget, options: TouchOptions) {
       options.showChrome()
     }
   }
-  listen('touchend', finish, { passive: true })
-  listen('touchcancel', finish, { passive: true })
+  listen('touchend', finish, { passive: true, capture: true })
+  listen('touchcancel', finish, { passive: true, capture: true })
   listen('pointerdown', (event) => {
     if (event.pointerType === 'mouse') ignoreClick = false
   })

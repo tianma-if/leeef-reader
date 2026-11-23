@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bindReaderTouch } from './readerTouch'
 
-const setup = (selecting = () => false, paginated = () => true) => {
+const setup = (selecting = () => false, paginated = () => true, captureTurns = () => true) => {
   const target = new EventTarget()
   const controller = new AbortController()
   let now = 0
@@ -18,6 +18,7 @@ const setup = (selecting = () => false, paginated = () => true) => {
     paginated,
     selecting,
     prepareTurn: vi.fn(),
+    captureTurns,
     startTurn,
     moveTurn,
     finishTurn,
@@ -135,6 +136,23 @@ describe('reader touch gestures', () => {
     touch('touchend', 150, startTime + 20, startY + 85)
     expect(previewBookmark).not.toHaveBeenCalled()
     expect(addBookmark).not.toHaveBeenCalled()
+  })
+
+  it('leaves a horizontal drag to the paginator when the captured sheet is off', () => {
+    const { touch, startTurn } = setup(() => false, () => true, () => false)
+    touch('touchstart', 320, 0)
+    expect(touch('touchmove', 200, 40)).toBe(true)
+    touch('touchend', 80, 70)
+    expect(startTurn).not.toHaveBeenCalled()
+  })
+
+  it('still bookmarks from a pull when the paginator owns horizontal drags', () => {
+    const { touch, addBookmark, startTurn } = setup(() => false, () => true, () => false)
+    touch('touchstart', 150, 0)
+    touch('touchmove', 150, 40, 180)
+    touch('touchend', 150, 70, 190)
+    expect(addBookmark).toHaveBeenCalledTimes(1)
+    expect(startTurn).not.toHaveBeenCalled()
   })
 
   it('still opens the reader controls on an upward swipe', () => {

@@ -1,5 +1,7 @@
-import { ChevronLeft, ChevronRight, List, Palette, SlidersHorizontal, Type } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, List, Palette, Redo2, SlidersHorizontal, Type, Undo2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Slider } from '@/components/ui/slider'
 import type { Settings } from '../api'
 import { THEMES, type ThemeName } from './bookStyles'
@@ -13,9 +15,16 @@ type Props = {
   settings: Settings
   progress: number
   chapter: string
+  canGoBack: boolean
+  canGoForward: boolean
+  locationCurrent: number | null
+  locationTotal: number | null
   onOpenTab: (tab: FooterTab) => void
   onPatch: (partial: Partial<Settings>) => void
   onGoToFraction: (value: number) => void
+  onGoToLocation: (page: number) => void
+  onHistory: (forward: boolean) => void
+  onSection: (forward: boolean) => void
   onTurn: (forward: boolean) => void
   onKeepVisible: () => void
   onRequestHide: () => void
@@ -28,9 +37,16 @@ export function ReaderFooter({
   settings,
   progress,
   chapter,
+  canGoBack,
+  canGoForward,
+  locationCurrent,
+  locationTotal,
   onOpenTab,
   onPatch,
   onGoToFraction,
+  onGoToLocation,
+  onHistory,
+  onSection,
   onTurn,
   onKeepVisible,
   onRequestHide,
@@ -40,6 +56,19 @@ export function ReaderFooter({
   const lineHeight = settings.lineHeight ?? 1.65
   const flow = settings.flow ?? 'paginated'
   const columns = settings.columns ?? 1
+  const pageTurn = settings.pageTurn ?? 'push'
+  const navigation = (
+    <ReadingNavigation
+      canGoBack={canGoBack}
+      canGoForward={canGoForward}
+      locationCurrent={locationCurrent}
+      locationTotal={locationTotal}
+      onGoToLocation={onGoToLocation}
+      onHistory={onHistory}
+      onSection={onSection}
+      onTurn={onTurn}
+    />
+  )
 
   return (
     <footer
@@ -91,6 +120,26 @@ export function ReaderFooter({
                   onValueChange={([value]) => onPatch({ lineHeight: value })}
                 />
               </label>
+              {flow === 'paginated' ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={pageTurn === 'push' ? 'default' : 'outline'}
+                    onClick={() => onPatch({ pageTurn: 'push' })}
+                  >
+                    推移
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={pageTurn === 'slide' ? 'default' : 'outline'}
+                    onClick={() => onPatch({ pageTurn: 'slide' })}
+                  >
+                    滑动
+                  </Button>
+                </div>
+              ) : null}
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
@@ -128,7 +177,7 @@ export function ReaderFooter({
             </div>
           ) : null}
           {footerTab === 'progress' ? (
-            <div className="reader-footer-panel grid gap-2">
+            <div className="reader-footer-panel grid gap-3">
               <p className="text-muted-foreground truncate text-sm">{chapter}</p>
               <Slider
                 min={0}
@@ -136,6 +185,7 @@ export function ReaderFooter({
                 value={[Math.round(progress * 1000)]}
                 onValueChange={([value]) => onGoToFraction(value / 1000)}
               />
+              {navigation}
             </div>
           ) : null}
           <div className="reader-footer-bar">
@@ -183,8 +233,14 @@ export function ReaderFooter({
             </div>
           ) : null}
           <div className="reader-footer-desktop">
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="上一章" onClick={() => onSection(false)}>
+              <ChevronsLeft />
+            </Button>
             <Button type="button" variant="ghost" size="icon-sm" aria-label="上一页" onClick={() => onTurn(false)}>
               <ChevronLeft />
+            </Button>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="返回上一位置" disabled={!canGoBack} onClick={() => onHistory(false)}>
+              <Undo2 />
             </Button>
             <Slider
               className="flex-1"
@@ -196,8 +252,14 @@ export function ReaderFooter({
             <span className="text-muted-foreground w-14 text-right text-xs">
               {(progress * 100).toFixed(1)}%
             </span>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="前进到下一位置" disabled={!canGoForward} onClick={() => onHistory(true)}>
+              <Redo2 />
+            </Button>
             <Button type="button" variant="ghost" size="icon-sm" aria-label="下一页" onClick={() => onTurn(true)}>
               <ChevronRight />
+            </Button>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="下一章" onClick={() => onSection(true)}>
+              <ChevronsRight />
             </Button>
             <Button
               type="button"
@@ -212,5 +274,77 @@ export function ReaderFooter({
         </>
       )}
     </footer>
+  )
+}
+
+function ReadingNavigation({
+  canGoBack,
+  canGoForward,
+  locationCurrent,
+  locationTotal,
+  onGoToLocation,
+  onHistory,
+  onSection,
+  onTurn,
+}: {
+  canGoBack: boolean
+  canGoForward: boolean
+  locationCurrent: number | null
+  locationTotal: number | null
+  onGoToLocation: (page: number) => void
+  onHistory: (forward: boolean) => void
+  onSection: (forward: boolean) => void
+  onTurn: (forward: boolean) => void
+}) {
+  const [draft, setDraft] = useState(locationCurrent ? String(locationCurrent) : '')
+  const [editing, setEditing] = useState(false)
+  useEffect(() => {
+    if (!editing) setDraft(locationCurrent ? String(locationCurrent) : '')
+  }, [editing, locationCurrent])
+
+  return (
+    <div className="grid gap-3">
+      {locationTotal ? (
+        <form
+          className="flex items-center justify-center gap-2 text-sm"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const page = Number(draft)
+            if (Number.isInteger(page)) onGoToLocation(page)
+          }}
+        >
+          <Input
+            className="h-8 w-20 text-center"
+            inputMode="numeric"
+            aria-label="跳转到位置"
+            value={draft}
+            onFocus={() => setEditing(true)}
+            onBlur={() => setEditing(false)}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+          <span className="text-muted-foreground">/ {locationTotal}</span>
+        </form>
+      ) : null}
+      <div className="flex items-center justify-between gap-1">
+        <Button type="button" variant="ghost" size="icon" aria-label="上一章" onClick={() => onSection(false)}>
+          <ChevronsLeft />
+        </Button>
+        <Button type="button" variant="ghost" size="icon" aria-label="上一页" onClick={() => onTurn(false)}>
+          <ChevronLeft />
+        </Button>
+        <Button type="button" variant="ghost" size="icon" aria-label="返回上一位置" disabled={!canGoBack} onClick={() => onHistory(false)}>
+          <Undo2 />
+        </Button>
+        <Button type="button" variant="ghost" size="icon" aria-label="前进到下一位置" disabled={!canGoForward} onClick={() => onHistory(true)}>
+          <Redo2 />
+        </Button>
+        <Button type="button" variant="ghost" size="icon" aria-label="下一页" onClick={() => onTurn(true)}>
+          <ChevronRight />
+        </Button>
+        <Button type="button" variant="ghost" size="icon" aria-label="下一章" onClick={() => onSection(true)}>
+          <ChevronsRight />
+        </Button>
+      </div>
+    </div>
   )
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyViewLayout, bookCss, PAGE_MARGIN_PX, themeOf } from './bookStyles'
+import { applyViewLayout, bookCss, PAGE_MARGIN_PX, themeOf, usesCapturedSlide } from './bookStyles'
 
 const fakeView = () => {
   const attrs = new Map<string, string>()
@@ -66,12 +66,22 @@ describe('themeOf', () => {
 })
 
 describe('applyViewLayout', () => {
-  it('uses a compact page margin on mobile', () => {
+  it('uses a compact page margin and paginator push on mobile', () => {
     const { view, attrs } = fakeView()
     applyViewLayout(view, { flow: 'paginated' }, true)
     expect(attrs.get('margin')).toBe(`${PAGE_MARGIN_PX.mobile}px`)
     expect(attrs.get('max-column-count')).toBe('1')
+    expect(attrs.has('animated')).toBe(true)
+    expect(attrs.has('view:no-swipe')).toBe(false)
+    expect(usesCapturedSlide({ flow: 'paginated' }, true)).toBe(false)
+  })
+
+  it('keeps the captured sheet only for the slide style', () => {
+    const { view, attrs } = fakeView()
+    applyViewLayout(view, { flow: 'paginated', pageTurn: 'slide' }, true)
     expect(attrs.has('view:no-swipe')).toBe(true)
+    expect(attrs.has('animated')).toBe(false)
+    expect(usesCapturedSlide({ pageTurn: 'slide' }, true)).toBe(true)
   })
 
   it('keeps the wider desktop page margin', () => {

@@ -1,4 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import {
@@ -9,14 +11,16 @@ import {
   type Excerpt,
   type Settings,
 } from '../api'
-import { applyReadingFont, applyViewLayout, highlightDraw, labelOf, themeOf } from './bookStyles'
+import { applyReadingFont, applyViewLayout, highlightDraw, labelOf, themeOf, usesCapturedSlide } from './bookStyles'
 import { normalizeSelectedText } from './selectionText'
 import { mountReadingFont } from './fontLoader'
 import { CapturedPageTurn } from './capturedTurn'
 import { TurnQueue } from './turnQueue'
 import { ReaderChrome } from './ReaderChrome'
 import { ReaderFooter } from './ReaderFooter'
+import { ReadingOverlays } from './ReadingOverlays'
 import { ReaderSidebar, type SearchHit } from './ReaderSidebar'
+import { classifyReadingTarget, resolveFootnoteText } from './readingTarget'
 import { DEFAULT_HIGHLIGHT_COLOR, SelectionPopup, type SelectionState } from './SelectionPopup'
 import { zoneOf } from './turnCommit'
 import { bindReaderTouch, type BookmarkPull } from './readerTouch'
@@ -127,6 +131,16 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   const addPageBookmarkRef = useRef<() => void>(() => undefined)
   const [bookmarkPull, setBookmarkPull] = useState<BookmarkPull | null>(null)
   const [aiSource, setAiSource] = useState<ReadingSource | null>(null)
+  const [historyNav, setHistoryNav] = useState({ back: false, forward: false })
+  const [location, setLocation] = useState<{ current: number; total: number } | null>(null)
+  const [footnote, setFootnote] = useState<string | null>(null)
+  const [picture, setPicture] = useState<{ src: string; alt: string } | null>(null)
+  const [table, setTable] = useState<HTMLTableElement | null>(null)
+  const [externalHref, setExternalHref] = useState<string | null>(null)
+  const [searchSeed, setSearchSeed] = useState<{ id: number; query: string } | null>(null)
+  const [searchNav, setSearchNav] = useState<{ hits: SearchHit[]; index: number } | null>(null)
+  const searchNavRef = useRef(searchNav)
+  searchNavRef.current = searchNav
   const mobile = isMobile()
   const chrome = useReaderChrome()
   const chromeRef = useRef(chrome)
@@ -214,8 +228,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     if (selectionRef.current) clearSelection()
     turnQueue.current!.run(async () => {
       if (viewRef.current !== view) return
-      const useCapture =
-        isMobile() && (settingsRef.current.flow ?? 'paginated') === 'paginated'
+      const useCapture = usesCapturedSlide(settingsRef.current, isMobile())
       const started = useCapture && await getTurner().turn(forward)
       if (!started && viewRef.current === view) await (forward ? view.next() : view.prev())
       if (viewRef.current === view && useCapture) void getTurner().prepare()
@@ -236,7 +249,10 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     if (mobile) chrome.hide()
   }
 
-  const clearBookSearch = useCallback(() => viewRef.current?.clearSearch(), [])
+  const clearBookSearch = useCallback(() => {
+    if (searchNavRef.current) return
+    viewRef.current?.clearSearch()
+  }, [])
 
   const searchBook = async (query: string, signal: AbortSignal) => {
     const view = viewRef.current
@@ -278,6 +294,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     let cancelled = false
     let view: FoliateViewElement | null = null
     let ready = false
+    let unlistenHistory: (() => void) | undefined
     const events = new AbortController()
     const { signal } = events
     const isPaginated = () => (settingsRef.current.flow ?? 'paginated') === 'paginated'
@@ -299,6 +316,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         frame,
         paginated: () => isPaginated() && !chromeRef.current.visible && !chromeRef.current.sidebar,
         selecting,
+        captureTurns: () => usesCapturedSlide(settingsRef.current, mobile),
         prepareTurn: () => { void getTurner().prepare() },
         startTurn: (forward) => {
           if (turnQueue.current?.busy || selectionRef.current) return false
@@ -383,16 +401,30 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       await waitForSize(host)
       if (cancelled) return
       view = document.createElement('foliate-view')
-      host.append(view)
-      viewRef.current = view
+      const reader = view
+      host.append(reader)
+      viewRef.current = reader
+      const syncHistory = () => {
+        setHistoryNav({ back: reader.history.canGoBack, forward: reader.history.canGoForward })
+      }
+      reader.history.addEventListener('index-change', syncHistory)
+      unlistenHistory = () => reader.history.removeEventListener('index-change', syncHistory)
+      view.addEventListener('external-link', ((event: Event) => {
+        event.preventDefault()
+        const href = (event as CustomEvent<{ href_?: string }>).detail?.href_?.trim()
+        if (href) setExternalHref(href)
+      }) as EventListener)
       view.addEventListener('relocate', ((event: Event) => {
         setStatus('')
         const detail = (event as CustomEvent).detail as {
           cfi?: string
           fraction?: number
           tocItem?: TocItem
+          location?: { current: number; total: number }
         }
         const fraction = Number(detail.fraction ?? 0)
+        const place = detail.location
+        setLocation(place && place.total > 0 ? { current: place.current, total: place.total } : null)
         setProgress(fraction)
         const chapterTitle = labelOf(detail.tocItem?.label)
         setCurrentToc(detail.tocItem)
@@ -401,7 +433,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         void api.saveProgress(book.id, detail.cfi ?? '', fraction, chapterTitle || undefined)
         getTurner().invalidate()
         window.clearTimeout(prepareTimer.current)
-        if (mobile && isPaginated()) {
+        if (usesCapturedSlide(settingsRef.current, mobile)) {
           prepareTimer.current = window.setTimeout(() => {
             void getTurner().prepare()
           }, 160)
@@ -473,6 +505,37 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
             event.stopImmediatePropagation()
             return
           }
+          const targetNode = event.target as Node | null
+          const element = targetNode?.nodeType === Node.ELEMENT_NODE ? targetNode as Element : null
+          const readingTarget = element ? classifyReadingTarget(element) : null
+          if (readingTarget?.kind === 'footnote') {
+            const text = resolveFootnoteText(readingTarget.inline, readingTarget.hash, (id) => doc.getElementById(id)?.textContent ?? null)
+            if (text) {
+              event.preventDefault()
+              event.stopImmediatePropagation()
+              setFootnote(text)
+              return
+            }
+          }
+          if (readingTarget?.kind === 'image' && element) {
+            const image = element.closest('img') as HTMLImageElement | null
+            const src = image?.src || readingTarget.src
+            if (src) {
+              event.preventDefault()
+              event.stopImmediatePropagation()
+              setPicture({ src, alt: readingTarget.alt })
+              return
+            }
+          }
+          if (readingTarget?.kind === 'table' && element) {
+            const source = element.closest('table')
+            if (source) {
+              event.preventDefault()
+              event.stopImmediatePropagation()
+              setTable(document.importNode(source, true) as HTMLTableElement)
+              return
+            }
+          }
           if (event.button === 0 && !event.defaultPrevented) {
             const content = currentView.renderer.getContents?.().find((item) => item.doc === doc)
             const hit = content?.overlayer?.hitTest(event)
@@ -520,6 +583,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
 
     return () => {
       cancelled = true
+      unlistenHistory?.()
       events.abort()
       window.clearTimeout(prepareTimer.current)
       window.clearTimeout(saveTimer.current)
@@ -656,6 +720,40 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     }
   }
 
+  const stepHistory = (forward: boolean) => {
+    const history = viewRef.current?.history
+    if (!history) return
+    clearSelection()
+    if (forward) history.forward()
+    else history.back()
+    chrome.hide()
+  }
+
+  const turnSection = (forward: boolean) => {
+    const renderer = viewRef.current?.renderer
+    if (!renderer) return
+    clearSelection()
+    chrome.hide()
+    void (forward ? renderer.nextSection?.() : renderer.prevSection?.())
+  }
+
+  const goToLocation = (page: number) => {
+    const total = location?.total
+    if (!total || page < 1 || page > total) return
+    clearSelection()
+    void viewRef.current?.goToFraction(Math.min(0.999, (page - 1) / total))
+  }
+
+  const showSearchHit = (index: number) => {
+    const current = searchNavRef.current
+    const hit = current?.hits[index]
+    if (!current || !hit) return
+    const next = { hits: current.hits, index }
+    searchNavRef.current = next
+    setSearchNav(next)
+    goTo(hit.cfi)
+  }
+
   const toggleBookmark = () => {
     const current = viewRef.current?.lastLocation?.cfi ?? locator
     if (!current || !canBookmark) return
@@ -708,12 +806,19 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         settings={settings}
         progress={progress}
         chapter={chapter}
+        canGoBack={historyNav.back}
+        canGoForward={historyNav.forward}
+        locationCurrent={location ? location.current + 1 : null}
+        locationTotal={location?.total ?? null}
         onOpenTab={chrome.openTab}
         onPatch={patchSettings}
         onGoToFraction={(value) => {
           clearSelection()
           void viewRef.current?.goToFraction(value)
         }}
+        onGoToLocation={goToLocation}
+        onHistory={stepHistory}
+        onSection={turnSection}
         onTurn={turn}
         onKeepVisible={chrome.show}
         onRequestHide={chrome.hide}
@@ -734,6 +839,14 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         onPatch={patchSettings}
         onSearch={searchBook}
         onClearSearch={clearBookSearch}
+        searchSeed={searchSeed}
+        onPickSearch={(hits, index) => {
+          const next = { hits, index }
+          searchNavRef.current = next
+          setSearchNav(next)
+          goTo(hits[index]?.cfi ?? '')
+          if (mobile) chrome.hide()
+        }}
         onGo={(target) => {
           goTo(target)
           if (mobile) chrome.hide()
@@ -782,6 +895,13 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
               if (selectionRef.current?.cfi === selection.cfi) clearSelection()
             })
           }}
+          onSearch={() => {
+            const query = selection.text.replace(/\s+/g, ' ').trim().slice(0, 80)
+            if (!query) return
+            setSearchSeed({ id: Date.now(), query })
+            chrome.openSidebar()
+            clearSelection()
+          }}
         />
       ) : null}
       {aiSource ? (
@@ -794,6 +914,38 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
             onGo={(target) => { goTo(target); setAiSource(null) }} />
         </Suspense>
       ) : null}
+      {searchNav && !chrome.sidebar ? (
+        <div className="reader-search-nav" role="navigation" aria-label="搜索结果">
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="上一处" disabled={searchNav.index <= 0} onClick={() => showSearchHit(searchNav.index - 1)}>
+            <ChevronLeft />
+          </Button>
+          <span className="text-xs tabular-nums">{searchNav.index + 1} / {searchNav.hits.length}</span>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="下一处" disabled={searchNav.index >= searchNav.hits.length - 1} onClick={() => showSearchHit(searchNav.index + 1)}>
+            <ChevronRight />
+          </Button>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="关闭搜索" onClick={() => {
+            searchNavRef.current = null
+            setSearchNav(null)
+            viewRef.current?.clearSearch()
+          }}>
+            <X />
+          </Button>
+        </div>
+      ) : null}
+      <ReadingOverlays
+        footnote={footnote}
+        picture={picture}
+        table={table}
+        externalHref={externalHref}
+        onCloseFootnote={() => setFootnote(null)}
+        onClosePicture={() => setPicture(null)}
+        onCloseTable={() => setTable(null)}
+        onCloseExternal={() => setExternalHref(null)}
+        onOpenExternal={() => {
+          if (externalHref) window.open(externalHref, '_blank', 'noopener,noreferrer')
+          setExternalHref(null)
+        }}
+      />
       {error ? <p className="reader-error">{error}</p> : null}
     </div>
   )

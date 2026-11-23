@@ -19,8 +19,8 @@ it('accumulates small trackpad deltas without flipping on momentum', () => {
   expect(wheelTurnDirection(state, wheel(60, 100), 600)).toBeNull()
 })
 
-it('ignores horizontal gestures and supports line-based mouse wheels', () => {
+it('turns on a horizontal wheel and on line-based mouse wheels', () => {
   const state = createWheelTurnState()
-  expect(wheelTurnDirection(state, wheel(10, 0, 20), 600)).toBeNull()
+  expect(wheelTurnDirection(state, wheel(10, 0, 48), 600)).toBe(true)
   expect(wheelTurnDirection(state, wheel(-3, 200, 0, 1), 600)).toBe(false)
 })

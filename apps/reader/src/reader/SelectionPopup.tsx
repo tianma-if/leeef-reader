@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { Bookmark, Bot, Copy, Highlighter, MessageSquarePlus, Trash2 } from 'lucide-react'
+import { Bookmark, Bot, Copy, Highlighter, MessageSquarePlus, Search, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
@@ -34,6 +34,7 @@ type Props = {
   onRemove: () => Promise<void>
   onDismiss: () => void
   onBookmark: () => void
+  onSearch: () => void
   onAiExplain: () => void
 }
 
@@ -49,6 +50,7 @@ export function SelectionPopup({
   onRemove,
   onDismiss,
   onBookmark,
+  onSearch,
   onAiExplain,
 }: Props) {
   const popupRef = useRef<HTMLDivElement>(null)
@@ -205,6 +207,9 @@ export function SelectionPopup({
             </Button>
             <Button type="button" size="icon" variant="ghost" onClick={onBookmark} disabled={saving} aria-label="添加书签" title="添加书签">
               <Bookmark />
+            </Button>
+            <Button type="button" size="icon" variant="ghost" onClick={onSearch} disabled={saving} aria-label="在书中搜索" title="在书中搜索">
+              <Search />
             </Button>
             <Button type="button" size="icon" variant="ghost" onClick={onAiExplain} disabled={saving} aria-label="AI 解释" title="AI 解释">
               <Bot />
