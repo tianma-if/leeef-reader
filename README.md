@@ -96,7 +96,7 @@ Online features need a network and credentials you supply. Leeef does not sell A
 
 These are not in the current GitHub Release:
 
-- Signed Windows installers
+- Signed Windows installers (build, signing, updater and audit workflows are wired; production credentials and a successful Windows release are still required)
 - QR scanning on the existing pairing-code flow, on-demand book download, and backups larger than 128 MiB
 
 ## Updates

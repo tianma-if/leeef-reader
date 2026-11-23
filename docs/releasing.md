@@ -1,6 +1,6 @@
-# 商店与 macOS 发布
+# 商店与桌面端发布
 
-当前正式资产走 [`.github/workflows/tauri-release.yml`](../.github/workflows/tauri-release.yml)：对 Draft Tag 手动调度，构建签名 macOS DMG/ZIP、Android APK/AAB（默认上传 Google Play production）和 iOS IPA（默认上传 App Store Connect、提交审核，并在审核通过后自动发布）。旧的 Flutter 工作流 `google-play.yml` / `ios-app-store.yml` / `macos-dmg.yml` 不得对正式 Tag 发版。
+当前正式资产走 [`.github/workflows/tauri-release.yml`](../.github/workflows/tauri-release.yml)：对 Draft Tag 手动调度，构建签名 macOS DMG/ZIP、Windows x64 NSIS 安装包、Android APK/AAB（默认上传 Google Play production）和 iOS IPA（默认上传 App Store Connect、提交审核，并在审核通过后自动发布）。旧的 Flutter 工作流 `google-play.yml` / `ios-app-store.yml` / `macos-dmg.yml` 不得对正式 Tag 发版。
 
 首次发布前，应先在 Apple Developer、App Store Connect 和 Google Play Console 创建应用；已登记的标识不可随意更换。仓库级发布约束见 [`AGENTS.md`](../AGENTS.md)，本页说明实际操作。
 
@@ -9,9 +9,9 @@
 - 正式 Tag 与 Release 标题使用 `vX.Y.Z`；`apps/reader/package.json`、`apps/reader/src-tauri/tauri.conf.json` 与 Rust crate 版本必须使用匹配的 `X.Y.Z`，Android `versionCode` 和 iOS `CFBundleVersion` 必须高于已经上传的构建。
 - 必须按 SemVer 显式决定 patch、minor 或 major。用户可感知的新能力和新增平台不能仅因发版方便而归入 patch。
 - 以上一个正式 Release 为基线审计变更，并使用中英文说明公开的用户可感知变化；构建、签名和公证细节留在 Actions 或关联 Issue。
-- 先创建 Draft Release，在 Draft 内准备并核验 macOS 资产，资产齐全后立即公开，不得停下来询问确认。Release 的 `published` 事件只审计已有资产；审计失败会尝试把 Release 恢复为 Draft。
+- 先创建 Draft Release，在 Draft 内准备并核验 macOS、Windows 与 Android 资产，资产齐全后立即公开，不得停下来询问确认。Release 的 `published` 事件只审计已有资产；审计失败会尝试把 Release 恢复为 Draft。
 - 正式发版默认交付 Google Play production（`completed`），并将 iOS 构建上传 App Store Connect、关联正式版本、提交审核，设置为审核通过后自动发布。internal、draft、TestFlight 测试分发和移动端真机回归均不是项目强制前置条件。平台自身的构建处理、资料与审核要求仍适用。
-- 当前没有正式 Windows 安装包、签名和更新资产工作流，因此不得在 Release 说明中把 Windows 写成该版本已经交付的平台。
+- Windows 流程已接入，但只有 Windows CI、正式代码签名、Updater 验签和资产审计通过后，才能把 Windows 列为该 Release 已交付的平台。新增平台需选择 minor 或 major。
 
 ## 标准发布命令
 
@@ -35,7 +35,7 @@ dart run tool/release.dart \
 
 仅有发布流程、测试或文档调整且仍需发版时，使用 `--bump patch --maintenance`，不提供 `--change-*`，并用 `--ignore-commit` 为基线后的每个提交注明排除原因。工具仍执行完整提交覆盖审计；公开说明明确本次无用户可感知的功能变化，不虚构功能更新。
 
-当前 Tauri 发版：确认 `main` 与 `origin/main` 一致并复用已通过的 CI；创建跟踪 Issue、同步 `apps/reader/package.json` 与 `apps/reader/src-tauri/tauri.conf.json` 版本、推送正式 Tag、创建 Draft Release，以该 Tag 调度 `tauri-release.yml`（默认 `platforms: all`、`upload_play: true`、`upload_appstore: true`、`submit_appstore: true`）。macOS 的 DMG/ZIP、Tauri Updater `.app.tar.gz`、`.sig`、`latest.json` 与 Android 资产上传到 Draft 后立即公开 GitHub Release。Google Play production（`completed`）以及 App Store Connect 上传、版本关联和送审由该工作流直接执行，不依赖 `published` 事件，也不走旧的 Flutter Job。
+当前 Tauri 发版：确认 `main` 与 `origin/main` 一致并复用已通过的 CI；创建跟踪 Issue、同步 `apps/reader/package.json` 与 `apps/reader/src-tauri/tauri.conf.json` 版本、推送正式 Tag、创建 Draft Release，以该 Tag 调度 `tauri-release.yml`（默认 `platforms: all`、`upload_play: true`、`upload_appstore: true`、`submit_appstore: true`）。macOS 的 DMG/ZIP、Tauri Updater `.app.tar.gz`、`.sig`、Windows 安装包及 `.sig` 与 Android 资产上传到 Draft 后，由 finalize 合并 `latest.json`、验签并审计；`platforms: all` 的选中任务全部成功后自动公开 GitHub Release。单平台运行只准备 Draft 资产，不自动公开；可以在准备完成后运行完整流程。Google Play production（`completed`）以及 App Store Connect 上传、版本关联和送审由该工作流直接执行，不依赖 `published` 事件，也不走旧的 Flutter Job。
 
 若版本文件已因未公开的 Draft 递增，显式添加 `--pending-draft vX.Y.Z`。
 工具会验证该 Draft 的 Tag、构建号与当前版本一致，并且位于上一正式 Release 与当前提交之间；
@@ -50,6 +50,7 @@ flutter test test/release_tool_test.dart
 
 | 平台 | 应用标识 | 工作流 | 产物/目标 |
 | --- | --- | --- | --- |
+| Windows | `dev.leeef.leeef-reader` | `Tauri signed release` | Authenticode 签名的 x64 NSIS `.exe`、Tauri Updater `.sig` 与合并后的 `latest.json` |
 | Android | `dev.leeef.leeef_reader` | `Tauri signed release` | 签名 APK/AAB；默认 Play production `completed` |
 | iOS | `dev.leeef.leeefReader` | `Tauri signed release` | 签名 IPA；默认上传 App Store Connect、提交审核、审核通过后自动发布 |
 | macOS | `dev.leeef.leeef-reader` | `Tauri signed release` | Developer ID 签名并公证的 universal DMG/ZIP，以及签名的 Tauri Updater 包与 `latest.json` |
@@ -111,7 +112,7 @@ GitHub 的 `macos-distribution` Environment 配置：
 - Secrets：`MACOS_CERTIFICATES_FILE_BASE64`、`MACOS_CERTIFICATES_PASSWORD`、`MACOS_CERTIFICATE_NAME`、`APPSTORE_API_PRIVATE_KEY`。
 - Tauri Updater 签名 Secret：`TAURI_SIGNING_PRIVATE_KEY`。对应公钥固定在 `apps/reader/src-tauri/tauri.conf.json`；丢失后不能为已安装客户端发布可信更新。
 
-正式发布时，先创建 Draft Release，再以该 Draft 的 Tag 作为 `release_tag` 运行工作流；工作流会从 Tag 构建、签名、公证，并向 Draft 附加 DMG、ZIP、`.app.tar.gz`、`.sig` 与 `latest.json`。Tag 必须与 `apps/reader/package.json` 和 `apps/reader/src-tauri/tauri.conf.json` 的版本一致。五项 macOS 资产齐全且工作流成功后立即公开 Release。已安装的 macOS 客户端启动时立即检查，持续运行期间每 5 分钟静默下载并验证签名；安装准备完成后提示用户重启。
+正式发布时，先创建 Draft Release，再以该 Draft 的 Tag 作为 `release_tag` 运行工作流；工作流会从 Tag 构建、签名、公证，并向 Draft 附加 DMG、ZIP、`.app.tar.gz`、`.sig` 与 `latest.json`。Tag 必须与 `apps/reader/package.json` 和 `apps/reader/src-tauri/tauri.conf.json` 的版本一致。macOS Job 不单独上传 `latest.json`；finalize 从该 Release 的桌面资产统一生成它，避免覆盖 Windows 条目。完整流程的所有平台任务与审计成功后立即公开 Release。已安装的 macOS 客户端启动时立即检查，持续运行期间每 5 分钟静默下载并验证签名；安装准备完成后提示用户重启。
 
 首次配置更新签名时，将仓库外保存的私钥写入 GitHub Environment：
 
@@ -124,12 +125,37 @@ gh secret set TAURI_SIGNING_PRIVATE_KEY \
 
 私钥必须与 `tauri.conf.json` 的 `plugins.updater.pubkey` 匹配。不要重新生成或提交私钥；应把它作为发布凭据加密备份。
 
+## Windows x64 安装包与自动更新
+
+Windows 使用 `windows-2022` Runner，从正式 Tag 构建 NSIS 安装器。`tauri.windows.conf.json` 自动覆盖打包目标，不改变 macOS 的 DMG/App 配置。当前覆盖 x64，不宣称提供 ARM64 原生包。CI 会在 Windows 上运行前端测试、Rust 库测试和不带正式签名的 NSIS 构建；CI 包不上传正式 Release。
+
+首次正式发布前，需要在受保护的 `windows-distribution` GitHub Environment 配置：
+
+- Secrets：`WINDOWS_CERTIFICATE_BASE64`（可用于自动签名的代码签名 PFX 的 base64）、`WINDOWS_CERTIFICATE_PASSWORD`。
+- Secret：`TAURI_SIGNING_PRIVATE_KEY`，必须使用与客户端内置公钥匹配的现有固定私钥；不能重新生成，也不能提交进仓库。需从仓库外的安全备份配置到此 Environment。
+- Variable：`WINDOWS_TIMESTAMP_URL`，使用证书提供商的 RFC 3161 时间戳服务。
+
+正式工作流会检查凭据、导入证书、对主程序和安装器签名，并验证 Authenticode 证书指纹、信任状态与时间戳；缺少凭据或验签失败时终止。若证书使用硬件或云端签名服务，需先将签名步骤适配该服务；不可把不支持导出的密钥伪装成 PFX，也不可回退为无签名正式包。
+
+产物是 `Leeef-Reader-X.Y.Z-windows-x64-setup.exe` 和同名 `.sig`。Tauri 2 直接复用安装器进行更新，不需要另造更新 ZIP。`finalize` 下载该 Draft 的资产，使用客户端公钥验证 macOS/Windows 的 Updater 签名，生成同时包含 `darwin-aarch64`、`darwin-x86_64` 和 `windows-x86_64` 的 `latest.json`，并确认 URL、版本、签名与附件一致。单平台重试会保留已存在的另一桌面平台；发现残缺资产时失败，不会静默删除更新入口。
+
+手动选择 `platforms: windows` 只准备 Windows Draft 资产。`platforms: all` 才会在全部任务成功且资产审计通过后公开。所有构建上传必须针对 Draft；`appstore-submit` 只做商店送审，允许复用已公开 Release。`published` 事件只审计现有附件，失败恢复 Draft，不构建或上传资产。
+
+Windows 和 macOS 在后台下载并验证更新，用户点击“立即重启”后才安装。Windows 安装阶段会退出应用并由安装器重启。正式发布不会在开发者本机下载安装包或启动应用。
+
+发布资产审计回归：
+
+```bash
+cd apps/reader
+node --test scripts/release-assets.test.mjs
+```
+
 ## 发布检查
 
 1. 确认 `main` 与 `origin/main` 一致且工作区干净；以上一个正式 Release 为基线整理中英文用户变更。
 2. 显式选择 SemVer 级别，同步更新 `package.json`、`tauri.conf.json`、`Cargo.toml` 与锁文件；确认移动端构建号严格递增。
 3. 等待当前源码提交的跨平台 CI 全部通过；该工作流执行 `apps/reader` 的 Bun 测试/构建，以及 `apps/reader/src-tauri` 的 `cargo test --lib`。发布规划器会直接复用这一结果，不重复执行同一套门禁。
-4. 创建 `vX.Y.Z` Draft Release，使用同一 Tag 运行 `Tauri signed release`（默认 `platforms: all`），确认 macOS DMG/ZIP/`.app.tar.gz`/`.sig`/`latest.json` 与 Android APK/AAB 已上传且工作流成功。
-5. 立即公开 GitHub Release。Google Play production 与 App Store Connect 上传由 `tauri-release.yml` 直接执行，无需先经过测试渠道，也不得为此询问用户。建议检查真机导入、阅读、分享导入、后台音频、同步和 Android 更新流程；如未执行，如实记录，不阻塞正式上架或送审，也不得将其标记为通过。
+4. 创建 `vX.Y.Z` Draft Release，使用同一 Tag 运行 `Tauri signed release`（默认 `platforms: all`），确认 macOS DMG/ZIP/`.app.tar.gz`/`.sig`、Windows x64 安装器/`.sig`、合并的 `latest.json` 与 Android APK/AAB 已上传且工作流成功。
+5. 完整流程审计成功后由 finalize 立即公开 GitHub Release。Google Play production 与 App Store Connect 上传由 `tauri-release.yml` 直接执行，无需先经过测试渠道，也不得为此询问用户。建议检查真机导入、阅读、分享导入、后台音频、同步和 Android 更新流程；如未执行，如实记录，不阻塞正式上架或送审，也不得将其标记为通过。
 6. 在 Intel 与 Apple Silicon Mac 上验证 DMG 可挂载、拖入 Applications，并运行 `spctl --assess --type execute --verbose "Leeef Reader.app"`；从前一正式版本启动应用，确认新版 `.app.tar.gz` 静默下载并验签后出现“重启以更新”，重启后版本号已更新。该 macOS 验收仍按发布后行为执行，默认不覆盖安装开发者机器上的现有应用。
-7. 确认 `tauri-release.yml` 的 macOS、Android、iOS job 已成功；分别核验 Play 生产轨道、App Store Connect 处理/送审和正式上架状态，不将上传成功等同于上架成功。
+7. 确认 `tauri-release.yml` 的 macOS、Windows、Android、iOS、finalize job 已成功；分别核验 Play 生产轨道、App Store Connect 处理/送审和正式上架状态，不将上传成功等同于上架成功。

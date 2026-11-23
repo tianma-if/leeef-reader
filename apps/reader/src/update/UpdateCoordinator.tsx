@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import type { Update } from '@tauri-apps/plugin-updater'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -56,6 +57,7 @@ export function UpdateCoordinator() {
   const androidFlowStarted = useRef(false)
   const androidConsentPolls = useRef(0)
   const preparedVersion = useRef<string | undefined>(undefined)
+  const desktopUpdate = useRef<Update | undefined>(undefined)
   const dismissedIosVersion = useRef<string | undefined>(undefined)
 
   useEffect(() => {
@@ -129,9 +131,24 @@ export function UpdateCoordinator() {
     const checkDesktop = async () => {
       const { check } = await import('@tauri-apps/plugin-updater')
       const update = await check({ timeout: 15_000 })
-      if (!update || disposed || preparedVersion.current === update.version) return
-      await update.downloadAndInstall()
-      if (disposed) return
+      if (!update) return
+      if (disposed || preparedVersion.current === update.version) {
+        await update.close()
+        return
+      }
+      // Windows exits the app during install, so wait for the restart button.
+      try {
+        await update.download()
+      } catch (error) {
+        await update.close()
+        throw error
+      }
+      if (disposed) {
+        await update.close()
+        return
+      }
+      await desktopUpdate.current?.close()
+      desktopUpdate.current = update
       preparedVersion.current = update.version
       setPrompt({ kind: 'restart', platform: 'desktop', version: update.version })
     }
@@ -168,6 +185,8 @@ export function UpdateCoordinator() {
       window.clearTimeout(androidPollTimer)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('online', checkForUpdate)
+      void desktopUpdate.current?.close()
+      desktopUpdate.current = undefined
     }
   }, [])
 
@@ -190,6 +209,8 @@ export function UpdateCoordinator() {
         await invoke('plugin:native-bridge|complete_mobile_update')
         return
       }
+      if (!desktopUpdate.current) throw new Error('更新尚未准备好，请稍后重试')
+      await desktopUpdate.current.install()
       const { relaunch } = await import('@tauri-apps/plugin-process')
       await relaunch()
     } catch (error) {

@@ -31,18 +31,53 @@ on:
         description: Which signed jobs to run
         required: true
         type: choice
-        options: [all, macos, android, ios, appstore-submit]
+        options: [all, macos, windows, android, ios, appstore-submit]
         default: all
+
+  release:
+    types: [published]
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
-  group: tauri-release-${{ inputs.release_tag }}
+  group: tauri-release-${{ inputs.release_tag || github.event.release.tag_name }}
   cancel-in-progress: false
 
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+
 jobs:
+  preflight:
+    if: github.repository == 'tianma-if/leeef-reader' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Validate Draft and version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PLATFORM: ${{ inputs.platforms }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/release.json"
+          node apps/reader/scripts/release-assets.mjs preflight "$RUNNER_TEMP/release.json" "$RELEASE_PLATFORM"
+      - name: Require successful CI for the exact release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse HEAD)"
+          passed="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$commit" --limit 100 --json conclusion,event --jq 'any(.[]; .conclusion == "success" and .event != "pull_request")')"
+          test "$passed" = true
+
   macos:
+    needs: preflight
     if: github.repository == 'tianma-if/leeef-reader' && (inputs.platforms == 'all' || inputs.platforms == 'macos')
     name: Signed macOS DMG
     runs-on: macos-15
@@ -113,41 +148,6 @@ jobs:
           echo "APP_VERSION=$version" >> "$GITHUB_ENV"
           echo "UPDATER_ARCHIVE=$RUNNER_TEMP/macos-dist/Leeef-Reader-${version}-macos-universal.app.tar.gz" >> "$GITHUB_ENV"
           echo "UPDATER_SIGNATURE=$RUNNER_TEMP/macos-dist/Leeef-Reader-${version}-macos-universal.app.tar.gz.sig" >> "$GITHUB_ENV"
-      - name: Generate and verify updater manifest
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          notes="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
-          NOTES="$notes" node <<'NODE'
-          const fs = require('node:fs')
-          const path = require('node:path')
-
-          const filename = path.basename(process.env.UPDATER_ARCHIVE)
-          const asset = {
-            signature: fs.readFileSync(process.env.UPDATER_SIGNATURE, 'utf8').trim(),
-            url: `https://github.com/${process.env.GITHUB_REPOSITORY}/releases/download/${process.env.RELEASE_TAG}/${filename}`,
-          }
-          const manifest = {
-            version: process.env.APP_VERSION,
-            notes: process.env.NOTES,
-            pub_date: new Date().toISOString(),
-            platforms: {
-              'darwin-aarch64': asset,
-              'darwin-x86_64': asset,
-            },
-          }
-          fs.writeFileSync(
-            path.join(process.env.RUNNER_TEMP, 'macos-dist', 'latest.json'),
-            `${JSON.stringify(manifest, null, 2)}\n`,
-          )
-          NODE
-          jq -e --arg version "$APP_VERSION" '
-            .version == $version and
-            (.platforms["darwin-aarch64"].url | endswith(".app.tar.gz")) and
-            (.platforms["darwin-aarch64"].signature | length > 0) and
-            .platforms["darwin-aarch64"] == .platforms["darwin-x86_64"]
-          ' "$RUNNER_TEMP/macos-dist/latest.json" >/dev/null
       - uses: actions/upload-artifact@v4
         with:
           name: leeef-macos
@@ -163,6 +163,7 @@ jobs:
             --clobber
 
   android:
+    needs: preflight
     if: github.repository == 'tianma-if/leeef-reader' && (inputs.platforms == 'all' || inputs.platforms == 'android')
     name: Signed Android APK and AAB
     runs-on: ubuntu-latest
@@ -259,6 +260,7 @@ jobs:
         run: rm -f src-tauri/gen/android/keystore.properties "$RUNNER_TEMP/leeef-upload.jks"
 
   ios:
+    needs: preflight
     if: github.repository == 'tianma-if/leeef-reader' && (inputs.platforms == 'all' || inputs.platforms == 'ios')
     name: Signed iOS IPA
     runs-on: macos-26
@@ -401,10 +403,11 @@ jobs:
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
           wait-for-processing: true
   ios-submit:
-    needs: ios
+    needs: [preflight, ios]
     if: >-
       always() &&
       github.repository == 'tianma-if/leeef-reader' &&
+      needs.preflight.result == 'success' &&
       inputs.submit_appstore &&
       (inputs.platforms == 'all' || inputs.platforms == 'ios' || inputs.platforms == 'appstore-submit') &&
       (inputs.platforms == 'appstore-submit' || needs.ios.result == 'success')
@@ -643,3 +646,199 @@ jobs:
       - name: Remove App Store API key
         if: always()
         run: rm -f "$RUNNER_TEMP/app-store-submit/api-key.json"
+
+  windows:
+    needs: preflight
+    if: github.repository == 'tianma-if/leeef-reader' && (inputs.platforms == 'all' || inputs.platforms == 'windows')
+    name: Signed Windows x64 installer
+    runs-on: windows-2022
+    timeout-minutes: 90
+    environment: windows-distribution
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: apps/reader
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/reader/src-tauri
+      - run: bun ci
+      - name: Import Windows code signing certificate
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          if (!$env:WINDOWS_CERTIFICATE_BASE64 -or !$env:WINDOWS_CERTIFICATE_PASSWORD -or !$env:WINDOWS_TIMESTAMP_URL) {
+            throw 'Configure Windows certificate, password and timestamp URL in windows-distribution'
+          }
+          $certPath = Join-Path $env:RUNNER_TEMP 'leeef-signing.pfx'
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+          try {
+            $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+            $certs = @(Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $password)
+            $signers = @($certs | Where-Object { $_.HasPrivateKey -and ($_.EnhancedKeyUsageList.ObjectId -contains '1.3.6.1.5.5.7.3.3') })
+            if ($signers.Count -ne 1) { throw 'Expected exactly one code signing identity with a private key' }
+            $cert = $signers[0]
+            if ($cert.NotAfter -le (Get-Date)) { throw 'Code signing certificate has expired' }
+            "WINDOWS_CERTIFICATE_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+            $config = @{ bundle = @{ windows = @{
+              certificateThumbprint = $cert.Thumbprint
+              digestAlgorithm = 'sha256'
+              timestampUrl = $env:WINDOWS_TIMESTAMP_URL
+              tsp = $true
+            } } }
+            $config | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP/windows-signing.json"
+          } finally {
+            Remove-Item $certPath -Force -ErrorAction SilentlyContinue
+          }
+      - name: Build signed Windows installer and updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          CI: true
+        run: |
+          if (!$env:TAURI_SIGNING_PRIVATE_KEY) { throw 'Missing fixed Tauri updater signing key' }
+          bun run tauri build --target x86_64-pc-windows-msvc --bundles nsis --config "$env:RUNNER_TEMP/windows-signing.json"
+      - name: Verify signatures and stage installer
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $installers = @(Get-ChildItem src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe)
+          if ($installers.Count -ne 1) { throw 'Expected one NSIS installer' }
+          $installer = $installers[0]
+          $app = 'src-tauri/target/x86_64-pc-windows-msvc/release/leeef_reader.exe'
+          foreach ($file in @($installer.FullName, $app)) {
+            $signature = Get-AuthenticodeSignature $file
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -ne $env:WINDOWS_CERTIFICATE_THUMBPRINT -or !$signature.TimeStamperCertificate) {
+              throw "Invalid or untimestamped Authenticode signature: $file"
+            }
+          }
+          if (!(Test-Path "$($installer.FullName).sig") -or !(Get-Content "$($installer.FullName).sig" -Raw).Trim()) {
+            throw 'Missing updater signature'
+          }
+          $dist = New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/windows-dist"
+          $name = "Leeef-Reader-$version-windows-x64-setup.exe"
+          Copy-Item $installer.FullName (Join-Path $dist $name)
+          Copy-Item "$($installer.FullName).sig" (Join-Path $dist "$name.sig")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: leeef-windows
+          path: ${{ runner.temp }}/windows-dist/*
+          if-no-files-found: error
+      - name: Upload to Draft Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = @(Get-ChildItem "$env:RUNNER_TEMP/windows-dist/*" | ForEach-Object { $_.FullName })
+          gh release upload $env:RELEASE_TAG @assets --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+      - name: Remove signing material
+        if: always()
+        run: |
+          if ($env:WINDOWS_CERTIFICATE_THUMBPRINT) {
+            Remove-Item "Cert:\CurrentUser\My\$env:WINDOWS_CERTIFICATE_THUMBPRINT" -Force -ErrorAction SilentlyContinue
+          }
+          Remove-Item "$env:RUNNER_TEMP/leeef-signing.pfx", "$env:RUNNER_TEMP/windows-signing.json" -Force -ErrorAction SilentlyContinue
+
+  finalize:
+    needs: [preflight, macos, windows, android, ios, ios-submit]
+    if: >-
+      always() && github.repository == 'tianma-if/leeef-reader' &&
+      github.event_name == 'workflow_dispatch' && needs.preflight.result == 'success'
+    name: Audit assets and publish complete release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Require successful selected jobs
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module <<'NODE'
+          const jobs = JSON.parse(process.env.JOB_RESULTS)
+          for (const [name, job] of Object.entries(jobs)) {
+            if (!['success', 'skipped'].includes(job.result)) throw new Error(`${name}: ${job.result}`)
+          }
+          NODE
+      - name: Generate and audit combined desktop update manifest
+        if: inputs.platforms == 'all' || inputs.platforms == 'macos' || inputs.platforms == 'windows'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRED_DESKTOP: ${{ inputs.platforms }}
+        run: |
+          set -euo pipefail
+          directory="$RUNNER_TEMP/release-assets"
+          mkdir -p "$directory"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$directory"
+          export RELEASE_NOTES="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+          node apps/reader/scripts/release-assets.mjs generate "$directory" "$REQUIRED_DESKTOP"
+          node apps/reader/scripts/release-assets.mjs audit "$directory" "$REQUIRED_DESKTOP"
+          gh release upload "$RELEASE_TAG" "$directory/latest.json" --repo "$GITHUB_REPOSITORY" --clobber
+      - name: Audit all declared assets before publishing
+        if: inputs.platforms == 'all'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          test -s "$RUNNER_TEMP/release-assets/Leeef-Reader-${version}-android-arm64.apk"
+          test -s "$RUNNER_TEMP/release-assets/Leeef-Reader-${version}-android.aab"
+          # Re-download the uploaded manifest rather than auditing only a local copy.
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP/release-assets" --clobber
+          node apps/reader/scripts/release-assets.mjs audit "$RUNNER_TEMP/release-assets" all
+      - name: Publish complete release
+        if: inputs.platforms == 'all'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest
+      - name: Keep failed release in Draft
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft
+
+  audit-published:
+    if: github.repository == 'tianma-if/leeef-reader' && github.event_name == 'release'
+    name: Audit published Tauri assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Audit existing release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          directory="$RUNNER_TEMP/release-assets"
+          mkdir -p "$directory"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$directory"
+          node apps/reader/scripts/release-assets.mjs audit "$directory" all
+          version="${RELEASE_TAG#v}"
+          test -s "$directory/Leeef-Reader-${version}-android-arm64.apk"
+          test -s "$directory/Leeef-Reader-${version}-android.aab"
+      - name: Restore failed release to Draft
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft

@@ -17,7 +17,7 @@
 3. **发布基线**：以上一个正式 Release 为审计基线。Release 说明必须覆盖该基线后的全部用户可感知变化；纯测试、重构、CI 或文档提交可不进入公开说明，但必须在发布审计记录中给出明确理由。
 4. **平台范围**：不得在 Release 中宣称尚未交付或未经验证的平台。Android 以 Google Play 轨道中的 Play App Signing 构建为准，iOS 以 App Store Connect/TestFlight 构建为准，macOS 以签名、公证且带 Tauri Updater 签名资产与 `latest.json` 的 universal DMG/ZIP 为准。Windows 在正式安装包、签名/更新与审计工作流完成前，不得列为该 Release 的已交付资产。
 5. **验证命令**：正式发布前必须通过 `apps/reader` 的 `bun ci` 与 `bun run build`、`apps/reader/src-tauri` 的 `cargo test --lib`，以及 `.github/workflows/ci.yml`。移动端真机回归作为建议检查，不是 production 发布的前置门禁；未执行时如实记录，不得宣称通过。不得对 `published` 事件跑旧的 Flutter Job（`google-play.yml` / `ios-app-store.yml` / `macos-dmg.yml`）。
-6. **Draft 内准备资产后自动公开**：先创建 `vX.Y.Z` Draft Release，再通过带 `release_tag` 的 macOS 资产工作流构建、签名、公证并上传资产。DMG、ZIP、`.app.tar.gz`、对应 `.sig` 和 `latest.json` 齐全且工作流成功后必须立即公开该 Release，不得暂停询问用户确认。`published` 事件只允许审计已有资产，禁止在 Release 已公开后才首次构建或上传正式资产。
+6. **Draft 内准备资产后自动公开**：先创建 `vX.Y.Z` Draft Release，再通过带 `release_tag` 的正式资产工作流构建、签名、公证并上传资产。macOS DMG、ZIP、`.app.tar.gz`、Windows x64 安装器、对应 `.sig` 和合并的 `latest.json` 齐全且完整工作流成功后必须立即公开该 Release，不得暂停询问用户确认。`published` 事件只允许审计已有资产，禁止在 Release 已公开后才首次构建或上传正式资产。
 7. **签名边界**：签名证书、密钥库、API Key、Tauri Updater 私钥及密码必须保存在仓库外或受保护的 GitHub Environment 中，严禁提交到 Git。Android 正式交付必须启用 Play App Signing；macOS `.app.tar.gz` 更新包必须使用与客户端内置公钥匹配的固定私钥签名，`latest.json` 必须引用同一 Release 的更新包并内嵌其签名。
 8. **失败处理**：任一阻塞验证、签名、公证、上传或资产审计失败时，Release 必须保持或恢复为 Draft；修复并重新执行门禁后才可公开。不得发布已知损坏、缺少声明资产或版本不一致的 Release。
 9. **商店交付**：正式发版默认同时交付 Google Play production（`completed`），并将 iOS 构建上传 App Store Connect、关联正式版本、提交审核，设置为审核通过后自动发布；不要求先经过 internal、draft、TestFlight 测试分发或真机回归，也不得为此暂停询问用户选择渠道。平台自身要求的构建处理、资料与审核仍需完成。商店上传或送审不等于正式上架，商店状态必须单独核验并写入跟踪 Issue。
@@ -25,8 +25,6 @@
 11. **Release 说明**：公开说明使用中英文双语，只写用户可感知的变化、影响和必要的升级提醒。类型检查、构建命令、签名、公证、资产复用等技术验证细节留在 Actions 或关联 Issue，不写入公开正文。推荐结构：
 
 ```md
-## 🇨🇳 中文说明 / Chinese Changelog
-
 ## 主要更新
 
 - 面向用户说明本次变化及影响。
