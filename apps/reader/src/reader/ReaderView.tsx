@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type PointerEvent } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import {
@@ -18,18 +18,8 @@ import { ReaderChrome } from './ReaderChrome'
 import { ReaderFooter } from './ReaderFooter'
 import { ReaderSidebar, type SearchHit } from './ReaderSidebar'
 import { SelectionPopup, type SelectionState } from './SelectionPopup'
-import {
-  releaseVelocity,
-  shouldCommitTurn,
-  TAP_SLOP_PX,
-  zoneOf,
-} from './turnCommit'
-import {
-  createTurnGestureIntent,
-  edgeDirectionOf,
-  shouldClaimTurnGesture,
-  type TurnGestureIntent,
-} from './turnGestureArena'
+import { zoneOf } from './turnCommit'
+import { bindReaderTouch } from './readerTouch'
 import { useReaderChrome } from './useReaderChrome'
 import { createReadingTimer } from './readingTimer'
 import { createWheelTurnState, wheelTurnDirection } from './wheelTurn'
@@ -95,20 +85,6 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   const settingsRef = useRef<Settings>({})
   const saveTimer = useRef<number>(0)
   const prepareTimer = useRef<number>(0)
-  const dragRef = useRef<{
-    pointerId: number
-    startX: number
-    startY: number
-    originX: number
-    visualOrigin: number
-    left: number
-    width: number
-    claimed: boolean
-    vertical: boolean
-    forward: boolean
-    intent: TurnGestureIntent
-    samples: { distance: number; time: number }[]
-  } | null>(null)
   const turner = useRef<CapturedPageTurn | null>(null)
   const turnQueue = useRef<TurnQueue | null>(null)
   turnQueue.current ??= new TurnQueue((error) => {
@@ -128,16 +104,27 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   const [excerpts, setExcerpts] = useState<Excerpt[]>([])
   const [settings, setSettings] = useState<Settings>({})
   const [selection, setSelection] = useState<SelectionState | null>(null)
+  const selectionRef = useRef<SelectionState | null>(null)
+  const savingExcerpt = useRef(false)
   const savingBookmark = useRef(false)
   const [aiSource, setAiSource] = useState<ReadingSource | null>(null)
   const mobile = isMobile()
   const chrome = useReaderChrome()
   const chromeRef = useRef(chrome)
   chromeRef.current = chrome
-  const paginated = (settings.flow ?? 'paginated') === 'paginated'
   const theme = themeOf(settings)
   const bookmarked = bookmarks.some((item) => item.locator === locator)
   const canBookmark = !status && !!locator
+
+  const updateSelection = useCallback((next: SelectionState | null) => {
+    selectionRef.current = next
+    setSelection(next)
+  }, [])
+
+  const clearSelection = useCallback(() => {
+    updateSelection(null)
+    viewRef.current?.deselect()
+  }, [updateSelection])
 
   const getTurner = () => {
     turner.current ??= new CapturedPageTurn({
@@ -198,7 +185,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     const view = viewRef.current
     if (!view) return
     chromeRef.current.hide()
-    if (dragRef.current?.claimed) return
+    if (selectionRef.current) clearSelection()
     turnQueue.current!.run(async () => {
       if (viewRef.current !== view) return
       const useCapture =
@@ -210,30 +197,12 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   }
   const turnRef = useRef(turn)
   turnRef.current = turn
-
-  useEffect(() => {
-    if (mobile) return
-    const stage = hostRef.current
-    if (!stage) return
-    const wheelState = createWheelTurnState()
-    const onWheel = (event: WheelEvent) => {
-      if ((settingsRef.current.flow ?? 'paginated') !== 'paginated' || !viewRef.current) return
-      if (event.ctrlKey || event.metaKey) return
-      if (event.deltaY === 0 || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
-      event.preventDefault()
-      const direction = wheelTurnDirection(wheelState, event, stage.clientHeight)
-      if (direction === null) return
-      turnRef.current(direction)
-    }
-    stage.addEventListener('wheel', onWheel, { passive: false })
-    return () => stage.removeEventListener('wheel', onWheel)
-  }, [mobile])
+  const keyRef = useRef<(event: KeyboardEvent) => void>(() => undefined)
 
   const goTo = (target: string) => {
-    viewRef.current?.deselect()
+    clearSelection()
     void viewRef.current?.goTo(target)
     chrome.closeSidebar()
-    setSelection(null)
   }
 
   const closeNavigation = () => {
@@ -287,6 +256,77 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     let cancelled = false
     let view: FoliateViewElement | null = null
     let ready = false
+    const events = new AbortController()
+    const { signal } = events
+    const isPaginated = () => (settingsRef.current.flow ?? 'paginated') === 'paginated'
+    const wheelState = createWheelTurnState()
+    const onWheel = (event: WheelEvent) => {
+      if (!isPaginated() || !viewRef.current || event.ctrlKey || event.metaKey) return
+      if (event.deltaY === 0 || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+      event.preventDefault()
+      const direction = wheelTurnDirection(wheelState, event, host.clientHeight)
+      if (direction !== null) turnRef.current(direction)
+    }
+    if (!mobile) host.addEventListener('wheel', onWheel, { signal, passive: false })
+
+    const bindTouch = (target: Document | HTMLElement, selecting: () => boolean, frame?: HTMLElement) => {
+      if (!mobile) return
+      bindReaderTouch(target, {
+        signal,
+        host,
+        frame,
+        paginated: () => isPaginated() && !chromeRef.current.visible && !chromeRef.current.sidebar,
+        selecting,
+        prepareTurn: () => { void getTurner().prepare() },
+        startTurn: (forward) => {
+          if (turnQueue.current?.busy || selectionRef.current) return false
+          const { page, pages } = view?.renderer ?? {}
+          // A chapter turn replaces the iframe and ends its touch sequence.
+          if (frame && (page == null || pages == null || (forward ? page >= pages - 2 : page <= 1))) return false
+          return getTurner().startDrag(forward)
+        },
+        moveTurn: (progress) => getTurner().setProgress(progress),
+        finishTurn: (forward, captured, commit) => {
+          if (!captured) {
+            if (commit && !selectionRef.current) turnRef.current(forward)
+            return
+          }
+          const activeTurner = getTurner()
+          turnQueue.current!.run(async () => {
+            const started = await activeTurner.endDrag(commit)
+            if (viewRef.current !== view || !view) return
+            if (!started && commit) await (forward ? view.next() : view.prev())
+            void activeTurner.prepare()
+          })
+        },
+        showChrome: () => chromeRef.current.toggle(),
+      })
+    }
+
+    const handleTap = (event: MouseEvent, frame?: HTMLElement) => {
+      if (event.button !== 0 || event.defaultPrevented) return
+      if (selectionRef.current) {
+        clearSelection()
+        return
+      }
+      const ui = chromeRef.current
+      if (ui.visible || ui.sidebar) {
+        ui.hide()
+        ui.closeSidebar()
+        return
+      }
+      if ((event.target as Element | null)?.closest?.('a[href]')) return
+      const bounds = host.getBoundingClientRect()
+      const frameRect = frame?.getBoundingClientRect()
+      const scale = frameRect && frame?.clientWidth ? frameRect.width / frame.clientWidth : 1
+      const ratio = ((frameRect?.left ?? 0) + event.clientX * scale - bounds.left) / bounds.width
+      const zone = zoneOf(ratio)
+      if (zone === 'center' || !isPaginated()) ui.toggle()
+      else turnRef.current(zone === 'right')
+    }
+    bindTouch(host, () => !!selectionRef.current)
+    host.addEventListener('click', (event) => handleTap(event), { signal })
+
     const readingTimer = createReadingTimer((seconds) => api.recordSession(book.id, seconds))
     const flushReadingTime = () => {
       void readingTimer.flush().catch(() => toast.error('阅读时长保存失败，将在下次记录时重试'))
@@ -335,7 +375,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         void api.saveProgress(book.id, detail.cfi ?? '', fraction, chapterTitle || undefined)
         getTurner().invalidate()
         window.clearTimeout(prepareTimer.current)
-        if (isMobile() && (settingsRef.current.flow ?? 'paginated') === 'paginated') {
+        if (mobile && isPaginated()) {
           prepareTimer.current = window.setTimeout(() => {
             void getTurner().prepare()
           }, 160)
@@ -354,63 +394,69 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       view.addEventListener('load', ((event: Event) => {
         const detail = (event as CustomEvent).detail as { doc?: Document; index?: number }
         const doc = detail.doc
-        if (!doc || !view) return
-        void applyReadingFont(view, settingsRef.current)
+        const currentView = view
+        const frame = doc?.defaultView?.frameElement as HTMLElement | null
+        if (!doc || !currentView || !frame) return
+        updateSelection(null)
+        void applyReadingFont(currentView, settingsRef.current)
         const index = detail.index ?? 0
-        const onPointer = () => {
-          const text = normalizeSelectedText(doc.getSelection()?.toString() ?? '')
-          const range =
-            doc.getSelection()?.rangeCount ? doc.getSelection()!.getRangeAt(0) : null
-          if (!text || !range || range.collapsed) {
-            setSelection(null)
+        let mouseSelecting = false
+        let pressedWhileSelected = false
+        const hasNativeSelection = () => !!doc.getSelection()?.toString().trim()
+        const readSelection = () => {
+          if (!frame.isConnected || mouseSelecting) return
+          const native = doc.getSelection()
+          const text = normalizeSelectedText(native?.toString() ?? '')
+          if (!native?.rangeCount || !text) {
+            // Keep the quote when a toolbar action moves focus out of the iframe.
+            if (pressedWhileSelected) updateSelection(null)
             return
           }
-          const frame = doc.defaultView?.frameElement as HTMLElement | null
-          const frameRect = frame?.getBoundingClientRect()
+          pressedWhileSelected = false
+          const range = native.getRangeAt(0)
+          const frameRect = frame.getBoundingClientRect()
+          const scaleX = frameRect.width / (frame.clientWidth || 1)
+          const scaleY = frameRect.height / (frame.clientHeight || 1)
           const rangeRect = range.getBoundingClientRect()
-          if (!frameRect) return
-          setSelection({
+          if (!rangeRect.width || !rangeRect.height) return
+          updateSelection({
             text,
-            cfi: view!.getCFI(index, range),
-            x: frameRect.left + rangeRect.left + rangeRect.width / 2,
-            y: frameRect.top + Math.max(8, rangeRect.top - 8),
+            cfi: currentView.getCFI(index, range),
+            x: frameRect.left + (rangeRect.left + rangeRect.width / 2) * scaleX,
+            y: frameRect.top + rangeRect.top * scaleY,
+            bottom: frameRect.top + rangeRect.bottom * scaleY,
           })
         }
-        doc.addEventListener('mouseup', onPointer)
-        doc.addEventListener('touchend', onPointer)
+        doc.addEventListener('selectionchange', readSelection, { signal })
+        doc.addEventListener('pointerdown', (event) => {
+          mouseSelecting = event.pointerType === 'mouse'
+          pressedWhileSelected = hasNativeSelection()
+        }, { signal })
+        doc.addEventListener('pointercancel', () => {
+          mouseSelecting = false
+          pressedWhileSelected = false
+        }, { signal })
+        doc.addEventListener('mouseup', () => {
+          mouseSelecting = false
+          if (hasNativeSelection()) readSelection()
+        }, { signal })
+        doc.addEventListener('keydown', (event) => keyRef.current(event), { signal })
+        if (!mobile) doc.addEventListener('wheel', onWheel, { signal, passive: false })
+        bindTouch(doc, hasNativeSelection, frame)
         doc.addEventListener('click', (event) => {
-          if (doc.getSelection()?.toString().trim()) return
-          const ratio = event.clientX / (doc.defaultView?.innerWidth || 1)
-          const zone = zoneOf(ratio)
-          const ui = chromeRef.current
-          if (ui.visible || ui.sidebar) {
-            ui.hide()
-            ui.closeSidebar()
+          const hasSelection = hasNativeSelection()
+          if (hasSelection || selectionRef.current || pressedWhileSelected) {
+            if (!hasSelection) {
+              pressedWhileSelected = false
+              clearSelection()
+            }
+            event.preventDefault()
+            event.stopImmediatePropagation()
             return
           }
-          if (zone === 'center') ui.toggle()
-          else if ((settingsRef.current.flow ?? 'paginated') === 'paginated') {
-            turnRef.current(zone === 'right')
-          } else ui.toggle()
-        })
-        doc.addEventListener('touchstart', (event) => {
-          const touch = event.changedTouches[0]
-          if (!touch) return
-          ;(doc.documentElement as HTMLElement).dataset.touchX = String(touch.clientX)
-          ;(doc.documentElement as HTMLElement).dataset.touchY = String(touch.clientY)
-        })
-        doc.addEventListener('touchend', (event) => {
-          const touch = event.changedTouches[0]
-          if (!touch) return
-          const startX = Number((doc.documentElement as HTMLElement).dataset.touchX ?? touch.clientX)
-          const startY = Number((doc.documentElement as HTMLElement).dataset.touchY ?? touch.clientY)
-          const dx = touch.clientX - startX
-          const dy = touch.clientY - startY
-          if (dy < -10 && Math.abs(dy) > 2 * Math.abs(dx) && Math.abs(dx) < (doc.defaultView?.innerWidth ?? 1) * 0.3) {
-            chromeRef.current.toggle()
-          }
-        })
-        paintHighlights(view)
+          handleTap(event, frame)
+        }, { signal, capture: true })
+        paintHighlights(currentView)
       }) as EventListener)
       await view.open(source)
       if (cancelled) return
@@ -440,10 +486,11 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
 
     return () => {
       cancelled = true
+      events.abort()
       window.clearTimeout(prepareTimer.current)
       window.clearTimeout(saveTimer.current)
       turnQueue.current?.clear()
-      dragRef.current = null
+      updateSelection(null)
       window.clearInterval(readingInterval)
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('pagehide', onPageHide)
@@ -456,7 +503,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       view?.close()
       view?.remove()
     }
-  }, [book.id, initialLocator])
+  }, [book.id, initialLocator, clearSelection, updateSelection])
 
   useEffect(() => {
     let stop: (() => void) | undefined
@@ -474,139 +521,57 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     return () => stop?.()
   }, [mobile])
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (chrome.sidebar || event.defaultPrevented) return
-      const target = event.target as HTMLElement | null
-      if (target?.closest?.('button, input, textarea, select') || target?.isContentEditable) {
-        return
-      }
-      if (event.key === 'Escape') {
-        if (selection) {
-          setSelection(null)
-          viewRef.current?.deselect()
-          return
-        }
-        if (chrome.visible) {
-          chrome.hide()
-          return
-        }
-        onClose()
-        return
-      }
-      if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
-        event.preventDefault()
-        turn(false)
-      }
-      if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') {
-        event.preventDefault()
-        turn(true)
-      }
+  keyRef.current = (event: KeyboardEvent) => {
+    if (chrome.sidebar || event.defaultPrevented) return
+    const target = event.target as HTMLElement | null
+    if (target?.closest?.('button, input, textarea, select') || target?.isContentEditable) {
+      return
     }
+    if (event.key === 'Escape') {
+      if (selectionRef.current) {
+        clearSelection()
+        return
+      }
+      if (chrome.visible) {
+        chrome.hide()
+        return
+      }
+      onClose()
+      return
+    }
+    if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
+    if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+      event.preventDefault()
+      turn(false)
+    }
+    if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') {
+      event.preventDefault()
+      turn(true)
+    }
+  }
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => keyRef.current(event)
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [chrome, onClose, selection])
+  }, [])
 
-  const onGesturePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (!event.isPrimary || dragRef.current) return
-    if (chrome.visible || chrome.sidebar) {
-      chrome.hide()
-      chrome.closeSidebar()
+  const saveExcerpt = async (selected: SelectionState, color: string, note?: string) => {
+    if (savingExcerpt.current) return
+    savingExcerpt.current = true
+    const view = viewRef.current
+    try {
+      await api.createExcerpt({ bookId: book.id, locator: selected.cfi, quote: selected.text, note, color })
+    } catch {
+      toast.error('书摘保存失败，请重试')
       return
+    } finally {
+      savingExcerpt.current = false
     }
-    const rect = hostRef.current?.getBoundingClientRect()
-    if (!rect) return
-    event.currentTarget.setPointerCapture(event.pointerId)
-    const now = performance.now()
-    const localX = event.clientX - rect.left
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      originX: event.clientX,
-      visualOrigin: 0,
-      left: rect.left,
-      width: rect.width,
-      claimed: false,
-      vertical: false,
-      forward: true,
-      intent: createTurnGestureIntent(edgeDirectionOf(localX, rect.width), now),
-      samples: [{ distance: 0, time: now }],
-    }
-    if (mobile && paginated) void getTurner().prepare()
-  }
-
-  const onGesturePointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    const dx = event.clientX - drag.startX
-    const dy = event.clientY - drag.startY
-    if (!drag.claimed && !drag.vertical) {
-      if (drag.intent.verticalLocked) {
-        drag.vertical = true
-        return
-      }
-      const claimed = shouldClaimTurnGesture(drag.intent, {
-        deltaX: dx,
-        deltaY: dy,
-        deltaT: performance.now(),
-      })
-      if (drag.intent.verticalLocked) {
-        drag.vertical = true
-        return
-      }
-      if (claimed && mobile && paginated) {
-        if (turnQueue.current?.busy || !getTurner().startDrag(dx < 0)) return
-        drag.claimed = true
-        drag.forward = dx < 0
-        drag.originX = drag.startX
-        drag.visualOrigin = Math.max(0, drag.forward ? -dx : dx)
-      }
-    }
-    if (!drag.claimed) return
-    const signed = drag.forward ? drag.originX - event.clientX : event.clientX - drag.originX
-    const next = Math.min(1, Math.max(0, (signed - drag.visualOrigin) / drag.width))
-    getTurner().setProgress(next)
-    drag.samples.push({ distance: signed, time: performance.now() })
-    if (drag.samples.length > 8) drag.samples.shift()
-  }
-
-  const onGesturePointerUp = (event: PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    dragRef.current = null
-    const dx = event.clientX - drag.startX
-    const dy = event.clientY - drag.startY
-    if (drag.claimed) {
-      const signed = drag.forward ? drag.originX - event.clientX : event.clientX - drag.originX
-      const progressValue = Math.min(1, Math.max(0, (signed - drag.visualOrigin) / drag.width))
-      getTurner().setProgress(progressValue)
-      const velocity = releaseVelocity(drag.samples, performance.now())
-      const commit =
-        event.type === 'pointercancel'
-          ? false
-          : shouldCommitTurn(progressValue, velocity, drag.width)
-      const view = viewRef.current
-      const activeTurner = getTurner()
-      turnQueue.current!.run(async () => {
-        const started = await activeTurner.endDrag(commit)
-        if (viewRef.current !== view) return
-        if (!started && commit && view) await (drag.forward ? view.next() : view.prev())
-        void activeTurner.prepare()
-      })
-      return
-    }
-    if (event.type === 'pointercancel') return
-    if (chrome.visible || chrome.sidebar) return
-    if (drag.vertical || (dy < -10 && Math.abs(dy) > 2 * Math.abs(dx))) {
-      chrome.toggle()
-      return
-    }
-    if (Math.hypot(dx, dy) > TAP_SLOP_PX) return
-    const zone = zoneOf((event.clientX - drag.left) / drag.width)
-    if (zone === 'center') chrome.toggle()
-    else if (paginated) turn(zone === 'right')
-    else chrome.toggle()
+    if (viewRef.current !== view) return
+    if (selectionRef.current?.cfi === selected.cfi) clearSelection()
+    toast.success('书摘已保存')
+    void reloadMarks().catch(console.error)
+    void view?.addAnnotation({ value: selected.cfi, color }).catch(console.error)
   }
 
   const saveBookmark = async (operation: () => Promise<unknown>) => {
@@ -638,15 +603,6 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     >
       <div className="reader-stage outline-none" ref={hostRef} tabIndex={-1}>
         {status ? <p className="reader-status">{status}</p> : null}
-        {paginated ? (
-          <div
-            className="reader-gesture"
-            onPointerDown={onGesturePointerDown}
-            onPointerMove={onGesturePointerMove}
-            onPointerUp={onGesturePointerUp}
-            onPointerCancel={onGesturePointerUp}
-          />
-        ) : null}
       </div>
 
       <ReaderChrome
@@ -672,7 +628,10 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         chapter={chapter}
         onOpenTab={chrome.openTab}
         onPatch={patchSettings}
-        onGoToFraction={(value) => void viewRef.current?.goToFraction(value)}
+        onGoToFraction={(value) => {
+          clearSelection()
+          void viewRef.current?.goToFraction(value)
+        }}
         onTurn={turn}
         onKeepVisible={chrome.show}
         onRequestHide={chrome.hide}
@@ -705,60 +664,25 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       {selection ? (
         <SelectionPopup
           selection={selection}
+          mobile={mobile}
           onAiExplain={() => {
             if (selection.text.length > 16_000) {
               toast.error('选中文字过长，请缩小到 16,000 字以内再提问')
               return
             }
             setAiSource({ bookTitle: title, chapter, quote: selection.text, locator: selection.cfi })
-            setSelection(null)
+            clearSelection()
             chrome.hide()
           }}
           onCopy={() => {
             void navigator.clipboard.writeText(selection.text)
-            setSelection(null)
+            clearSelection()
           }}
-          onHighlight={(color = '#c4a35a') => {
-            void api
-              .createExcerpt({
-                bookId: book.id,
-                locator: selection.cfi,
-                quote: selection.text,
-                color,
-              })
-              .then(async () => {
-                await reloadMarks()
-                void viewRef.current?.addAnnotation({
-                  value: selection.cfi,
-                  color,
-                })
-                setSelection(null)
-                viewRef.current?.deselect()
-              })
-          }}
-          onSaveNote={(note, color = '#c4a35a') => {
-            void api
-              .createExcerpt({
-                bookId: book.id,
-                locator: selection.cfi,
-                quote: selection.text,
-                note: note.trim() || undefined,
-                color,
-              })
-              .then(async () => {
-                await reloadMarks()
-                void viewRef.current?.addAnnotation({
-                  value: selection.cfi,
-                  color,
-                })
-                setSelection(null)
-                viewRef.current?.deselect()
-              })
-          }}
+          onSave={(color, note) => saveExcerpt(selection, color, note)}
           onBookmark={() => {
             void api.addBookmark(book.id, selection.cfi, selection.text.slice(0, 40)).then(() => {
               void reloadMarks()
-              setSelection(null)
+              if (selectionRef.current?.cfi === selection.cfi) clearSelection()
             })
           }}
         />

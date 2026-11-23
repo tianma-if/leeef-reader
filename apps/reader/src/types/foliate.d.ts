@@ -4,6 +4,8 @@ declare global {
   interface FoliateRendererElement extends HTMLElement {
     atStart: boolean
     atEnd: boolean
+    readonly page?: number
+    readonly pages?: number
     setStyles?: (css: string | [string, string]) => void
     getContents?: () => { doc?: Document; index?: number; overlayer?: unknown }[]
     next?: (distance?: number) => void | Promise<void>

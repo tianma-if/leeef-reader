@@ -158,13 +158,6 @@
   bottom: 0;
 }
 
-.reader-gesture {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  touch-action: none;
-}
-
 .reader-nav-sheet {
   gap: 0;
   overflow: hidden;
@@ -391,6 +384,19 @@
   border-radius: 0.75rem;
   box-shadow: 0 12px 32px rgb(0 0 0 / 16%);
   transition: opacity 150ms ease;
+}
+
+.reader-selection.is-mobile {
+  position: absolute;
+  inset: auto 0.5rem 0.5rem;
+  margin-inline: auto;
+  width: max-content;
+  max-width: calc(100% - 1rem);
+}
+
+.reader-selection.is-mobile.is-top {
+  top: 0.5rem;
+  bottom: auto;
 }
 
 .reader-error {

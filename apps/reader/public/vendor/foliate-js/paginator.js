@@ -594,8 +594,9 @@ export class Paginator extends HTMLElement {
         }, 700)
         this.addEventListener('load', ({ detail: { doc } }) => {
             let isPointerSelecting = false
-            doc.addEventListener('pointerdown', () => isPointerSelecting = true)
+            doc.addEventListener('pointerdown', e => isPointerSelecting = e.pointerType !== 'touch')
             doc.addEventListener('pointerup', () => isPointerSelecting = false)
+            doc.addEventListener('pointercancel', () => isPointerSelecting = false)
             let isKeyboardSelecting = false
             doc.addEventListener('keydown', () => isKeyboardSelecting = true)
             doc.addEventListener('keyup', () => isKeyboardSelecting = false)
@@ -858,7 +859,7 @@ export class Paginator extends HTMLElement {
     }
     #onTouchEnd() {
         this.#touchScrolled = false
-        if (this.scrolled) return
+        if (this.#ownsSwipe() || this.scrolled) return
 
         // XXX: Firefox seems to report scale as 1... sometimes...?
         // at this point I'm basically throwing `requestAnimationFrame` at
