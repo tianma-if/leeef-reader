@@ -2,6 +2,10 @@
 
 本文件约束参与 Leeef Reader 开发与发布的 AI 代理和协作者。当前主线是 Tauri（`apps/reader`），不是 Flutter。技术栈与开发入口优先参考 `README.md` 和 `docs/tauri-reader.md`。
 
+## UI 与交互设计
+
+- 新增或调整 UI 与交互时，尽量参考 Readest 的界面布局、操作流程和交互反馈，并结合 Leeef Reader 的功能和各平台的使用习惯做适配。
+
 ## Android 调测规则
 
 - Android 端的调试、测试和回归只允许使用通过 USB 连接的真机。禁止创建、启动或使用 Android 模拟器（包括 AVD）进行任何调测，也不得在未连接 USB 真机时回退到模拟器；此时应如实说明真机不可用并跳过相关调测。

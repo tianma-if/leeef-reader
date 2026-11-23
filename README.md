@@ -158,6 +158,8 @@ assets/brand                Logo and mark
 - EPUB pagination and format adapters use [foliate-js](https://github.com/johnfactotum/foliate-js), vendored in this repository.
 - The app chrome uses [shadcn/ui](https://ui.shadcn.com/) and [Tauri](https://tauri.app/).
 - Mobile slide page-turns were independently implemented against the public behavior of contemporary WebView readers (capture the outgoing page, jump the live view, overlay the slide).
+- Leeef Reader draws inspiration for its interface and interactions from [Readest](https://github.com/readest/readest).
+- Thanks to [Anxcye/anx-reader](https://github.com/Anxcye/anx-reader) for inspiration.
 
 ## Trademark and brand use
 
