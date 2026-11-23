@@ -17,7 +17,7 @@ import { TurnQueue } from './turnQueue'
 import { ReaderChrome } from './ReaderChrome'
 import { ReaderFooter } from './ReaderFooter'
 import { ReaderSidebar, type SearchHit } from './ReaderSidebar'
-import { SelectionPopup, type SelectionState } from './SelectionPopup'
+import { DEFAULT_HIGHLIGHT_COLOR, SelectionPopup, type SelectionState } from './SelectionPopup'
 import { zoneOf } from './turnCommit'
 import { bindReaderTouch } from './readerTouch'
 import { useReaderChrome } from './useReaderChrome'
@@ -78,10 +78,26 @@ const waitForSize = (element: HTMLElement) =>
     observer.observe(element)
   })
 
+function selectionAtRange(frame: HTMLElement, range: Range, cfi: string, text: string): SelectionState | null {
+  const rect = range.getBoundingClientRect()
+  if (!rect.width || !rect.height) return null
+  const frameRect = frame.getBoundingClientRect()
+  const scaleX = frameRect.width / (frame.clientWidth || 1)
+  const scaleY = frameRect.height / (frame.clientHeight || 1)
+  return {
+    text,
+    cfi,
+    x: frameRect.left + (rect.left + rect.width / 2) * scaleX,
+    y: frameRect.top + rect.top * scaleY,
+    bottom: frameRect.top + rect.bottom * scaleY,
+  }
+}
+
 export function ReaderView({ book, onClose, initialLocator }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<FoliateViewElement | null>(null)
   const excerptsRef = useRef<Excerpt[]>([])
+  const marksRevision = useRef(0)
   const settingsRef = useRef<Settings>({})
   const saveTimer = useRef<number>(0)
   const prepareTimer = useRef<number>(0)
@@ -106,6 +122,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   const [selection, setSelection] = useState<SelectionState | null>(null)
   const selectionRef = useRef<SelectionState | null>(null)
   const savingExcerpt = useRef(false)
+  const preferredHighlight = useRef(DEFAULT_HIGHLIGHT_COLOR)
   const savingBookmark = useRef(false)
   const [aiSource, setAiSource] = useState<ReadingSource | null>(null)
   const mobile = isMobile()
@@ -149,18 +166,25 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   }
 
   const reloadMarks = useCallback(async () => {
+    const revision = ++marksRevision.current
+    const previousExcerpts = excerptsRef.current
     const [nextBookmarks, nextExcerpts] = await Promise.all([
       api.listBookmarks(book.id),
       api.listExcerpts(book.id),
     ])
+    if (revision !== marksRevision.current) return
     setBookmarks(nextBookmarks)
+    if (excerptsRef.current !== previousExcerpts) return
     setExcerpts(nextExcerpts)
     excerptsRef.current = nextExcerpts
   }, [book.id])
 
   const paintHighlights = useCallback((view: FoliateViewElement) => {
+    const painted = new Set<string>()
     for (const item of excerptsRef.current) {
-      void view.addAnnotation({ value: item.locator, color: item.color || '#c4a35a' })
+      if (painted.has(item.locator)) continue
+      painted.add(item.locator)
+      void view.addAnnotation({ value: item.locator, color: item.color || DEFAULT_HIGHLIGHT_COLOR })
     }
   }, [])
 
@@ -244,10 +268,6 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       })
     }
   })
-
-  useEffect(() => {
-    excerptsRef.current = excerpts
-  }, [excerpts])
 
   useEffect(() => {
     void reloadMarks()
@@ -386,7 +406,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
           draw: (fn: typeof highlightDraw, options: { color?: string }) => void
           annotation: { color?: string }
         }
-        detail.draw(highlightDraw, { color: detail.annotation.color ?? '#c4a35a' })
+        detail.draw(highlightDraw, { color: detail.annotation.color ?? DEFAULT_HIGHLIGHT_COLOR })
       }) as EventListener)
       view.addEventListener('create-overlay', (() => {
         if (view) paintHighlights(view)
@@ -414,20 +434,13 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
           }
           pressedWhileSelected = false
           const range = native.getRangeAt(0)
-          const frameRect = frame.getBoundingClientRect()
-          const scaleX = frameRect.width / (frame.clientWidth || 1)
-          const scaleY = frameRect.height / (frame.clientHeight || 1)
-          const rangeRect = range.getBoundingClientRect()
-          if (!rangeRect.width || !rangeRect.height) return
-          updateSelection({
-            text,
-            cfi: currentView.getCFI(index, range),
-            x: frameRect.left + (rangeRect.left + rangeRect.width / 2) * scaleX,
-            y: frameRect.top + rangeRect.top * scaleY,
-            bottom: frameRect.top + rangeRect.bottom * scaleY,
-          })
+          const anchor = selectionAtRange(frame, range, currentView.getCFI(index, range), text)
+          if (anchor) updateSelection(anchor)
         }
         doc.addEventListener('selectionchange', readSelection, { signal })
+        if (mobile) doc.addEventListener('contextmenu', (event) => {
+          if (hasNativeSelection()) event.preventDefault()
+        }, { signal, capture: true })
         doc.addEventListener('pointerdown', (event) => {
           mouseSelecting = event.pointerType === 'mouse'
           pressedWhileSelected = hasNativeSelection()
@@ -445,7 +458,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         bindTouch(doc, hasNativeSelection, frame)
         doc.addEventListener('click', (event) => {
           const hasSelection = hasNativeSelection()
-          if (hasSelection || selectionRef.current || pressedWhileSelected) {
+          if (hasSelection || pressedWhileSelected) {
             if (!hasSelection) {
               pressedWhileSelected = false
               clearSelection()
@@ -453,6 +466,21 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
             event.preventDefault()
             event.stopImmediatePropagation()
             return
+          }
+          if (event.button === 0 && !event.defaultPrevented) {
+            const content = currentView.renderer.getContents?.().find((item) => item.doc === doc)
+            const hit = content?.overlayer?.hitTest(event)
+            const excerpt = hit?.length && excerptsRef.current.find((item) => item.locator === hit[0])
+            if (hit?.length && excerpt) {
+              const anchor = selectionAtRange(frame, hit[1], excerpt.locator, excerpt.quote)
+              if (anchor) {
+                chromeRef.current.hide()
+                updateSelection(anchor)
+                event.preventDefault()
+                event.stopImmediatePropagation()
+                return
+              }
+            }
           }
           handleTap(event, frame)
         }, { signal, capture: true })
@@ -556,22 +584,55 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   }, [])
 
   const saveExcerpt = async (selected: SelectionState, color: string, note?: string) => {
+    if (savingExcerpt.current) return false
+    savingExcerpt.current = true
+    const view = viewRef.current
+    try {
+      const existing = excerptsRef.current.find((item) => item.locator === selected.cfi)
+      const savedNote = note === undefined ? existing?.note ?? undefined : note || undefined
+      let saved: Excerpt
+      if (existing) {
+        await api.updateExcerpt({ id: existing.id, quote: existing.quote, note: savedNote, color })
+        saved = { ...existing, note: savedNote, color }
+      } else {
+        const input = { bookId: book.id, locator: selected.cfi, quote: selected.text, note: savedNote, color }
+        const id = await api.createExcerpt(input)
+        saved = { ...input, id, createdAt: new Date().toISOString() }
+      }
+      if (viewRef.current !== view) return true
+      const next = [saved, ...excerptsRef.current.filter((item) => item.id !== saved.id)]
+      excerptsRef.current = next
+      setExcerpts(next)
+      if (selectionRef.current?.cfi === selected.cfi) view?.deselect()
+      void view?.addAnnotation({ value: selected.cfi, color }).catch(console.error)
+      return true
+    } catch {
+      toast.error('书摘保存失败，请重试')
+      return false
+    } finally {
+      savingExcerpt.current = false
+    }
+  }
+
+  const removeExcerpt = async (excerpt: Excerpt) => {
     if (savingExcerpt.current) return
     savingExcerpt.current = true
     const view = viewRef.current
     try {
-      await api.createExcerpt({ bookId: book.id, locator: selected.cfi, quote: selected.text, note, color })
+      await api.deleteExcerpt(excerpt.id)
+      if (viewRef.current !== view) return
+      const remaining = excerptsRef.current.filter((item) => item.id !== excerpt.id)
+      excerptsRef.current = remaining
+      setExcerpts(remaining)
+      if (selectionRef.current?.cfi === excerpt.locator) clearSelection()
+      const previous = remaining.find((item) => item.locator === excerpt.locator)
+      if (previous) await view?.addAnnotation({ value: previous.locator, color: previous.color })
+      else await view?.deleteAnnotation({ value: excerpt.locator })
     } catch {
-      toast.error('书摘保存失败，请重试')
-      return
+      toast.error('书摘移除失败，请重试')
     } finally {
       savingExcerpt.current = false
     }
-    if (viewRef.current !== view) return
-    if (selectionRef.current?.cfi === selected.cfi) clearSelection()
-    toast.success('书摘已保存')
-    void reloadMarks().catch(console.error)
-    void view?.addAnnotation({ value: selected.cfi, color }).catch(console.error)
   }
 
   const saveBookmark = async (operation: () => Promise<unknown>) => {
@@ -595,6 +656,8 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       ? api.deleteBookmark(existing.id)
       : api.addBookmark(book.id, current, chapter || title))
   }
+
+  const selectedExcerpt = selection ? excerpts.find((item) => item.locator === selection.cfi) : undefined
 
   return (
     <div
@@ -663,7 +726,10 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       />
       {selection ? (
         <SelectionPopup
+          key={selection.cfi}
           selection={selection}
+          excerpt={selectedExcerpt}
+          defaultColor={preferredHighlight.current}
           mobile={mobile}
           onAiExplain={() => {
             if (selection.text.length > 16_000) {
@@ -678,7 +744,17 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
             void navigator.clipboard.writeText(selection.text)
             clearSelection()
           }}
-          onSave={(color, note) => saveExcerpt(selection, color, note)}
+          onColor={async (color) => {
+            if (await saveExcerpt(selection, color)) preferredHighlight.current = color
+          }}
+          onOpenNote={() => viewRef.current?.deselect()}
+          onSaveNote={(note) => saveExcerpt(selection, selectedExcerpt?.color || preferredHighlight.current, note)}
+          onRemove={async () => {
+            if (selectedExcerpt) await removeExcerpt(selectedExcerpt)
+          }}
+          onDismiss={() => {
+            if (selectionRef.current?.cfi === selection.cfi) clearSelection()
+          }}
           onBookmark={() => {
             void api.addBookmark(book.id, selection.cfi, selection.text.slice(0, 40)).then(() => {
               void reloadMarks()

@@ -7,7 +7,11 @@ declare global {
     readonly page?: number
     readonly pages?: number
     setStyles?: (css: string | [string, string]) => void
-    getContents?: () => { doc?: Document; index?: number; overlayer?: unknown }[]
+    getContents?: () => {
+      doc?: Document
+      index?: number
+      overlayer?: { hitTest: (event: MouseEvent) => [] | [string, Range] }
+    }[]
     next?: (distance?: number) => void | Promise<void>
     prev?: (distance?: number) => void | Promise<void>
   }

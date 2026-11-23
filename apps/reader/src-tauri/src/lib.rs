@@ -119,10 +119,10 @@ fn create_excerpt(
     quote: String,
     note: Option<String>,
     color: String,
-) -> Result<(), String> {
-    db::upsert_excerpt(&state, &book_id, &locator, &quote, note.as_deref(), &color)?;
+) -> Result<String, String> {
+    let id = db::upsert_excerpt(&state, &book_id, &locator, &quote, note.as_deref(), &color)?;
     edgeever::schedule(state.inner().clone(), book_id);
-    Ok(())
+    Ok(id)
 }
 
 #[tauri::command]

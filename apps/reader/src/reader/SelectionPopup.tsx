@@ -1,7 +1,9 @@
-import { useState } from 'react'
-import { Bookmark, Bot, Check, Copy, Highlighter, MessageSquarePlus } from 'lucide-react'
+import { useLayoutEffect, useRef, useState } from 'react'
+import { Bookmark, Bot, Copy, Highlighter, MessageSquarePlus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import { Textarea } from '@/components/ui/textarea'
+import type { Excerpt } from '../api'
 
 export type SelectionState = {
   text: string
@@ -12,140 +14,199 @@ export type SelectionState = {
 }
 
 const HIGHLIGHT_COLORS = [
-  { id: '#c4a35a', label: '金色', bg: 'bg-[#c4a35a]' },
-  { id: '#529b6f', label: '青绿', bg: 'bg-[#529b6f]' },
-  { id: '#488bc2', label: '天蓝', bg: 'bg-[#488bc2]' },
-  { id: '#c25272', label: '桃粉', bg: 'bg-[#c25272]' },
+  { id: '#c4a35a', label: '金色' },
+  { id: '#529b6f', label: '青绿' },
+  { id: '#488bc2', label: '天蓝' },
+  { id: '#c25272', label: '桃粉' },
 ]
+
+export const DEFAULT_HIGHLIGHT_COLOR = HIGHLIGHT_COLORS[0].id
 
 type Props = {
   selection: SelectionState
+  excerpt?: Excerpt
+  defaultColor: string
   mobile: boolean
   onCopy: () => void
-  onSave: (color: string, note?: string) => Promise<void>
+  onColor: (color: string) => Promise<void>
+  onOpenNote: () => void
+  onSaveNote: (note: string) => Promise<boolean>
+  onRemove: () => Promise<void>
+  onDismiss: () => void
   onBookmark: () => void
-  onAiExplain?: (text: string) => void
+  onAiExplain: () => void
 }
 
 export function SelectionPopup({
   selection,
+  excerpt,
+  defaultColor,
   mobile,
   onCopy,
-  onSave,
+  onColor,
+  onOpenNote,
+  onSaveNote,
+  onRemove,
+  onDismiss,
   onBookmark,
   onAiExplain,
 }: Props) {
-  const [selectedColor, setSelectedColor] = useState(HIGHLIGHT_COLORS[0].id)
-  const [showNoteInput, setShowNoteInput] = useState(false)
-  const [noteText, setNoteText] = useState('')
+  const popupRef = useRef<HTMLDivElement>(null)
+  const [sheet, setSheet] = useState<HTMLDivElement | null>(null)
+  const [draft, setDraft] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const editing = draft !== null
+  const inSheet = mobile && editing
+  const { x, y, bottom } = selection
 
-  const safeX = Math.max(172, Math.min(window.innerWidth - 172, selection.x))
-  const isNearTop = selection.y < 100
-  const dockAtTop = showNoteInput || (selection.bottom > window.innerHeight - 96 && selection.y > 160)
+  useLayoutEffect(() => {
+    const popup = popupRef.current
+    if (!popup) return
+    const place = () => {
+      const margin = 8
+      const gap = 18
+      const { width, height } = popup.getBoundingClientRect()
+      const above = y - gap - height
+      const below = bottom + gap
+      const roomBelow = window.innerHeight - below - margin
+      const top = above >= margin || roomBelow < y - gap - margin ? above : below
+      popup.style.left = `${Math.max(margin, Math.min(window.innerWidth - width - margin, x - width / 2))}px`
+      popup.style.top = `${Math.max(margin, Math.min(window.innerHeight - height - margin, top))}px`
+    }
+    place()
+    const observer = new ResizeObserver(place)
+    observer.observe(popup)
+    window.addEventListener('resize', place)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', place)
+    }
+  }, [bottom, inSheet, x, y])
 
-  const save = async (note?: string) => {
+  useLayoutEffect(() => {
+    const viewport = window.visualViewport
+    if (!sheet || !viewport) return
+    const update = () => {
+      const bottom = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+      sheet.style.setProperty('--reader-viewport-bottom', `${bottom}px`)
+    }
+    update()
+    viewport.addEventListener('resize', update)
+    viewport.addEventListener('scroll', update)
+    return () => {
+      viewport.removeEventListener('resize', update)
+      viewport.removeEventListener('scroll', update)
+    }
+  }, [sheet])
+
+  const run = async (operation: () => Promise<unknown>) => {
     setSaving(true)
     try {
-      await onSave(selectedColor, note?.trim() || undefined)
+      await operation()
     } finally {
       setSaving(false)
     }
   }
 
+  const editNote = () => {
+    setDraft(excerpt?.note ?? '')
+    onOpenNote()
+  }
+
+  const editor = editing ? (
+    <form className="flex min-h-0 flex-col gap-3" onSubmit={(event) => {
+      event.preventDefault()
+      if (!saving) void run(async () => {
+        if (await onSaveNote(draft.trim())) onDismiss()
+      })
+    }}>
+      <blockquote className="reader-excerpt-quote line-clamp-2 text-sm text-muted-foreground">{selection.text}</blockquote>
+      <Textarea
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        className="reader-note-input"
+        aria-label="批注内容"
+        placeholder="写下你的想法…"
+        autoFocus
+        onKeyDown={(event) => {
+          if (event.key === 'Escape' && !mobile && !event.nativeEvent.isComposing) {
+            event.stopPropagation()
+            if (!saving) onDismiss()
+          }
+        }}
+      />
+      <div className="flex shrink-0 justify-end gap-2">
+        <Button type="button" variant="ghost" onClick={onDismiss} disabled={saving}>取消</Button>
+        <Button type="submit" disabled={saving || (!excerpt && !draft.trim())}>保存</Button>
+      </div>
+    </form>
+  ) : null
+
+  if (inSheet) {
+    return (
+      <Sheet open onOpenChange={(open) => { if (!open && !saving) onDismiss() }}>
+        <SheetContent ref={setSheet} side="bottom" showCloseButton={false} className="reader-note-sheet gap-3 rounded-t-2xl p-4" aria-describedby={undefined}>
+          <SheetTitle>{excerpt?.note ? '编辑批注' : '写批注'}</SheetTitle>
+          {editor}
+        </SheetContent>
+      </Sheet>
+    )
+  }
+
   return (
     <div
-      className={['reader-selection p-1.5', mobile && 'is-mobile', dockAtTop && 'is-top'].filter(Boolean).join(' ')}
-      style={mobile ? undefined : {
-        left: safeX,
-        top: isNearTop ? Math.max(8, Math.min(120, selection.bottom + 8)) : Math.min(selection.y - 8, window.innerHeight - 8),
-        transform: isNearTop ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
-      }}
+      ref={popupRef}
+      className="reader-selection"
+      aria-label={editor ? '书摘批注' : '选中文字操作'}
       onMouseDown={(event) => {
         if ((event.target as Element).closest('button')) event.preventDefault()
       }}
     >
-      <div className="flex flex-wrap items-center gap-1">
-        <Button
-          type="button"
-          size={mobile ? 'sm' : 'xs'}
-          onClick={() => void save(showNoteInput ? noteText : undefined)}
-          disabled={saving}
-        >
-          <Highlighter className="size-3.5" />
-          存书摘
-        </Button>
-        <Button type="button" size={mobile ? 'sm' : 'xs'} variant="ghost" onClick={onCopy} title="复制文字">
-          <Copy className="size-3.5" />
-          复制
-        </Button>
-        <Button
-          type="button"
-          size={mobile ? 'sm' : 'xs'}
-          variant={showNoteInput ? 'secondary' : 'ghost'}
-          onClick={() => setShowNoteInput((v) => !v)}
-          title="写想法"
-        >
-          <MessageSquarePlus className="size-3.5" />
-          想法
-        </Button>
-        <Button type="button" size={mobile ? 'sm' : 'xs'} variant="ghost" onClick={onBookmark} title="添加书签">
-          <Bookmark className="size-3.5" />
-          书签
-        </Button>
-        {onAiExplain ? (
-          <Button
-            type="button"
-            size={mobile ? 'sm' : 'xs'}
-            variant="ghost"
-            onClick={() => onAiExplain(selection.text)}
-            title="AI 解释"
-          >
-            <Bot className="size-3.5 text-primary" />
-            AI 解释
-          </Button>
-        ) : null}
-      </div>
-
-      {/* Color picker row */}
-      <div className="flex items-center justify-between border-t border-border/50 px-1 pt-1.5 mt-1">
-        <span className="text-[10px] text-muted-foreground">划线颜色</span>
-        <div className="flex items-center gap-1.5">
-          {HIGHLIGHT_COLORS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`size-3.5 rounded-full transition-transform ${item.bg} ${
-                selectedColor === item.id ? 'ring-2 ring-primary ring-offset-1 scale-110' : 'opacity-70 hover:opacity-100'
-              }`}
-              title={item.label}
-              aria-label={item.label}
-              aria-pressed={selectedColor === item.id}
-              onClick={() => setSelectedColor(item.id)}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* Note input field if opened */}
-      {showNoteInput ? (
-        <div className="mt-1.5 flex items-center gap-1 border-t border-border/50 pt-1.5">
-          <Input
-            value={noteText}
-            onChange={(e) => setNoteText(e.target.value)}
-            placeholder="写下你的想法…"
-            className="h-7 text-xs flex-1"
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.nativeEvent.isComposing && !saving) void save(noteText)
-            }}
-          />
-          <Button size="xs" disabled={saving} onClick={() => void save(noteText)}>
-            <Check className="size-3" />
-            保存
-          </Button>
-        </div>
-      ) : null}
+      {editor ?? (
+        <>
+          <div className="reader-selection-colors" aria-label="高亮颜色">
+            {HIGHLIGHT_COLORS.map(({ id, label }) => (
+              <button
+                key={id}
+                type="button"
+                aria-label={`${label}高亮`}
+                aria-pressed={excerpt?.color === id}
+                title={`${label}高亮`}
+                className="reader-selection-swatch"
+                disabled={saving}
+                onClick={() => void run(() => onColor(id))}
+              >
+                <span style={{ backgroundColor: id }} />
+              </button>
+            ))}
+          </div>
+          {excerpt?.note ? <p className="mx-2 line-clamp-2 text-sm text-muted-foreground">{excerpt.note}</p> : null}
+          <div className="reader-selection-actions">
+            {excerpt ? (
+              <Button type="button" size="icon" variant="ghost" disabled={saving} onClick={() => void run(onRemove)} aria-label="移除书摘" title="移除书摘">
+                <Trash2 />
+              </Button>
+            ) : (
+              <Button type="button" size="icon" variant="ghost" disabled={saving} onClick={() => void run(() => onColor(defaultColor))} aria-label="高亮" title="高亮">
+                <Highlighter />
+              </Button>
+            )}
+            <Button type="button" variant="ghost" onClick={editNote} disabled={saving}>
+              <MessageSquarePlus />
+              {excerpt?.note ? '编辑批注' : '批注'}
+            </Button>
+            <Button type="button" size="icon" variant="ghost" onClick={onCopy} disabled={saving} aria-label="复制文字" title="复制文字">
+              <Copy />
+            </Button>
+            <Button type="button" size="icon" variant="ghost" onClick={onBookmark} disabled={saving} aria-label="添加书签" title="添加书签">
+              <Bookmark />
+            </Button>
+            <Button type="button" size="icon" variant="ghost" onClick={onAiExplain} disabled={saving} aria-label="AI 解释" title="AI 解释">
+              <Bot />
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   )
 }

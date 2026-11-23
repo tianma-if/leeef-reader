@@ -179,7 +179,7 @@ export const api = {
     note?: string
     color: string
   }) =>
-    invoke('create_excerpt', {
+    invoke<string>('create_excerpt', {
       bookId: input.bookId,
       locator: input.locator,
       quote: input.quote,

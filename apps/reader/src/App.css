@@ -377,26 +377,75 @@
 .reader-selection {
   position: fixed;
   z-index: 30;
-  display: flex;
-  flex-direction: column;
+  width: min(16rem, calc(100vw - 1rem));
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.375rem;
   background: var(--popover);
   border: 1px solid var(--border);
   border-radius: 0.75rem;
-  box-shadow: 0 12px 32px rgb(0 0 0 / 16%);
-  transition: opacity 150ms ease;
+  box-shadow: 0 4px 20px rgb(0 0 0 / 16%);
 }
 
-.reader-selection.is-mobile {
-  position: absolute;
-  inset: auto 0.5rem 0.5rem;
-  margin-inline: auto;
-  width: max-content;
-  max-width: calc(100% - 1rem);
+.reader-selection-colors,
+.reader-selection-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
-.reader-selection.is-mobile.is-top {
-  top: 0.5rem;
-  bottom: auto;
+.reader-selection-colors {
+  padding: 0 0.375rem 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.reader-selection-swatch {
+  display: grid;
+  place-items: center;
+  width: 2.625rem;
+  height: 2.625rem;
+  border-radius: 0.5rem;
+}
+
+.reader-selection-swatch:hover {
+  background: var(--muted);
+}
+
+.reader-selection-swatch span {
+  display: block;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+}
+
+.reader-selection-swatch[aria-pressed='true'] span {
+  outline: 1px solid var(--foreground);
+  outline-offset: 3px;
+}
+
+.reader-selection-swatch:disabled {
+  opacity: 0.5;
+}
+
+.reader-note-input {
+  field-sizing: fixed;
+  min-height: clamp(3rem, 18dvh, 8rem);
+  resize: none;
+}
+
+.reader-note-sheet {
+  --reader-keyboard-bottom: max(var(--leeef-keyboard-bottom, 0px), var(--reader-viewport-bottom, 0px));
+  max-height: calc(100dvh - var(--reader-keyboard-bottom) - 0.5rem);
+  overflow: auto;
+  padding-bottom: max(1rem, calc(max(env(safe-area-inset-bottom, 0px), var(--leeef-safe-bottom, 0px)) - var(--reader-keyboard-bottom)));
+}
+
+.reader-note-sheet[data-side='bottom'] {
+  bottom: var(--reader-keyboard-bottom);
+}
+
+body:has(.reader-note-sheet) > [data-slot='sheet-overlay'] {
+  backdrop-filter: none;
 }
 
 .reader-error {

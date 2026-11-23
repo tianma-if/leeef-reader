@@ -18,6 +18,12 @@ class MainActivity : TauriActivity() {
         WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
       )
       val density = webView.resources.displayMetrics.density
+      val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+      val keyboardBottom = if (ime > bars.bottom) ime / density else 0f
+      webView.evaluateJavascript(
+        "document.documentElement.style.setProperty('--leeef-keyboard-bottom', '${keyboardBottom}px')",
+        null,
+      )
       pushSafeArea(webView, bars.top / density, bars.bottom / density)
       insets
     }
