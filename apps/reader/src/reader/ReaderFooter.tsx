@@ -139,7 +139,7 @@ export function ReaderFooter({
             </div>
           ) : null}
           <div className="reader-footer-bar">
-            <Button type="button" variant="ghost" size="icon" aria-label="目录" onClick={() => onOpenTab('toc')}>
+            <Button type="button" variant="ghost" aria-label="目录" aria-haspopup="dialog" className="size-11" onClick={() => onOpenTab('toc')}>
               <List />
             </Button>
             <Button type="button" variant="ghost" size="icon" aria-label="主题" onClick={() => onOpenTab('theme')}>

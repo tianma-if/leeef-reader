@@ -35,14 +35,21 @@ declare global {
     lastLocation?: {
       cfi?: string
       fraction?: number
-      tocItem?: { label?: string }
+      tocItem?: TocItem
       range?: Range
     }
     renderer: FoliateRendererElement
-    search: (opts: { query: string }) => AsyncIterable<{ cfi?: string; excerpt?: string }>
+    search: (opts: { query: string }) => AsyncIterable<FoliateSearchResult>
+    clearSearch: () => void
   }
 
-  type TocItem = { label?: unknown; href?: string; subitems?: TocItem[] }
+  type TocItem = { id?: number; label?: unknown; href?: string; subitems?: TocItem[] }
+  type FoliateSearchExcerpt = { pre: string; match: string; post: string }
+  type FoliateSearchMatch = { cfi: string; excerpt: FoliateSearchExcerpt }
+  type FoliateSearchResult = FoliateSearchMatch
+    | { label: string; subitems: FoliateSearchMatch[] }
+    | { progress: number }
+    | 'done'
 
   interface HTMLElementTagNameMap {
     'foliate-view': FoliateViewElement

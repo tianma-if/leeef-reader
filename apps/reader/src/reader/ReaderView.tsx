@@ -9,14 +9,14 @@ import {
   type Excerpt,
   type Settings,
 } from '../api'
-import { applyReadingFont, applyViewLayout, highlightDraw, themeOf } from './bookStyles'
+import { applyReadingFont, applyViewLayout, highlightDraw, labelOf, themeOf } from './bookStyles'
 import { normalizeSelectedText } from './selectionText'
 import { mountReadingFont } from './fontLoader'
 import { CapturedPageTurn } from './capturedTurn'
 import { TurnQueue } from './turnQueue'
 import { ReaderChrome } from './ReaderChrome'
 import { ReaderFooter } from './ReaderFooter'
-import { ReaderSidebar } from './ReaderSidebar'
+import { ReaderSidebar, type SearchHit } from './ReaderSidebar'
 import { SelectionPopup, type SelectionState } from './SelectionPopup'
 import {
   releaseVelocity,
@@ -123,12 +123,12 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState('正在打开…')
   const [toc, setToc] = useState<TocItem[]>([])
-  const [query, setQuery] = useState('')
-  const [hits, setHits] = useState<{ cfi?: string; excerpt?: string }[]>([])
+  const [currentToc, setCurrentToc] = useState<TocItem>()
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [excerpts, setExcerpts] = useState<Excerpt[]>([])
   const [settings, setSettings] = useState<Settings>({})
   const [selection, setSelection] = useState<SelectionState | null>(null)
+  const savingBookmark = useRef(false)
   const [aiSource, setAiSource] = useState<ReadingSource | null>(null)
   const mobile = isMobile()
   const chrome = useReaderChrome()
@@ -137,6 +137,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   const paginated = (settings.flow ?? 'paginated') === 'paginated'
   const theme = themeOf(settings)
   const bookmarked = bookmarks.some((item) => item.locator === locator)
+  const canBookmark = !status && !!locator
 
   const getTurner = () => {
     turner.current ??= new CapturedPageTurn({
@@ -229,9 +230,37 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   }, [mobile])
 
   const goTo = (target: string) => {
+    viewRef.current?.deselect()
     void viewRef.current?.goTo(target)
     chrome.closeSidebar()
     setSelection(null)
+  }
+
+  const closeNavigation = () => {
+    chrome.closeSidebar()
+    if (mobile) chrome.hide()
+  }
+
+  const clearBookSearch = useCallback(() => viewRef.current?.clearSearch(), [])
+
+  const searchBook = async (query: string, signal: AbortSignal) => {
+    const view = viewRef.current
+    const hits: SearchHit[] = []
+    if (!view) return hits
+    for await (const result of view.search({ query })) {
+      if (signal.aborted || viewRef.current !== view) break
+      if (result === 'done') break
+      if ('subitems' in result) {
+        for (const hit of result.subitems) {
+          hits.push({ ...hit, chapter: result.label })
+          if (hits.length >= 40) return hits
+        }
+      } else if ('cfi' in result) {
+        hits.push(result)
+        if (hits.length >= 40) break
+      }
+    }
+    return hits
   }
 
   const lastSuggestedLocator = useRef('')
@@ -295,13 +324,15 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         const detail = (event as CustomEvent).detail as {
           cfi?: string
           fraction?: number
-          tocItem?: { label?: string }
+          tocItem?: TocItem
         }
         const fraction = Number(detail.fraction ?? 0)
         setProgress(fraction)
-        setChapter(detail.tocItem?.label ?? '')
+        const chapterTitle = labelOf(detail.tocItem?.label)
+        setCurrentToc(detail.tocItem)
+        setChapter(chapterTitle)
         setLocator(detail.cfi ?? '')
-        void api.saveProgress(book.id, detail.cfi ?? '', fraction, detail.tocItem?.label)
+        void api.saveProgress(book.id, detail.cfi ?? '', fraction, chapterTitle || undefined)
         getTurner().invalidate()
         window.clearTimeout(prepareTimer.current)
         if (isMobile() && (settingsRef.current.flow ?? 'paginated') === 'paginated') {
@@ -445,18 +476,15 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (chrome.sidebar || event.defaultPrevented) return
       const target = event.target as HTMLElement | null
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+      if (target?.closest?.('button, input, textarea, select') || target?.isContentEditable) {
         return
       }
       if (event.key === 'Escape') {
         if (selection) {
           setSelection(null)
           viewRef.current?.deselect()
-          return
-        }
-        if (chrome.sidebar) {
-          chrome.closeSidebar()
           return
         }
         if (chrome.visible) {
@@ -581,14 +609,26 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
     else chrome.toggle()
   }
 
+  const saveBookmark = async (operation: () => Promise<unknown>) => {
+    if (savingBookmark.current) return
+    savingBookmark.current = true
+    try {
+      await operation()
+      await reloadMarks()
+    } catch {
+      toast.error('书签更新失败，请重试')
+    } finally {
+      savingBookmark.current = false
+    }
+  }
+
   const toggleBookmark = () => {
     const current = viewRef.current?.lastLocation?.cfi ?? locator
+    if (!current || !canBookmark) return
     const existing = bookmarks.find((item) => item.locator === current)
-    if (existing) {
-      void api.deleteBookmark(existing.id).then(reloadMarks)
-      return
-    }
-    void api.addBookmark(book.id, current, chapter || title).then(reloadMarks)
+    void saveBookmark(() => existing
+      ? api.deleteBookmark(existing.id)
+      : api.addBookmark(book.id, current, chapter || title))
   }
 
   return (
@@ -596,7 +636,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       className={mobile ? 'reader-shell is-mobile' : 'reader-shell'}
       style={{ color: theme.fg, background: theme.bg }}
     >
-      <div className="reader-stage" ref={hostRef}>
+      <div className="reader-stage outline-none" ref={hostRef} tabIndex={-1}>
         {status ? <p className="reader-status">{status}</p> : null}
         {paginated ? (
           <div
@@ -615,6 +655,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         progress={progress}
         visible={chrome.visible}
         bookmarked={bookmarked}
+        canBookmark={canBookmark}
         mobile={mobile}
         onBack={onClose}
         onToggleBookmark={toggleBookmark}
@@ -639,30 +680,27 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       <ReaderSidebar
         open={chrome.sidebar}
         mobile={mobile}
+        title={title}
+        author={book.author}
         toc={toc}
-        query={query}
-        hits={hits}
+        currentToc={currentToc}
+        locator={locator}
+        progress={progress}
         bookmarks={bookmarks}
         excerpts={excerpts}
         settings={settings}
+        canBookmark={canBookmark}
         onPatch={patchSettings}
-        onQuery={setQuery}
-        onSearch={() => {
-          const view = viewRef.current
-          if (!view || !query.trim()) return
-          void (async () => {
-            const next: { cfi?: string; excerpt?: string }[] = []
-            for await (const hit of view.search({ query })) {
-              next.push(hit)
-              if (next.length > 40) break
-            }
-            setHits(next)
-          })()
+        onSearch={searchBook}
+        onClearSearch={clearBookSearch}
+        onGo={(target) => {
+          goTo(target)
+          if (mobile) chrome.hide()
         }}
-        onGo={goTo}
         onAddBookmark={toggleBookmark}
-        onDeleteBookmark={(id) => void api.deleteBookmark(id).then(reloadMarks)}
-        onClose={chrome.closeSidebar}
+        onDeleteBookmark={(id) => void saveBookmark(() => api.deleteBookmark(id))}
+        onClose={closeNavigation}
+        onRestoreFocus={() => hostRef.current?.focus({ preventScroll: true })}
       />
       {selection ? (
         <SelectionPopup

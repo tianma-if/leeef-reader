@@ -7,6 +7,7 @@ type Props = {
   progress: number
   visible: boolean
   bookmarked: boolean
+  canBookmark: boolean
   mobile: boolean
   onBack: () => void
   onToggleBookmark: () => void
@@ -21,6 +22,7 @@ export function ReaderChrome({
   progress,
   visible,
   bookmarked,
+  canBookmark,
   mobile,
   onBack,
   onToggleBookmark,
@@ -61,13 +63,14 @@ export function ReaderChrome({
           type="button"
           variant="ghost"
           size="icon-sm"
+          disabled={!canBookmark}
           aria-label={bookmarked ? '取消书签' : '添加书签'}
           onClick={onToggleBookmark}
         >
           <Bookmark className={bookmarked ? 'fill-current' : undefined} />
         </Button>
         {!mobile ? (
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="目录与书签" onClick={onOpenSidebar}>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="目录、书摘与书签" aria-haspopup="dialog" onClick={onOpenSidebar}>
             <PanelRight />
           </Button>
         ) : null}
