@@ -8,6 +8,11 @@ import {
 
 // Leave a stationary touch to the WebView before it starts native text selection.
 const SWIPE_START_WINDOW_MS = 350
+const BOOKMARK_PULL_START_PX = 6
+const BOOKMARK_PULL_COMMIT_PX = 64
+const BOOKMARK_PULL_TOP_EDGE_PX = 24
+
+export type BookmarkPull = 'pulling' | 'ready'
 
 type TouchOptions = {
   signal: AbortSignal
@@ -19,6 +24,9 @@ type TouchOptions = {
   startTurn: (forward: boolean) => boolean
   moveTurn: (progress: number) => void
   finishTurn: (forward: boolean, captured: boolean, commit: boolean) => void
+  canPullBookmark: () => boolean
+  previewBookmark: (pull: BookmarkPull | null) => void
+  addBookmark: () => void
   showChrome: () => void
 }
 
@@ -32,6 +40,8 @@ export function bindReaderTouch(target: EventTarget, options: TouchOptions) {
     startedAt: number
     selecting: boolean
     paginated: boolean
+    canPullBookmark: boolean
+    bookmarkPull: BookmarkPull | null
     claimed: boolean
     captured: boolean
     forward: boolean
@@ -50,7 +60,10 @@ export function bindReaderTouch(target: EventTarget, options: TouchOptions) {
   listen('touchstart', (event) => {
     ignoreClick = false
     if (gesture) {
-      if (event.touches.length > 1) gesture.selecting = true
+      if (event.touches.length > 1) {
+        gesture.selecting = true
+        if (gesture.bookmarkPull) options.previewBookmark(null)
+      }
       return
     }
     const touch = event.changedTouches[0]
@@ -60,6 +73,8 @@ export function bindReaderTouch(target: EventTarget, options: TouchOptions) {
     const frameRect = frame?.getBoundingClientRect()
     const scale = frameRect && frame?.clientWidth ? frameRect.width / frame.clientWidth : 1
     const x = (frameRect?.left ?? 0) + touch.clientX * scale - bounds.left
+    const scaleY = frameRect && frame?.clientHeight ? frameRect.height / frame.clientHeight : 1
+    const y = (frameRect?.top ?? 0) + touch.clientY * scaleY
     const now = performance.now()
     gesture = {
       id: touch.identifier,
@@ -69,6 +84,8 @@ export function bindReaderTouch(target: EventTarget, options: TouchOptions) {
       startedAt: now,
       selecting: options.selecting(),
       paginated: options.paginated(),
+      canPullBookmark: y >= BOOKMARK_PULL_TOP_EDGE_PX && options.canPullBookmark(),
+      bookmarkPull: null,
       claimed: false,
       captured: false,
       forward: true,
@@ -87,9 +104,28 @@ export function bindReaderTouch(target: EventTarget, options: TouchOptions) {
     const dx = touch.screenX - drag.x
     const dy = touch.screenY - drag.y
     const now = performance.now()
+    if (drag.bookmarkPull) {
+      if (event.cancelable) event.preventDefault()
+      const pull = dy >= BOOKMARK_PULL_COMMIT_PX && dy > 2 * Math.abs(dx) ? 'ready' : 'pulling'
+      if (pull !== drag.bookmarkPull) {
+        drag.bookmarkPull = pull
+        options.previewBookmark(pull)
+      }
+      return
+    }
     if (!drag.claimed) {
       if (options.selecting() || now - drag.startedAt >= SWIPE_START_WINDOW_MS) {
         drag.selecting = true
+        return
+      }
+      if (dy <= -BOOKMARK_PULL_START_PX || (Math.abs(dx) >= BOOKMARK_PULL_START_PX && Math.abs(dx) > Math.abs(dy))) {
+        drag.canPullBookmark = false
+      }
+      if (drag.canPullBookmark && dy >= BOOKMARK_PULL_START_PX && dy > 2 * Math.abs(dx)
+        && options.canPullBookmark()) {
+        if (event.cancelable) event.preventDefault()
+        drag.bookmarkPull = dy >= BOOKMARK_PULL_COMMIT_PX ? 'ready' : 'pulling'
+        options.previewBookmark(drag.bookmarkPull)
         return
       }
       const wantsTurn = shouldClaimTurnGesture(drag.intent, { deltaX: dx, deltaY: dy, deltaT: now })
@@ -116,6 +152,15 @@ export function bindReaderTouch(target: EventTarget, options: TouchOptions) {
     const dy = (touch?.screenY ?? drag.y) - drag.y
     const now = performance.now()
     const cancelled = event.type === 'touchcancel'
+    if (drag.bookmarkPull) {
+      ignoreClick = true
+      options.previewBookmark(null)
+      if (!cancelled && !drag.selecting && !options.selecting() && options.paginated() && options.canPullBookmark()
+        && dy >= BOOKMARK_PULL_COMMIT_PX && dy > 2 * Math.abs(dx)) {
+        options.addBookmark()
+      }
+      return
+    }
     if (drag.claimed) {
       ignoreClick = true
       const distance = drag.forward ? -dx : dx

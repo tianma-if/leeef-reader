@@ -19,7 +19,7 @@ import { ReaderFooter } from './ReaderFooter'
 import { ReaderSidebar, type SearchHit } from './ReaderSidebar'
 import { DEFAULT_HIGHLIGHT_COLOR, SelectionPopup, type SelectionState } from './SelectionPopup'
 import { zoneOf } from './turnCommit'
-import { bindReaderTouch } from './readerTouch'
+import { bindReaderTouch, type BookmarkPull } from './readerTouch'
 import { useReaderChrome } from './useReaderChrome'
 import { createReadingTimer } from './readingTimer'
 import { createWheelTurnState, wheelTurnDirection } from './wheelTurn'
@@ -124,6 +124,8 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   const savingExcerpt = useRef(false)
   const preferredHighlight = useRef(DEFAULT_HIGHLIGHT_COLOR)
   const savingBookmark = useRef(false)
+  const addPageBookmarkRef = useRef<() => void>(() => undefined)
+  const [bookmarkPull, setBookmarkPull] = useState<BookmarkPull | null>(null)
   const [aiSource, setAiSource] = useState<ReadingSource | null>(null)
   const mobile = isMobile()
   const chrome = useReaderChrome()
@@ -319,6 +321,10 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
             void activeTurner.prepare()
           })
         },
+        canPullBookmark: () => !!view?.lastLocation?.cfi && !savingBookmark.current
+          && !turnQueue.current?.busy && !selectionRef.current && (window.visualViewport?.scale ?? 1) <= 1,
+        previewBookmark: setBookmarkPull,
+        addBookmark: () => addPageBookmarkRef.current(),
         showChrome: () => chromeRef.current.toggle(),
       })
     }
@@ -519,6 +525,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       window.clearTimeout(saveTimer.current)
       turnQueue.current?.clear()
       updateSelection(null)
+      setBookmarkPull(null)
       window.clearInterval(readingInterval)
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('pagehide', onPageHide)
@@ -658,6 +665,16 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       : api.addBookmark(book.id, current, chapter || title))
   }
 
+  addPageBookmarkRef.current = () => {
+    const current = viewRef.current?.lastLocation?.cfi
+    if (!current || !canBookmark || bookmarks.some((item) => item.locator === current)) return
+    void saveBookmark(async () => {
+      const currentBookmarks = await api.listBookmarks(book.id)
+      if (currentBookmarks.some((item) => item.locator === current)) return
+      await api.addBookmark(book.id, current, chapter || title)
+    })
+  }
+
   const selectedExcerpt = selection ? excerpts.find((item) => item.locator === selection.cfi) : undefined
 
   return (
@@ -675,6 +692,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         progress={progress}
         visible={chrome.visible}
         bookmarked={bookmarked}
+        bookmarkPull={bookmarkPull}
         canBookmark={canBookmark}
         mobile={mobile}
         onBack={onClose}

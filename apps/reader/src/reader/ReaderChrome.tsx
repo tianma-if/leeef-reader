@@ -1,5 +1,6 @@
 import { Bookmark, ChevronLeft, PanelRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import type { BookmarkPull } from './readerTouch'
 
 type Props = {
   title: string
@@ -7,6 +8,7 @@ type Props = {
   progress: number
   visible: boolean
   bookmarked: boolean
+  bookmarkPull: BookmarkPull | null
   canBookmark: boolean
   mobile: boolean
   onBack: () => void
@@ -22,6 +24,7 @@ export function ReaderChrome({
   progress,
   visible,
   bookmarked,
+  bookmarkPull,
   canBookmark,
   mobile,
   onBack,
@@ -34,7 +37,9 @@ export function ReaderChrome({
     <>
       <p className="reader-band reader-band-top">{chapter || title}</p>
       <p className="reader-band reader-band-bottom">{(progress * 100).toFixed(1)}%</p>
-      {bookmarked ? <span className="reader-ribbon" aria-hidden /> : null}
+      {bookmarked || bookmarkPull ? (
+        <span className="reader-ribbon" data-pull={bookmarked ? undefined : bookmarkPull} aria-hidden />
+      ) : null}
 
       {!mobile ? (
         <>
