@@ -70,7 +70,7 @@ Leeef Reader 是一款把书库、进度和笔记留在你自己设备上的电�
 - **OPDS 目录**：浏览并下载你配置的 OPDS 源。
 - **自带 AI 接口**：桌面设置填写 OpenAI 兼容 Endpoint、API Key 和模型（OpenAI、DeepSeek、OpenRouter、xAI 等）。对话在进程内流式输出。模型可查询本地书库；改书库的操作会先请你确认。
 - **进程内 MCP**：在设置里启动书库 MCP。它在本机 loopback 上提供 HTTP，读写的就是阅读器正在用的 `leeef.sqlite`。Agent 可以列书、抽正文、搜书摘，并在确认后写入。
-- **桌面填凭据，手机配对**：对象存储、AI 等密钥只在电脑上填写。手机展示配对码，而不是这些表单。
+- **可信设备配对与恢复**：对象存储、AI 等凭据在电脑上填写。任一可信手机或电脑都可以为新设备配对。如果所有可信设备都已丢失，可以使用受 Argon2id 保护的恢复包。
 - **可打开的本地数据**：书库是标准 SQLite。核心写入会在同一事务里记下 `sync_operation`，以后接到你自己的云时有日志，而不是旁路改表。
 
 ## MCP
@@ -85,9 +85,9 @@ Leeef 在 Tauri 进程内提供 [Model Context Protocol](https://modelcontextpro
 ## 数据、AI 与同步
 
 - 书籍和阅读数据默认只在本机。
-- AI 可选，接口和密钥由你提供，不必离开你输入它们的那台电脑。
-- 跨设备使用**你自己的** S3 兼容存储或 WebDAV。局域网配对传同步空间密钥和第一份配置；之后的设置通过每台设备各自的加密配置合并。主动打开「书籍与阅读数据」后，还会同步加密的书籍、封面、分类、标签、书摘、书签、进度和阅读时长；不打开则仍只同步配置。协议见 [trusted-device-sync.md](docs/trusted-device-sync.md)。
-- 导出的 `.leeef-recovery` 用于所有可信设备都丢失时恢复同步空间。另有密码保护的 `.leeef-backup` 书库备份（书籍与封面合计不超过 128 MiB）。两份密码都不要只存在 Leeef 里。
+- AI 为可选功能，接口和密钥由你提供。只有主动配对可信设备时，密钥才会从桌面端同步。配置文件会在上传前加密。
+- 跨设备同步使用**你自己的** S3 兼容存储桶或 WebDAV。局域网配对会传输加密的同步空间密钥和首份配置快照。后续的设置变更通过各设备自己的加密配置文件同步。开启「书籍与阅读数据」后，还会同步加密的书籍、封面、书架、标签、书摘、书签、阅读进度和阅读时长。此选项默认关闭。协议见 [trusted-device-sync.md](docs/trusted-device-sync.md)。
+- 导出的 `.leeef-recovery` 恢复包包含加密的恢复资料，可在所有可信设备均丢失时恢复同步空间。`.leeef-backup` 则是受密码保护的书库备份，书籍与封面合计不超过 128 MiB。请在 Leeef 之外保管这两个密码。
 - 阅读时选中文字，可以用你配置的模型解释、翻译、概括，或把回答存成笔记。
 
 在线功能需要网络，以及你自行提供的第三方凭据。应用内不出售 AI 或云存储。
@@ -96,8 +96,14 @@ Leeef 在 Tauri 进程内提供 [Model Context Protocol](https://modelcontextpro
 
 以下内容不在当前 GitHub Release 中：
 
-- 已签名的 Windows 安装包
+- 已签名的 Windows 安装包（构建、签名、更新和审计工作流已接入，正式发布仍需生产凭据并成功完成 Windows 发布流程）
 - 配对流程上的二维码扫描、按需下载书籍，以及超过 128 MiB 的书库备份
+
+## 应用更新
+
+- macOS 在启动时及之后每五分钟检查 GitHub Release 的签名更新清单。应用在后台下载并校验 Tauri 更新包，然后询问是否重启。
+- Android 使用 Google Play 灵活更新。Google Play 会先征得下载同意，随后在后台继续下载。下载完成后，Leeef Reader 会询问是否重启以完成安装。
+- iOS 检查 App Store 公开版本，有更新时提供 App Store 页面链接。下载和安装时机由 iOS 的自动更新设置决定。
 
 ## 技术栈
 
@@ -152,6 +158,8 @@ assets/brand                Logo 与标识
 - EPUB 分页与格式适配使用 [foliate-js](https://github.com/johnfactotum/foliate-js)，源码 vendored 在本仓库。
 - 应用壳层使用 [shadcn/ui](https://ui.shadcn.com/) 与 [Tauri](https://tauri.app/)。
 - 移动端滑动翻页依据当代 WebView 阅读器的公开交互独立实现（只截当前页、底下瞬间跳栏、overlay 跟手滑动）。
+- Leeef Reader 的界面与交互设计借鉴了 [Readest](https://github.com/readest/readest)。
+- 感谢 [Anxcye/anx-reader](https://github.com/Anxcye/anx-reader) 提供的灵感。
 
 ## 商标与品牌使用
 
@@ -163,6 +171,6 @@ Leeef Reader 是一款完全独立的开源软件，与 Amazon、Apple、Google 
 
 Leeef 不托管你的书库。你导入的内容由你负责。可选的第三方 AI、TTS、OPDS 与对象存储服务由对应提供商运营，适用其自身条款。
 
-## License
+## 许可证
 
 [AGPL-3.0](LICENSE)
