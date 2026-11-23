@@ -268,7 +268,7 @@ function ReaderSidebarBody(props: Props) {
                 </li>
               ))}
             </ul>
-          ) : <p className="reader-nav-empty">{term ? '未找到匹配的书摘' : '还没有书摘，选中文字即可保存'}</p>}
+          ) : <p className="reader-nav-empty">{term ? '未找到匹配的书摘' : '还没有书摘，选中文字后点「存书摘」'}</p>}
         </TabsContent>
         <TabsContent value="bookmarks" className="reader-nav-scroll">
           {searchInBook ? <SearchResults hits={hits} searching={searching} onGo={props.onGo} /> : props.bookmarks.length ? (

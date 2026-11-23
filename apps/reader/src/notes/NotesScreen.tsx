@@ -172,7 +172,7 @@ export function NotesScreen({ onOpenBook }: Props) {
           <p className="text-muted-foreground text-xs max-w-sm mb-4 leading-relaxed">
             {query || selectedBookId !== 'all'
               ? '请尝试更换搜索关键字或清除书籍筛选。'
-              : '在阅读书籍时选中文字，点击「划线」或「想法」即可快速添加。'}
+              : '阅读时选中文字，点「存书摘」即可保存。'}
           </p>
         </div>
       ) : (

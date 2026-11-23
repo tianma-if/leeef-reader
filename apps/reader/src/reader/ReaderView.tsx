@@ -605,6 +605,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       setExcerpts(next)
       if (selectionRef.current?.cfi === selected.cfi) view?.deselect()
       void view?.addAnnotation({ value: selected.cfi, color }).catch(console.error)
+      if (!existing) toast.success('书摘已保存')
       return true
     } catch {
       toast.error('书摘保存失败，请重试')
@@ -745,7 +746,9 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
             clearSelection()
           }}
           onColor={async (color) => {
-            if (await saveExcerpt(selection, color)) preferredHighlight.current = color
+            const saved = await saveExcerpt(selection, color)
+            if (saved) preferredHighlight.current = color
+            return saved
           }}
           onOpenNote={() => viewRef.current?.deselect()}
           onSaveNote={(note) => saveExcerpt(selection, selectedExcerpt?.color || preferredHighlight.current, note)}

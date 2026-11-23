@@ -28,7 +28,7 @@ type Props = {
   defaultColor: string
   mobile: boolean
   onCopy: () => void
-  onColor: (color: string) => Promise<void>
+  onColor: (color: string) => Promise<boolean>
   onOpenNote: () => void
   onSaveNote: (note: string) => Promise<boolean>
   onRemove: () => Promise<void>
@@ -108,6 +108,10 @@ export function SelectionPopup({
     }
   }
 
+  const saveAndDismiss = (save: () => Promise<boolean>) => run(async () => {
+    if (await save()) onDismiss()
+  })
+
   const editNote = () => {
     setDraft(excerpt?.note ?? '')
     onOpenNote()
@@ -116,9 +120,7 @@ export function SelectionPopup({
   const editor = editing ? (
     <form className="flex min-h-0 flex-col gap-3" onSubmit={(event) => {
       event.preventDefault()
-      if (!saving) void run(async () => {
-        if (await onSaveNote(draft.trim())) onDismiss()
-      })
+      if (!saving) void saveAndDismiss(() => onSaveNote(draft.trim()))
     }}>
       <blockquote className="reader-excerpt-quote line-clamp-2 text-sm text-muted-foreground">{selection.text}</blockquote>
       <Textarea
@@ -137,7 +139,9 @@ export function SelectionPopup({
       />
       <div className="flex shrink-0 justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onDismiss} disabled={saving}>取消</Button>
-        <Button type="submit" disabled={saving || (!excerpt && !draft.trim())}>保存</Button>
+        <Button type="submit" disabled={saving}>
+          {draft.trim() ? '保存批注' : '仅存书摘'}
+        </Button>
       </div>
     </form>
   ) : null
@@ -164,14 +168,14 @@ export function SelectionPopup({
     >
       {editor ?? (
         <>
-          <div className="reader-selection-colors" aria-label="高亮颜色">
+          <div className="reader-selection-colors" role="group" aria-label={excerpt ? '修改书摘颜色' : '选择颜色并保存书摘'}>
             {HIGHLIGHT_COLORS.map(({ id, label }) => (
               <button
                 key={id}
                 type="button"
-                aria-label={`${label}高亮`}
+                aria-label={excerpt ? `改成${label}高亮` : `存为${label}书摘`}
                 aria-pressed={excerpt?.color === id}
-                title={`${label}高亮`}
+                title={excerpt ? `改成${label}高亮` : `存为${label}书摘`}
                 className="reader-selection-swatch"
                 disabled={saving}
                 onClick={() => void run(() => onColor(id))}
@@ -187,8 +191,9 @@ export function SelectionPopup({
                 <Trash2 />
               </Button>
             ) : (
-              <Button type="button" size="icon" variant="ghost" disabled={saving} onClick={() => void run(() => onColor(defaultColor))} aria-label="高亮" title="高亮">
+              <Button type="button" disabled={saving} onClick={() => void saveAndDismiss(() => onColor(defaultColor))}>
                 <Highlighter />
+                存书摘
               </Button>
             )}
             <Button type="button" variant="ghost" onClick={editNote} disabled={saving}>

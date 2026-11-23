@@ -377,7 +377,7 @@
 .reader-selection {
   position: fixed;
   z-index: 30;
-  width: min(16rem, calc(100vw - 1rem));
+  width: min(18rem, calc(100vw - 1rem));
   display: grid;
   gap: 0.25rem;
   padding: 0.375rem;
@@ -397,6 +397,11 @@
 .reader-selection-colors {
   padding: 0 0.375rem 0.25rem;
   border-bottom: 1px solid var(--border);
+}
+
+.reader-selection-actions {
+  flex-wrap: wrap;
+  gap: 0.125rem;
 }
 
 .reader-selection-swatch {

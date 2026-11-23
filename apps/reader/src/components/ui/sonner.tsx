@@ -2,6 +2,8 @@ import type { CSSProperties } from "react"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
 
+const bottomOffset = "calc(16px + max(env(safe-area-inset-bottom, 0px), var(--leeef-safe-bottom, 0px)))"
+
 const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner
@@ -24,7 +26,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
           <Loader2Icon className="size-4 animate-spin" />
         ),
       }}
-      offset="calc(16px + max(env(safe-area-inset-bottom, 0px), var(--leeef-safe-bottom, 0px)))"
+      offset={bottomOffset}
+      mobileOffset={{ bottom: bottomOffset }}
       style={
         {
           "--normal-bg": "var(--popover)",
