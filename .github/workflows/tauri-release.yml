@@ -65,7 +65,10 @@ jobs:
           RELEASE_PLATFORM: ${{ inputs.platforms }}
         run: |
           set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$RUNNER_TEMP/release.json"
+          # The tags API hides drafts, so resolve the Release by its tag name.
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName,name,isDraft,isPrerelease \
+            --jq '{tag_name:.tagName,name:.name,draft:.isDraft,prerelease:.isPrerelease}' \
+            > "$RUNNER_TEMP/release.json"
           node apps/reader/scripts/release-assets.mjs preflight "$RUNNER_TEMP/release.json" "$RELEASE_PLATFORM"
       - name: Require successful CI for the exact release commit
         env:
