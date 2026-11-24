@@ -650,10 +650,12 @@ jobs:
   windows:
     needs: preflight
     if: github.repository == 'tianma-if/leeef-reader' && (inputs.platforms == 'all' || inputs.platforms == 'windows')
-    name: Signed Windows x64 installer
+    name: Windows x64 installer
     runs-on: windows-2022
     timeout-minutes: 90
-    environment: windows-distribution
+    # The updater key already lives in macos-distribution. An absent
+    # Authenticode certificate ships the unsigned Preview, matching EdgeEver.
+    environment: macos-distribution
     defaults:
       run:
         shell: pwsh
@@ -675,14 +677,15 @@ jobs:
         with:
           workspaces: apps/reader/src-tauri
       - run: bun ci
-      - name: Import Windows code signing certificate
+      - name: Import Windows code signing certificate when present
         env:
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
         run: |
           if (!$env:WINDOWS_CERTIFICATE_BASE64 -or !$env:WINDOWS_CERTIFICATE_PASSWORD -or !$env:WINDOWS_TIMESTAMP_URL) {
-            throw 'Configure Windows certificate, password and timestamp URL in windows-distribution'
+            Write-Host 'No Authenticode certificate configured; building the unsigned Windows Preview'
+            exit 0
           }
           $certPath = Join-Path $env:RUNNER_TEMP 'leeef-signing.pfx'
           [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
@@ -704,14 +707,18 @@ jobs:
           } finally {
             Remove-Item $certPath -Force -ErrorAction SilentlyContinue
           }
-      - name: Build signed Windows installer and updater
+      - name: Build Windows installer and updater
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           CI: true
         run: |
           if (!$env:TAURI_SIGNING_PRIVATE_KEY) { throw 'Missing fixed Tauri updater signing key' }
-          bun run tauri build --target x86_64-pc-windows-msvc --bundles nsis --config "$env:RUNNER_TEMP/windows-signing.json"
-      - name: Verify signatures and stage installer
+          if (Test-Path "$env:RUNNER_TEMP/windows-signing.json") {
+            bun run tauri build --target x86_64-pc-windows-msvc --bundles nsis --config "$env:RUNNER_TEMP/windows-signing.json"
+          } else {
+            bun run tauri build --target x86_64-pc-windows-msvc --bundles nsis
+          }
+      - name: Verify updater signature and stage installer
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
           $installers = @(Get-ChildItem src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe)
@@ -720,8 +727,12 @@ jobs:
           $app = 'src-tauri/target/x86_64-pc-windows-msvc/release/leeef_reader.exe'
           foreach ($file in @($installer.FullName, $app)) {
             $signature = Get-AuthenticodeSignature $file
-            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -ne $env:WINDOWS_CERTIFICATE_THUMBPRINT -or !$signature.TimeStamperCertificate) {
-              throw "Invalid or untimestamped Authenticode signature: $file"
+            if ($env:WINDOWS_CERTIFICATE_THUMBPRINT) {
+              if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -ne $env:WINDOWS_CERTIFICATE_THUMBPRINT -or !$signature.TimeStamperCertificate) {
+                throw "Invalid or untimestamped Authenticode signature: $file"
+              }
+            } elseif ($signature.Status -eq 'Valid') {
+              throw "Refusing an Authenticode signature that this Preview job did not configure: $file"
             }
           }
           if (!(Test-Path "$($installer.FullName).sig") -or !(Get-Content "$($installer.FullName).sig" -Raw).Trim()) {
@@ -731,6 +742,8 @@ jobs:
           $name = "Leeef-Reader-$version-windows-x64-setup.exe"
           Copy-Item $installer.FullName (Join-Path $dist $name)
           Copy-Item "$($installer.FullName).sig" (Join-Path $dist "$name.sig")
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Encoding ascii (Join-Path $dist 'SHA256SUMS-windows.txt') "$hash  $name"
       - uses: actions/upload-artifact@v4
         with:
           name: leeef-windows

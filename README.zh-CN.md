@@ -43,17 +43,19 @@ Leeef Reader 是一款把书库、进度和笔记留在你自己设备上的电�
 
 ## 客户端下载
 
-当前 GitHub Release 提供 **已签名** 的 macOS 与 Android 安装包。Google Play 使用同一 Android 包名。
+当前 GitHub Release 提供 **已签名** 的 macOS 与 Android 安装包，以及 **未做 Authenticode 签名** 的 Windows x64 预览版。Google Play 使用同一 Android 包名。
 
 <p>
   <a href="https://github.com/tianma-if/leeef-reader/releases/latest"><img src="assets/readme/platforms/macos.svg" alt="下载 macOS 客户端" width="40" height="40" /></a>&nbsp;&nbsp;
+  <a href="https://github.com/tianma-if/leeef-reader/releases/latest"><img src="assets/readme/platforms/windows.svg" alt="下载 Windows 预览版" width="40" height="40" /></a>&nbsp;&nbsp;
   <a href="https://github.com/tianma-if/leeef-reader/releases/latest"><img src="assets/readme/platforms/android.svg" alt="下载 Android APK" width="40" height="40" /></a>&nbsp;&nbsp;
   <a href="https://play.google.com/store/apps/details?id=dev.leeef.leeef_reader"><img src="assets/readme/platforms/google-play.svg" alt="从 Google Play 获取 Leeef Reader" width="40" height="40" /></a>
 </p>
 
 - **macOS**：从 [GitHub Releases](https://github.com/tianma-if/leeef-reader/releases/latest) 下载 universal DMG / ZIP（Developer ID 签名并公证）。
+- **Windows**：GitHub Releases 上的 x64 预览版安装包没有 Authenticode 签名，Windows 可能会提示风险。请只从本仓库下载，不要为了安装关闭 SmartScreen。应用内更新仍会用内置公钥校验安装包。
 - **Android**：GitHub Releases 上的 arm64 APK，或 [Google Play](https://play.google.com/store/apps/details?id=dev.leeef.leeef_reader) 的 Play App Signing AAB。
-- **iOS 与 Windows** 安装包不在当前 Release 中，列在路线图里，本文不把它们写成已交付。
+- **iOS** 通过 App Store Connect 交付，不附在 GitHub Release 上。
 
 旧版 Flutter 客户端不会自动升级到此应用，书库也不会自动迁移。
 
@@ -96,12 +98,12 @@ Leeef 在 Tauri 进程内提供 [Model Context Protocol](https://modelcontextpro
 
 以下内容不在当前 GitHub Release 中：
 
-- 已签名的 Windows 安装包（构建、签名、更新和审计工作流已接入，正式发布仍需生产凭据并成功完成 Windows 发布流程）
+- Windows 预览版的 Authenticode 发布者签名。买到可信代码签名证书之前，安装包保持未签名。
 - 配对流程上的二维码扫描、按需下载书籍，以及超过 128 MiB 的书库备份
 
 ## 应用更新
 
-- macOS 在启动时及之后每五分钟检查 GitHub Release 的签名更新清单。应用在后台下载并校验 Tauri 更新包，然后询问是否重启。
+- macOS 与 Windows 预览版在启动时及之后每五分钟检查 GitHub Release 的签名更新清单。应用在后台下载并校验 Tauri 更新包，然后询问是否重启。Windows 安装包没有 Authenticode 签名，所以更新签名有效时系统仍可能提示风险。
 - Android 使用 Google Play 灵活更新。Google Play 会先征得下载同意，随后在后台继续下载。下载完成后，Leeef Reader 会询问是否重启以完成安装。
 - iOS 检查 App Store 公开版本，有更新时提供 App Store 页面链接。下载和安装时机由 iOS 的自动更新设置决定。
 

@@ -43,17 +43,19 @@ Most of us already have a folder of EPUBs, PDFs, and Chinese TXT novels. The usu
 
 ## Downloads
 
-Current GitHub Releases ship **signed** macOS and Android installers. Google Play uses the same Android package.
+Current GitHub Releases ship a **signed** macOS installer, a **signed** Android installer, and an **unsigned** Windows x64 Preview. Google Play uses the same Android package.
 
 <p>
   <a href="https://github.com/tianma-if/leeef-reader/releases/latest"><img src="assets/readme/platforms/macos.svg" alt="Download Leeef Reader for macOS" width="40" height="40" /></a>&nbsp;&nbsp;
+  <a href="https://github.com/tianma-if/leeef-reader/releases/latest"><img src="assets/readme/platforms/windows.svg" alt="Download the Leeef Reader Windows Preview" width="40" height="40" /></a>&nbsp;&nbsp;
   <a href="https://github.com/tianma-if/leeef-reader/releases/latest"><img src="assets/readme/platforms/android.svg" alt="Download the Leeef Reader Android APK" width="40" height="40" /></a>&nbsp;&nbsp;
   <a href="https://play.google.com/store/apps/details?id=dev.leeef.leeef_reader"><img src="assets/readme/platforms/google-play.svg" alt="Get Leeef Reader on Google Play" width="40" height="40" /></a>
 </p>
 
 - **macOS**: universal DMG / ZIP from [GitHub Releases](https://github.com/tianma-if/leeef-reader/releases/latest) (Developer ID signed and notarized).
+- **Windows**: unsigned x64 Preview installer from GitHub Releases. Windows may warn because the package is not Authenticode-signed. Download it only from this repository, and do not turn off SmartScreen to install it. In-app updates still verify the installer with the pinned updater key.
 - **Android**: arm64 APK from GitHub Releases, or the Play App Signing AAB on [Google Play](https://play.google.com/store/apps/details?id=dev.leeef.leeef_reader).
-- **iOS and Windows** packages are not in the current Release. They are on the roadmap; this README does not treat them as shipped.
+- **iOS** is delivered through App Store Connect and is not attached to the GitHub Release.
 
 The previous Flutter client does not auto-update to this app, and libraries are not migrated automatically.
 
@@ -96,12 +98,12 @@ Online features need a network and credentials you supply. Leeef does not sell A
 
 These are not in the current GitHub Release:
 
-- Signed Windows installers (build, signing, updater and audit workflows are wired; production credentials and a successful Windows release are still required)
+- Authenticode publisher identity for the Windows Preview, until a trusted code-signing certificate can be purchased
 - QR scanning on the existing pairing-code flow, on-demand book download, and backups larger than 128 MiB
 
 ## Updates
 
-- macOS checks the signed GitHub Release manifest on launch and every five minutes. It downloads and verifies the Tauri updater bundle in the background, then asks before restarting.
+- macOS and the Windows Preview check the signed GitHub Release manifest on launch and every five minutes. Each downloads and verifies the Tauri updater bundle in the background, then asks before restarting. The Windows installer is not Authenticode-signed, so Windows can still warn while the updater signature is valid.
 - Android uses Google Play Flexible Update. Play asks for download consent, continues in the background, and Leeef Reader asks before restarting to finish installation.
 - iOS checks the public App Store version and links to its App Store page when an update is available. Download and installation timing follows the user's iOS automatic-update setting; App Store apps cannot replace their own IPA.
 

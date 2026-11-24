@@ -72,7 +72,12 @@ export function manifestForAssets({ directory, version, tag, repository, notes, 
     nonempty(`${mac}.zip`)
     platforms['darwin-aarch64'] = platforms['darwin-x86_64'] = asset(`${mac}.app.tar.gz`)
   }
-  if (required !== 'macos' || hasWin) platforms['windows-x86_64'] = asset(win)
+  if (required !== 'macos' || hasWin) {
+    platforms['windows-x86_64'] = asset(win)
+    const checksum = readFileSync(join(directory, 'SHA256SUMS-windows.txt'), 'utf8').trim()
+    const hash = createHash('sha256').update(readFileSync(join(directory, win))).digest('hex')
+    assert.equal(checksum, `${hash}  ${win}`, 'Windows SHA-256 manifest does not match the installer')
+  }
   return { version, notes, pub_date: new Date().toISOString(), platforms }
 }
 

@@ -25,6 +25,11 @@ function fixture(t, names) {
   for (const name of names) {
     writeFileSync(join(directory, name), name.endsWith('.sig') ? signed(Buffer.from(`asset-${name.slice(0, -4)}`)) : `asset-${name}`)
   }
+  const exe = names.find(name => name.endsWith('windows-x64-setup.exe'))
+  if (exe) {
+    const hash = createHash('sha256').update(readFileSync(join(directory, exe))).digest('hex')
+    writeFileSync(join(directory, 'SHA256SUMS-windows.txt'), `${hash}  ${exe}\n`)
+  }
   return { directory, publicKey: encodedPublicKey, version: '2.7.0', tag: 'v2.7.0', repository: 'tianma-if/leeef-reader', notes: '主要更新\nKey Changes' }
 }
 const mac = ['.dmg', '.zip', '.app.tar.gz', '.app.tar.gz.sig'].map(ext => `Leeef-Reader-2.7.0-macos-universal${ext}`)
@@ -72,6 +77,11 @@ test('rejects empty installer, mismatched version, URL or signature, and dropped
   assert.throws(() => auditManifest(dropped, expected))
   assert.throws(() => auditManifest({ ...expected, version: '2.6.0' }, expected))
   assert.throws(() => manifestForAssets({ ...options, tag: 'v2.6.0' }))
+  const checksumPath = join(options.directory, 'SHA256SUMS-windows.txt')
+  writeFileSync(checksumPath, `deadbeef  ${win[0]}\n`)
+  assert.throws(() => manifestForAssets(options))
+  const hash = createHash('sha256').update(readFileSync(join(options.directory, win[0]))).digest('hex')
+  writeFileSync(checksumPath, `${hash}  ${win[0]}\n`)
   writeFileSync(join(options.directory, win[0]), '')
   assert.throws(() => manifestForAssets(options))
 })

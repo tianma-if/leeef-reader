@@ -1,6 +1,6 @@
 # 商店与桌面端发布
 
-当前正式资产走 [`.github/workflows/tauri-release.yml`](../.github/workflows/tauri-release.yml)：对 Draft Tag 手动调度，构建签名 macOS DMG/ZIP、Windows x64 NSIS 安装包、Android APK/AAB（默认上传 Google Play production）和 iOS IPA（默认上传 App Store Connect、提交审核，并在审核通过后自动发布）。旧的 Flutter 工作流 `google-play.yml` / `ios-app-store.yml` / `macos-dmg.yml` 不得对正式 Tag 发版。
+当前正式资产走 [`.github/workflows/tauri-release.yml`](../.github/workflows/tauri-release.yml)：对 Draft Tag 手动调度，构建签名 macOS DMG/ZIP、Windows x64 NSIS 预览安装包、Android APK/AAB（默认上传 Google Play production）和 iOS IPA（默认上传 App Store Connect、提交审核，并在审核通过后自动发布）。旧的 Flutter 工作流 `google-play.yml` / `ios-app-store.yml` / `macos-dmg.yml` 不得对正式 Tag 发版。
 
 首次发布前，应先在 Apple Developer、App Store Connect 和 Google Play Console 创建应用；已登记的标识不可随意更换。仓库级发布约束见 [`AGENTS.md`](../AGENTS.md)，本页说明实际操作。
 
@@ -11,7 +11,7 @@
 - 以上一个正式 Release 为基线审计变更，并使用中英文说明公开的用户可感知变化；构建、签名和公证细节留在 Actions 或关联 Issue。
 - 先创建 Draft Release，在 Draft 内准备并核验 macOS、Windows 与 Android 资产，资产齐全后立即公开，不得停下来询问确认。Release 的 `published` 事件只审计已有资产；审计失败会尝试把 Release 恢复为 Draft。
 - 正式发版默认交付 Google Play production（`completed`），并将 iOS 构建上传 App Store Connect、关联正式版本、提交审核，设置为审核通过后自动发布。internal、draft、TestFlight 测试分发和移动端真机回归均不是项目强制前置条件。平台自身的构建处理、资料与审核要求仍适用。
-- Windows 流程已接入，但只有 Windows CI、正式代码签名、Updater 验签和资产审计通过后，才能把 Windows 列为该 Release 已交付的平台。新增平台需选择 minor 或 major。
+- Windows 在没有可信 Authenticode 证书时按预览版交付。安装包可以未签名，但必须带 Tauri Updater 签名、`SHA256SUMS-windows.txt`，并通过资产审计。公开说明必须写明 SmartScreen 可能拦截，不得宣称发布者签名。新增平台需选择 minor 或 major。
 
 ## 标准发布命令
 
@@ -50,7 +50,7 @@ flutter test test/release_tool_test.dart
 
 | 平台 | 应用标识 | 工作流 | 产物/目标 |
 | --- | --- | --- | --- |
-| Windows | `dev.leeef.leeef-reader` | `Tauri signed release` | Authenticode 签名的 x64 NSIS `.exe`、Tauri Updater `.sig` 与合并后的 `latest.json` |
+| Windows | `dev.leeef.leeef-reader` | `Tauri signed release` | 未做 Authenticode 签名的 x64 NSIS 预览 `.exe`、Tauri Updater `.sig`、`SHA256SUMS-windows.txt` 与合并后的 `latest.json` |
 | Android | `dev.leeef.leeef_reader` | `Tauri signed release` | 签名 APK/AAB；默认 Play production `completed` |
 | iOS | `dev.leeef.leeefReader` | `Tauri signed release` | 签名 IPA；默认上传 App Store Connect、提交审核、审核通过后自动发布 |
 | macOS | `dev.leeef.leeef-reader` | `Tauri signed release` | Developer ID 签名并公证的 universal DMG/ZIP，以及签名的 Tauri Updater 包与 `latest.json` |
@@ -125,19 +125,17 @@ gh secret set TAURI_SIGNING_PRIVATE_KEY \
 
 私钥必须与 `tauri.conf.json` 的 `plugins.updater.pubkey` 匹配。不要重新生成或提交私钥；应把它作为发布凭据加密备份。
 
-## Windows x64 安装包与自动更新
+## Windows x64 预览版与自动更新
 
-Windows 使用 `windows-2022` Runner，从正式 Tag 构建 NSIS 安装器。`tauri.windows.conf.json` 自动覆盖打包目标，不改变 macOS 的 DMG/App 配置。当前覆盖 x64，不宣称提供 ARM64 原生包。CI 会在 Windows 上运行前端测试、Rust 库测试和不带正式签名的 NSIS 构建；CI 包不上传正式 Release。
+Windows 使用 `windows-2022` Runner，从正式 Tag 构建 NSIS 安装器。`tauri.windows.conf.json` 自动覆盖打包目标，不改变 macOS 的 DMG/App 配置。当前覆盖 x64，不宣称提供 ARM64 原生包。CI 会在 Windows 上运行前端测试、Rust 库测试和不带 Authenticode 的 NSIS 构建；CI 包不上传正式 Release。
 
-首次正式发布前，需要在受保护的 `windows-distribution` GitHub Environment 配置：
+当前没有可购买的可信 Authenticode 证书，做法与 EdgeEver 的 Windows 预览版相同：安装包和主程序不做发布者签名，SmartScreen、杀毒软件或组织策略可能提示风险或阻止安装。这是预览阶段的预期现象。公开说明必须要求只从 `tianma-if/leeef-reader` 的官方 Release 下载，并不得建议用户关闭系统安全控制。
 
-- Secrets：`WINDOWS_CERTIFICATE_BASE64`（可用于自动签名的代码签名 PFX 的 base64）、`WINDOWS_CERTIFICATE_PASSWORD`。
-- Secret：`TAURI_SIGNING_PRIVATE_KEY`，必须使用与客户端内置公钥匹配的现有固定私钥；不能重新生成，也不能提交进仓库。需从仓库外的安全备份配置到此 Environment。
-- Variable：`WINDOWS_TIMESTAMP_URL`，使用证书提供商的 RFC 3161 时间戳服务。
+更新通道不依赖未签名文件。Tauri Updater 使用已经配置在 `macos-distribution` 的固定私钥为安装包生成 `.sig`，公钥内置在客户端。`finalize` 用这把公钥验证签名，并核对 `SHA256SUMS-windows.txt` 与安装包字节一致后，才把 `windows-x86_64` 写入 `latest.json`。签名缺失、公钥不匹配或校验和不一致时，Release 保持 Draft。不要新生成这把私钥。
 
-正式工作流会检查凭据、导入证书、对主程序和安装器签名，并验证 Authenticode 证书指纹、信任状态与时间戳；缺少凭据或验签失败时终止。若证书使用硬件或云端签名服务，需先将签名步骤适配该服务；不可把不支持导出的密钥伪装成 PFX，也不可回退为无签名正式包。
+以后买到可导出的代码签名证书时，把 `WINDOWS_CERTIFICATE_BASE64`、`WINDOWS_CERTIFICATE_PASSWORD` 和 `WINDOWS_TIMESTAMP_URL` 配进同一个 Environment。工作流会改签全部 PE 和安装包，并核验证书指纹与时间戳。签名会改变文件字节，因此必须先签名，再生成 `.sig`、校验和与 `latest.json`。证书缺失时继续发未签名预览版，不得伪造 PFX。
 
-产物是 `Leeef-Reader-X.Y.Z-windows-x64-setup.exe` 和同名 `.sig`。Tauri 2 直接复用安装器进行更新，不需要另造更新 ZIP。`finalize` 下载该 Draft 的资产，使用客户端公钥验证 macOS/Windows 的 Updater 签名，生成同时包含 `darwin-aarch64`、`darwin-x86_64` 和 `windows-x86_64` 的 `latest.json`，并确认 URL、版本、签名与附件一致。单平台重试会保留已存在的另一桌面平台；发现残缺资产时失败，不会静默删除更新入口。
+产物是 `Leeef-Reader-X.Y.Z-windows-x64-setup.exe`、同名 `.sig` 和 `SHA256SUMS-windows.txt`。Tauri 2 直接复用安装器进行更新，不需要另造更新 ZIP。`finalize` 下载该 Draft 的资产，生成同时包含 `darwin-aarch64`、`darwin-x86_64` 和 `windows-x86_64` 的 `latest.json`，并确认 URL、版本、签名与附件一致。单平台重试会保留已存在的另一桌面平台；发现残缺资产时失败，不会静默删除更新入口。
 
 手动选择 `platforms: windows` 只准备 Windows Draft 资产。`platforms: all` 才会在全部任务成功且资产审计通过后公开。所有构建上传必须针对 Draft；`appstore-submit` 只做商店送审，允许复用已公开 Release。`published` 事件只审计现有附件，失败恢复 Draft，不构建或上传资产。
 
@@ -155,7 +153,7 @@ node --test scripts/release-assets.test.mjs
 1. 确认 `main` 与 `origin/main` 一致且工作区干净；以上一个正式 Release 为基线整理中英文用户变更。
 2. 显式选择 SemVer 级别，同步更新 `package.json`、`tauri.conf.json`、`Cargo.toml` 与锁文件；确认移动端构建号严格递增。
 3. 等待当前源码提交的跨平台 CI 全部通过；该工作流执行 `apps/reader` 的 Bun 测试/构建，以及 `apps/reader/src-tauri` 的 `cargo test --lib`。发布规划器会直接复用这一结果，不重复执行同一套门禁。
-4. 创建 `vX.Y.Z` Draft Release，使用同一 Tag 运行 `Tauri signed release`（默认 `platforms: all`），确认 macOS DMG/ZIP/`.app.tar.gz`/`.sig`、Windows x64 安装器/`.sig`、合并的 `latest.json` 与 Android APK/AAB 已上传且工作流成功。
+4. 创建 `vX.Y.Z` Draft Release，使用同一 Tag 运行 `Tauri signed release`（默认 `platforms: all`），确认 macOS DMG/ZIP/`.app.tar.gz`/`.sig`、Windows x64 安装器/`.sig`/`SHA256SUMS-windows.txt`、合并的 `latest.json` 与 Android APK/AAB 已上传且工作流成功。Windows 没有 Authenticode 证书时，安装包保持未签名预览版。
 5. 完整流程审计成功后由 finalize 立即公开 GitHub Release。Google Play production 与 App Store Connect 上传由 `tauri-release.yml` 直接执行，无需先经过测试渠道，也不得为此询问用户。建议检查真机导入、阅读、分享导入、后台音频、同步和 Android 更新流程；如未执行，如实记录，不阻塞正式上架或送审，也不得将其标记为通过。
 6. 在 Intel 与 Apple Silicon Mac 上验证 DMG 可挂载、拖入 Applications，并运行 `spctl --assess --type execute --verbose "Leeef Reader.app"`；从前一正式版本启动应用，确认新版 `.app.tar.gz` 静默下载并验签后出现“重启以更新”，重启后版本号已更新。该 macOS 验收仍按发布后行为执行，默认不覆盖安装开发者机器上的现有应用。
 7. 确认 `tauri-release.yml` 的 macOS、Windows、Android、iOS、finalize job 已成功；分别核验 Play 生产轨道、App Store Connect 处理/送审和正式上架状态，不将上传成功等同于上架成功。
