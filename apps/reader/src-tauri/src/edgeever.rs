@@ -64,6 +64,8 @@ pub struct SyncResult {
 pub struct Notebook {
     pub id: String,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    slug: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -178,7 +180,6 @@ pub fn status(state: &AppState) -> Result<SyncStatus, String> {
     let notebook_selected = !notebook_id.is_empty();
     let target_key = instance_base_url(&settings.edge_ever_endpoint)
         .ok()
-        .filter(|_| notebook_selected)
         .map(|base_url| target_key(&base_url, notebook_id));
     let configured = target_key.is_some() && !settings.edge_ever_token.trim().is_empty();
     let (cached_name, last_attempt) = if let Some(key) = &target_key {
@@ -190,14 +191,16 @@ pub fn status(state: &AppState) -> Result<SyncStatus, String> {
     } else {
         (None, None)
     };
-    let notebook_name = cached_name.or_else(|| {
-        settings
-            .edge_ever_notebook_label
-            .filter(|notebook| {
-                notebook_selected && notebook.id == notebook_id && !notebook.name.trim().is_empty()
-            })
-            .map(|notebook| notebook.name)
-    });
+    let notebook_name = if notebook_selected {
+        cached_name.or_else(|| {
+            settings
+                .edge_ever_notebook_label
+                .filter(|notebook| notebook.id == notebook_id && !notebook.name.trim().is_empty())
+                .map(|notebook| notebook.name)
+        })
+    } else {
+        Some("等待分类".into())
+    };
     Ok(SyncStatus {
         enabled: settings.edge_ever_enabled,
         configured,
@@ -281,25 +284,45 @@ fn digest(value: &str) -> String {
     hex::encode(Sha256::digest(value.as_bytes()))
 }
 
+async fn list_notebooks(client: &Client, config: &Config) -> Result<Vec<Notebook>, String> {
+    let response: NotebookEnvelope =
+        request_json(client, config, Method::GET, "api/v1/notebooks", None).await?;
+    Ok(response.notebooks)
+}
+
+fn inbox_notebook_id(notebooks: &[Notebook]) -> Result<&str, String> {
+    notebooks
+        .iter()
+        .find(|notebook| {
+            notebook.id == "nb_inbox"
+                || (notebook.id.starts_with("ws_") && notebook.id.ends_with("_inbox"))
+        })
+        .or_else(|| notebooks.iter().find(|notebook| notebook.slug.as_deref() == Some("inbox")))
+        .map(|notebook| notebook.id.as_str())
+        .ok_or_else(|| "无法访问 EdgeEver 的「等待分类」，请检查 Token 的笔记本权限或选择其他笔记本".into())
+}
+
 pub async fn test(state: &AppState) -> Result<String, String> {
     let config = config(state)?.ok_or_else(|| "EdgeEver 同步尚未启用".to_string())?;
     let client = client()?;
+    let notebooks = list_notebooks(&client, &config).await?;
+    let notebook_id = if config.notebook_id.is_empty() {
+        inbox_notebook_id(&notebooks)?
+    } else {
+        &config.notebook_id
+    };
     let path = format!(
         "api/v1/memos?notebookId={}&limit=1",
-        urlencoding::encode(&config.notebook_id)
+        urlencoding::encode(notebook_id)
     );
     let _: Value = request_json(&client, &config, Method::GET, &path, None).await?;
-    let _: NotebookEnvelope =
-        request_json(&client, &config, Method::GET, "api/v1/notebooks", None).await?;
     Ok("连接成功，Token 具备 read:notebooks 与 read:memos 权限".into())
 }
 
 pub async fn notebooks(state: &AppState) -> Result<Vec<Notebook>, String> {
     let config = config(state)?.ok_or_else(|| "EdgeEver 同步尚未启用".to_string())?;
-    let response: NotebookEnvelope =
-        request_json(&client()?, &config, Method::GET, "api/v1/notebooks", None).await?;
-    if let Some(notebook) = response
-        .notebooks
+    let notebooks = list_notebooks(&client()?, &config).await?;
+    if let Some(notebook) = notebooks
         .iter()
         .find(|notebook| notebook.id == config.notebook_id)
     {
@@ -310,7 +333,7 @@ pub async fn notebooks(state: &AppState) -> Result<Vec<Notebook>, String> {
             &notebook.name,
         );
     }
-    Ok(response.notebooks)
+    Ok(notebooks)
 }
 
 pub async fn sync_book(state: &AppState, book_id: &str) -> Result<bool, String> {
@@ -319,9 +342,6 @@ pub async fn sync_book(state: &AppState, book_id: &str) -> Result<bool, String> 
     let Some(config) = config(state)? else {
         return Ok(false);
     };
-    if config.notebook_id.is_empty() {
-        return Err("尚未选择 EdgeEver 目标笔记本".into());
-    }
     let generation = db::edgeever_pending_generation(state, book_id)?;
     let result = sync_book_unlocked(state, book_id, &config).await;
     if !matches!(result, Ok(None)) {
@@ -372,6 +392,12 @@ async fn sync_book_unlocked(
         )
         .await?
     } else {
+        let notebook_id = if config.notebook_id.is_empty() {
+            let notebooks = list_notebooks(&client, config).await?;
+            inbox_notebook_id(&notebooks)?.to_string()
+        } else {
+            config.notebook_id.clone()
+        };
         let title: String = book
             .title
             .trim()
@@ -389,7 +415,7 @@ async fn sync_book_unlocked(
             Some(json!({
                 "importId": IMPORT_ID,
                 "format": "markdown",
-                "notebookId": config.notebook_id,
+                "notebookId": notebook_id,
                 "items": [{
                     "externalId": book.sha256,
                     "title": title,
@@ -514,7 +540,7 @@ pub fn start_background(state: AppState) {
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(30)).await;
-            if !matches!(config(&state), Ok(Some(config)) if !config.notebook_id.is_empty()) {
+            if !matches!(config(&state), Ok(Some(_))) {
                 continue;
             }
             for book_id in db::pending_edgeever_books(&state).unwrap_or_default() {
@@ -572,7 +598,7 @@ pub async fn sync_all(state: &AppState) -> SyncResult {
 mod tests {
     use super::*;
     use axum::{
-        extract::State as AxumState,
+        extract::{Query, State as AxumState},
         http::HeaderMap,
         response::IntoResponse,
         routing::{get, post},
@@ -674,6 +700,7 @@ mod tests {
     struct MockEdgeEver {
         creates: Arc<AtomicUsize>,
         updates: Arc<AtomicUsize>,
+        import_notebooks: Arc<Mutex<Vec<String>>>,
         memo: Arc<Mutex<Value>>,
         fail_next_update: Arc<AtomicBool>,
         fail_next_import: Arc<AtomicBool>,
@@ -686,7 +713,17 @@ mod tests {
             .route(
                 "/api/v1/notebooks",
                 get(|| async {
-                    Json(json!({ "notebooks": [{ "id": "notebook-1", "name": "阅读摘录" }] }))
+                    Json(json!({ "notebooks": [
+                        { "id": "notebook-1", "name": "阅读摘录" },
+                        { "id": "ws_default_inbox", "name": "Inbox", "slug": "inbox" }
+                    ] }))
+                }),
+            )
+            .route(
+                "/api/v1/memos",
+                get(|Query(query): Query<HashMap<String, String>>| async move {
+                    assert_eq!(query["notebookId"], "ws_default_inbox");
+                    Json(json!({ "memos": [] }))
                 }),
             )
             .route(
@@ -699,6 +736,7 @@ mod tests {
                         assert_eq!(body["items"][0]["externalId"], digest("book"));
                         assert_eq!(body["items"][0]["title"], "同步测试");
                         assert!(body["items"][0]["contentMarkdown"].as_str().unwrap().contains("> 原文"));
+                        mock.import_notebooks.lock().unwrap().push(body["notebookId"].as_str().unwrap().to_string());
                         if mock.fail_next_import.swap(false, Ordering::SeqCst) {
                             return StatusCode::SERVICE_UNAVAILABLE.into_response();
                         }
@@ -903,7 +941,13 @@ mod tests {
 
         let second_root = tempfile::tempdir().unwrap();
         let second_state = db::open(second_root.path().to_path_buf()).unwrap();
-        db::kv_set(&second_state, "settings", &settings).unwrap();
+        let mut default_settings: Value = serde_json::from_str(&settings).unwrap();
+        default_settings["edgeEverNotebookId"] = json!("");
+        db::kv_set(&second_state, "settings", &default_settings.to_string()).unwrap();
+        let default_status = status(&second_state).unwrap();
+        assert!(default_status.configured);
+        assert_eq!(default_status.notebook_name.as_deref(), Some("等待分类"));
+        test(&second_state).await.unwrap();
         let imported = db::import_book(
             &second_state,
             "other-filename.txt",
@@ -929,6 +973,11 @@ mod tests {
                 .unwrap()
                 .unwrap();
         assert_eq!(linked.memo_id, "memo-1");
+        assert_eq!(
+            *mock.import_notebooks.lock().unwrap(),
+            ["notebook-1", "notebook-1", "ws_default_inbox"]
+        );
+        assert!(status(&second_state).unwrap().last_attempt.unwrap().succeeded);
         assert_eq!(mock.creates.load(Ordering::SeqCst), 1);
         assert_eq!(mock.updates.load(Ordering::SeqCst), 5);
         let mut changed_target: Value = serde_json::from_str(&settings).unwrap();

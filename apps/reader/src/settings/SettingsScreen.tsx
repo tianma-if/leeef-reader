@@ -520,9 +520,9 @@ export function SettingsScreen() {
             <div className="grid gap-1.5">
               <Label htmlFor="edgeever-notebook">目标笔记本</Label>
               <Select
-                value={value.edgeEverNotebookId || 'none'}
+                value={value.edgeEverNotebookId?.trim() || 'inbox-default'}
                 onValueChange={(id) => patch({
-                  edgeEverNotebookId: id === 'none' ? '' : id,
+                  edgeEverNotebookId: id === 'inbox-default' ? '' : id,
                   edgeEverNotebookLabel: edgeEverNotebooks.find((notebook) => notebook.id === id),
                 })}
               >
@@ -530,7 +530,7 @@ export function SettingsScreen() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">尚未选择</SelectItem>
+                  <SelectItem value="inbox-default">等待分类（默认）</SelectItem>
                   {edgeEverNotebooks.map((nb) => (
                     <SelectItem key={nb.id} value={nb.id}>
                       {nb.name}
@@ -548,11 +548,10 @@ export function SettingsScreen() {
                   setEdgeEverBusy(true)
                   void api
                     .saveSettings(value)
-                    .then(() => Promise.all([api.edgeEverTest(), api.edgeEverNotebooks()]))
-                    .then(([result, notebooks]) => {
-                      setEdgeEverNotebooks(notebooks)
-                      toast.success(result.message)
-                    })
+                    .then(() => api.edgeEverNotebooks())
+                    .then(setEdgeEverNotebooks)
+                    .then(() => api.edgeEverTest())
+                    .then((result) => toast.success(result.message))
                     .catch((cause) => toast.error(String(cause)))
                     .finally(() => setEdgeEverBusy(false))
                 }}
@@ -562,7 +561,7 @@ export function SettingsScreen() {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={edgeEverBusy || !value.edgeEverEnabled || !value.edgeEverNotebookId}
+                disabled={edgeEverBusy || !value.edgeEverEnabled || !value.edgeEverEndpoint?.trim() || !value.edgeEverToken?.trim()}
                 onClick={() => {
                   setEdgeEverBusy(true)
                   void api

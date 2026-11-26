@@ -24,7 +24,7 @@ export function EdgeEverStatusCard() {
         setUnavailable(false)
         if (requestedTarget === next.targetKey) return
         requestedTarget = next.targetKey
-        if (next.targetKey) {
+        if (next.targetKey && next.notebookSelected) {
           void api.edgeEverNotebooks().then(() => refresh()).catch(() => undefined)
         }
       } catch {
@@ -75,7 +75,7 @@ export function EdgeEverStatusCard() {
             <div className="flex justify-between gap-3 py-2.5">
               <dt className="shrink-0 text-muted-foreground">目标笔记本</dt>
               <dd className="min-w-0 break-words text-right font-medium">
-                {status.notebookName ?? (status.notebookSelected ? '名称暂不可用' : '尚未选择')}
+                {status.notebookName ?? '名称暂不可用'}
               </dd>
             </div>
             <div className="flex justify-between gap-3 py-2.5">
