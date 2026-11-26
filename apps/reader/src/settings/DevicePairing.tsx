@@ -3,7 +3,7 @@ import { FileUp, Monitor, ScanLine } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, isMobile, type PairingHostStatus, type PairingOffer, type PairingPeer, type SettingsSyncStatus } from '../api'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -49,19 +49,16 @@ function PairingQr({ qr }: { qr: NonNullable<PairingOffer['qr']> }) {
 }
 
 export function DevicePairing({
-  open,
-  onOpenChange,
   status,
   onStatus,
   onImported,
 }: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
   status: SettingsSyncStatus | null
   onStatus: (status: SettingsSyncStatus) => void
   onImported: () => void
 }) {
   const mobile = isMobile()
+  const [open, setOpen] = useState(false)
   const [peers, setPeers] = useState<PairingPeer[]>([])
   const [searchError, setSearchError] = useState('')
   const [searching, setSearching] = useState(true)
@@ -78,6 +75,9 @@ export function DevicePairing({
   const [packageText, setPackageText] = useState('')
   const [filename, setFilename] = useState('')
   const fileInput = useRef<HTMLInputElement>(null)
+  const startingHost = useRef(false)
+
+  useEffect(() => () => { startingHost.current = false }, [])
 
   useEffect(() => {
     if (!open || offer || busy) return
@@ -182,16 +182,26 @@ export function DevicePairing({
   }
 
   const beginHosting = async () => {
+    if (startingHost.current) return
+    startingHost.current = true
+    setPending(null)
     setBusy('host')
     setError('')
     try {
       const invite = await api.pairingStart()
+      if (!startingHost.current) {
+        void api.pairingStop(invite.sessionId).catch(() => undefined)
+        return
+      }
       setOffer(invite)
       void api.settingsSyncStatus().then(onStatus).catch(() => undefined)
     } catch (cause) {
-      setError(String(cause))
+      if (startingHost.current) setError(String(cause))
     } finally {
-      setBusy(null)
+      if (startingHost.current) {
+        startingHost.current = false
+        setBusy(null)
+      }
     }
   }
 
@@ -227,8 +237,9 @@ export function DevicePairing({
     }
   }
 
-  const close = (next: boolean) => {
-    if (!next && busy) return
+  const changeOpen = (next: boolean) => {
+    if (!next && (busy || startingHost.current)) return
+    if (next && !open && !mobile) void beginHosting()
     if (!next) {
       setOffer(null)
       setPending(null)
@@ -243,27 +254,32 @@ export function DevicePairing({
       setPackageText('')
       setFilename('')
     }
-    onOpenChange(next)
+    setOpen(next)
   }
 
   return (
-    <Dialog open={open} onOpenChange={close}>
+    <Dialog open={open} onOpenChange={changeOpen}>
+      <DialogTrigger asChild>
+        <Button>开始配对</Button>
+      </DialogTrigger>
       <DialogContent className="max-h-[86dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>设备配对</DialogTitle>
           <DialogDescription>
-            {mobile ? '在电脑端打开设备配对，点击「开始配对」。' : '开始配对后，在手机的设备配对页选择这台电脑，或扫描二维码。'}
+            {mobile ? '在电脑的设置页点击「开始配对」。' : '在手机的设置页点击「开始配对」，然后选择这台电脑或扫描二维码。'}
           </DialogDescription>
         </DialogHeader>
 
-        {!mobile && !offer && (
+        {!mobile && !offer && busy !== 'host' && (
           <Button onClick={() => void beginHosting()} disabled={!!busy}>
             <Monitor className="size-4" />
-            {busy === 'host' ? '正在开启配对…' : '开始配对'}
+            重新开始配对
           </Button>
         )}
 
-        {offer ? (
+        {busy === 'host' ? (
+          <p className="text-sm text-muted-foreground" role="status">正在开启配对…</p>
+        ) : offer ? (
           <section className="grid gap-3 rounded-lg border p-4">
             <div className="flex items-center justify-between gap-2">
               <h3 className="font-medium">等待另一台设备配对</h3>

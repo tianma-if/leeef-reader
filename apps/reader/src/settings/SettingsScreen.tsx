@@ -87,7 +87,6 @@ export function SettingsScreen() {
     endpoint?: string
     token?: string
   }>({ running: false })
-  const [pairingOpen, setPairingOpen] = useState(false)
   const [syncStatus, setSyncStatus] = useState<SettingsSyncStatus | null>(null)
   const [edgeEverBusy, setEdgeEverBusy] = useState(false)
   const [edgeEverNotebooks, setEdgeEverNotebooks] = useState<EdgeEverNotebook[]>([])
@@ -163,17 +162,14 @@ export function SettingsScreen() {
           <CardDescription>连接另一台设备，或用加密恢复包导入同步配置。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Button onClick={() => setPairingOpen(true)}>设备配对</Button>
+          <DevicePairing
+            status={syncStatus}
+            onStatus={setSyncStatus}
+            onImported={() => void api.getSettings().then(setValue).catch(() => undefined)}
+          />
           <SyncCenter status={syncStatus} onStatus={setSyncStatus} />
         </CardContent>
       </Card>
-      <DevicePairing
-        open={pairingOpen}
-        onOpenChange={setPairingOpen}
-        status={syncStatus}
-        onStatus={setSyncStatus}
-        onImported={() => void api.getSettings().then(setValue).catch(() => undefined)}
-      />
 
       {/* 1. 外观与阅读排版 */}
       <Card>
