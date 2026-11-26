@@ -3,34 +3,39 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use argon2::{Algorithm, Argon2, Params as Argon2Params, Version as Argon2Version};
-use axum::{extract::State as AxumState, http::StatusCode, routing::post, Json, Router};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use rand::{seq::SliceRandom, RngCore};
-use reqwest::{Client, Method, Url};
+use reqwest::{Client, Method, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error as _,
-    net::Ipv4Addr,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter};
-use tokio::{net::UdpSocket, sync::Notify};
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
+#[cfg(test)]
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::db::{self, AppState};
 use crate::library_sync::{self, Snapshot};
 
+mod pairing;
 mod pairing_transport;
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub use pairing::join_pairing_qr;
+use pairing::PairingSession;
+pub use pairing::{
+    cancel_pairing_join, decide_pairing, join_pairing, join_pairing_peer, nearby_pairing_devices,
+    pairing_status, start_pairing, stop_pairing, PairingHostStatus, PairingOffer, PairingPeer,
+};
 
 const SPACE_KEY: &str = "trusted_sync_space";
 const DEVICES_KEY: &str = "trusted_sync_devices";
@@ -199,7 +204,8 @@ fn book_label(records: &[library_sync::Record], hash: &str, cover: bool) -> Stri
 pub struct SyncRuntime {
     notify: Arc<Notify>,
     status: Arc<Mutex<SyncStatus>>,
-    pairing_cancel: Arc<Mutex<Option<CancellationToken>>>,
+    pairing: Arc<Mutex<Option<Arc<PairingSession>>>>,
+    pairing_join: Arc<Mutex<Option<CancellationToken>>>,
 }
 
 impl Default for SyncRuntime {
@@ -207,7 +213,8 @@ impl Default for SyncRuntime {
         Self {
             notify: Arc::new(Notify::new()),
             status: Arc::new(Mutex::new(SyncStatus::default())),
-            pairing_cancel: Arc::new(Mutex::new(None)),
+            pairing: Arc::new(Mutex::new(None)),
+            pairing_join: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -239,14 +246,6 @@ impl SyncRuntime {
         status.configured = configured_backend(state).is_ok();
         status.auto_sync = auto_sync_enabled(state);
         status
-    }
-
-    fn replace_pairing(&self, cancellation: CancellationToken) -> Result<(), String> {
-        let mut current = self.pairing_cancel.lock().map_err(|e| e.to_string())?;
-        if let Some(previous) = current.replace(cancellation) {
-            previous.cancel();
-        }
-        Ok(())
     }
 }
 
@@ -489,16 +488,14 @@ fn merge_configuration(
     Ok(changed)
 }
 
-fn apply_pairing_configuration(
-    state: &AppState,
+fn pairing_configuration(
+    mut settings: Map<String, Value>,
     document: ConfigurationDocument,
-) -> Result<usize, String> {
-    let mut settings = settings_object(state)?;
-    let local_only: BTreeMap<String, Value> = settings
-        .iter()
-        .filter(|(key, _)| !portable_key(key))
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
+) -> (
+    Map<String, Value>,
+    BTreeMap<String, ConfigurationVersion>,
+    usize,
+) {
     settings.retain(|key, _| !portable_key(key));
     let mut versions = BTreeMap::new();
     let mut changed = 0;
@@ -519,11 +516,62 @@ fn apply_pairing_configuration(
         );
         changed += 1;
     }
-    for (key, value) in local_only {
-        settings.insert(key, value);
-    }
+    (settings, versions, changed)
+}
+
+#[cfg(test)]
+fn apply_pairing_configuration(
+    state: &AppState,
+    document: ConfigurationDocument,
+) -> Result<usize, String> {
+    let (settings, versions, changed) = pairing_configuration(settings_object(state)?, document);
     db::kv_set(state, "settings", &Value::Object(settings).to_string())?;
     save_versions(state, &versions)?;
+    Ok(changed)
+}
+
+fn apply_trusted_snapshot(
+    state: &AppState,
+    snapshot: PairingSnapshot,
+    replace_existing: bool,
+) -> Result<usize, String> {
+    if snapshot.configuration.version != 1 || snapshot.configuration.space_id != snapshot.space.id {
+        return Err("同步配置与同步空间不匹配。".into());
+    }
+    snapshot.space.key_bytes()?;
+    let mut db = state.db.lock().map_err(|error| error.to_string())?;
+    let tx = db.transaction().map_err(|error| error.to_string())?;
+    if decode_space(db::kv_get_on(&tx, SPACE_KEY)?)?
+        .is_some_and(|existing| existing.id != snapshot.space.id)
+    {
+        if !replace_existing {
+            return Err("当前设备已加入另一个同步空间，请确认替换后重试。".into());
+        }
+        db::kv_delete_on(&tx, PREVIOUS_BACKEND_KEY)?;
+    }
+    let mut devices = snapshot.devices;
+    devices.push(state.device_id.clone());
+    devices.sort();
+    devices.dedup();
+    let current = decode_settings(db::kv_get_on(&tx, "settings")?);
+    let (settings, versions, changed) = pairing_configuration(current, snapshot.configuration);
+    db::kv_set_on(
+        &tx,
+        SPACE_KEY,
+        &serde_json::to_string(&snapshot.space).map_err(|error| error.to_string())?,
+    )?;
+    db::kv_set_on(
+        &tx,
+        DEVICES_KEY,
+        &serde_json::to_string(&devices).map_err(|error| error.to_string())?,
+    )?;
+    db::kv_set_on(&tx, "settings", &Value::Object(settings).to_string())?;
+    db::kv_set_on(
+        &tx,
+        VERSIONS_KEY,
+        &serde_json::to_string(&versions).map_err(|error| error.to_string())?,
+    )?;
+    tx.commit().map_err(|error| error.to_string())?;
     Ok(changed)
 }
 
@@ -813,7 +861,13 @@ fn decrypt_document<T: for<'de> Deserialize<'de>>(
 
 pub fn export_recovery(state: &AppState, password: &str) -> Result<String, String> {
     validate_recovery_password(password)?;
-    let space = load_space(state)?.ok_or_else(|| "请先建立或加入同步空间".to_string())?;
+    let space = match load_space(state)? {
+        Some(space) => space,
+        None => {
+            configured_backend(state)?;
+            ensure_space(state)?
+        }
+    };
     let mut devices = load_devices(state)?;
     if !devices.contains(&state.device_id) {
         devices.push(state.device_id.clone());
@@ -900,29 +954,15 @@ pub fn import_recovery(
     if payload.version != 1 || payload.configuration.space_id != payload.space.id {
         return Err("恢复包内容无效".into());
     }
-    let _ = payload.space.key_bytes()?;
-    let replacing_space = load_space(state)?
-        .map(|current| current.id != payload.space.id)
-        .unwrap_or(false);
-    if replacing_space {
-        if !replace_existing {
-            return Err("当前设备已加入另一个同步空间；确认替换后才能导入".into());
-        }
-        db::kv_delete(state, PREVIOUS_BACKEND_KEY)?;
-    }
-    let mut devices = payload.devices;
-    if !devices.contains(&state.device_id) {
-        devices.push(state.device_id.clone());
-    }
-    devices.sort();
-    devices.dedup();
-    db::kv_set(
+    apply_trusted_snapshot(
         state,
-        SPACE_KEY,
-        &serde_json::to_string(&payload.space).map_err(|e| e.to_string())?,
-    )?;
-    save_devices(state, &devices)?;
-    apply_pairing_configuration(state, payload.configuration)
+        PairingSnapshot {
+            space: payload.space,
+            devices: payload.devices,
+            configuration: payload.configuration,
+        },
+        replace_existing,
+    )
 }
 
 fn validate_recovery_password(password: &str) -> Result<(), String> {
@@ -1243,33 +1283,6 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
     Ok(mac.finalize().into_bytes().to_vec())
 }
 
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PairingOffer {
-    pub code: String,
-    pub expires_at: u64,
-}
-
-struct PairHostState {
-    app_state: AppState,
-    runtime: SyncRuntime,
-    code: String,
-    session_id: String,
-    secret: Arc<StaticSecret>,
-    public_key: [u8; 32],
-    completed: AtomicBool,
-    cancellation: CancellationToken,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PairRequest {
-    session_id: String,
-    device_id: String,
-    client_public_key: String,
-    proof: String,
-}
-
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PairResponse {
@@ -1299,200 +1312,6 @@ struct DiscoveryResponse {
     session_id: String,
     port: u16,
     host_public_key: String,
-}
-
-pub async fn start_pairing(state: AppState, runtime: SyncRuntime) -> Result<PairingOffer, String> {
-    let already_paired = load_space(&state)?.is_some();
-    if !already_paired {
-        // The first pairing must leave the new device with a usable route for
-        // later updates. Existing trusted devices may still pair while the
-        // backend is temporarily offline.
-        let _ = configured_backend(&state)?;
-    }
-    let _ = ensure_space(&state)?;
-    let _ = synchronize(&state).await;
-    let code = pairing_code();
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let cancellation = CancellationToken::new();
-    runtime.replace_pairing(cancellation.clone())?;
-    tokio::time::sleep(Duration::from_millis(25)).await;
-    let discovery_socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, DISCOVERY_PORT))
-        .await
-        .map_err(|e| format!("无法启动局域网发现：{e}"))?;
-    let secret = Arc::new(StaticSecret::random_from_rng(rand::rngs::OsRng));
-    let public_key = PublicKey::from(secret.as_ref()).to_bytes();
-    let listener = tokio::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0))
-        .await
-        .map_err(|e| format!("无法启动配对服务：{e}"))?;
-    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    let host = Arc::new(PairHostState {
-        app_state: state,
-        runtime,
-        code: code.clone(),
-        session_id: session_id.clone(),
-        secret,
-        public_key,
-        completed: AtomicBool::new(false),
-        cancellation: cancellation.clone(),
-    });
-    let router = Router::new()
-        .route("/pair", post(pair_handler))
-        .with_state(host.clone());
-    tauri::async_runtime::spawn({
-        let cancellation = cancellation.clone();
-        async move {
-            let _ = axum::serve(listener, router)
-                .with_graceful_shutdown(cancellation.cancelled_owned())
-                .await;
-        }
-    });
-    tauri::async_runtime::spawn(discovery_host(host, port, discovery_socket));
-    tauri::async_runtime::spawn({
-        let cancellation = cancellation.clone();
-        async move {
-            tokio::time::sleep(PAIRING_TTL).await;
-            cancellation.cancel();
-        }
-    });
-    Ok(PairingOffer {
-        code,
-        expires_at: now_millis() + PAIRING_TTL.as_millis() as u64,
-    })
-}
-
-async fn discovery_host(host: Arc<PairHostState>, port: u16, socket: UdpSocket) {
-    let mut buffer = [0_u8; 2048];
-    loop {
-        tokio::select! {
-            _ = host.cancellation.cancelled() => return,
-            incoming = socket.recv_from(&mut buffer) => {
-                let Ok((length, peer)) = incoming else { continue };
-                let Ok(request) = serde_json::from_slice::<DiscoveryRequest>(&buffer[..length]) else { continue };
-                if request.kind != "leeef-pair-discover" || request.code_hash != sha256_text(&host.code) {
-                    continue;
-                }
-                let response = DiscoveryResponse {
-                    kind: "leeef-pair-offer".into(),
-                    session_id: host.session_id.clone(),
-                    port,
-                    host_public_key: URL_SAFE_NO_PAD.encode(host.public_key),
-                };
-                if let Ok(bytes) = serde_json::to_vec(&response) {
-                    let _ = socket.send_to(&bytes, peer).await;
-                }
-            }
-        }
-    }
-}
-
-async fn pair_handler(
-    AxumState(host): AxumState<Arc<PairHostState>>,
-    Json(request): Json<PairRequest>,
-) -> Result<Json<PairResponse>, (StatusCode, String)> {
-    if request.session_id != host.session_id {
-        return Err((StatusCode::UNAUTHORIZED, "配对会话无效".into()));
-    }
-    let client_public_bytes = URL_SAFE_NO_PAD
-        .decode(&request.client_public_key)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "设备公钥无效".into()))?;
-    let client_public: [u8; 32] = client_public_bytes
-        .try_into()
-        .map_err(|_| (StatusCode::BAD_REQUEST, "设备公钥无效".into()))?;
-    let expected = pairing_proof(
-        &host.code,
-        &host.session_id,
-        &request.device_id,
-        &client_public,
-    )
-    .map_err(internal_pair_error)?;
-    if expected != request.proof {
-        return Err((StatusCode::UNAUTHORIZED, "配对码不正确".into()));
-    }
-    if host.completed.swap(true, Ordering::AcqRel) {
-        return Err((StatusCode::CONFLICT, "该配对码已使用".into()));
-    }
-
-    let space = ensure_space(&host.app_state).map_err(internal_pair_error)?;
-    let mut devices = load_devices(&host.app_state).map_err(internal_pair_error)?;
-    if !devices.contains(&host.app_state.device_id) {
-        devices.push(host.app_state.device_id.clone());
-    }
-    if !devices.contains(&request.device_id) {
-        devices.push(request.device_id.clone());
-    }
-    devices.sort();
-    devices.dedup();
-    save_devices(&host.app_state, &devices).map_err(internal_pair_error)?;
-    let configuration = ConfigurationDocument {
-        version: 1,
-        space_id: space.id.clone(),
-        device_id: host.app_state.device_id.clone(),
-        entries: capture_configuration(&host.app_state).map_err(internal_pair_error)?,
-    };
-    let snapshot = PairingSnapshot {
-        space,
-        devices,
-        configuration,
-    };
-    let shared = host.secret.diffie_hellman(&PublicKey::from(client_public));
-    let key = derive_pairing_key(shared.as_bytes(), &host.code, &host.session_id)
-        .map_err(internal_pair_error)?;
-    let response = encrypt_pairing_snapshot(&snapshot, &key).map_err(internal_pair_error)?;
-    host.runtime.trigger();
-    let cancellation = host.cancellation.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(250)).await;
-        cancellation.cancel();
-    });
-    Ok(Json(response))
-}
-
-fn internal_pair_error(error: String) -> (StatusCode, String) {
-    (StatusCode::INTERNAL_SERVER_ERROR, error)
-}
-
-pub async fn join_pairing(
-    app: &AppHandle,
-    state: &AppState,
-    runtime: &SyncRuntime,
-    code: &str,
-    replace_existing: bool,
-) -> Result<SyncStatus, String> {
-    let code = code.trim().to_ascii_uppercase();
-    if code.len() != 12 || !code.bytes().all(|item| PAIRING_ALPHABET.contains(&item)) {
-        return Err("请输入已有设备显示的 12 位配对码".into());
-    }
-    let endpoint = pairing_transport::discover(app, &code).await?;
-    let client_secret = StaticSecret::random_from_rng(rand::rngs::OsRng);
-    let client_public = PublicKey::from(&client_secret).to_bytes();
-    let request = PairRequest {
-        session_id: endpoint.session_id.clone(),
-        device_id: state.device_id.clone(),
-        client_public_key: URL_SAFE_NO_PAD.encode(client_public),
-        proof: pairing_proof(&code, &endpoint.session_id, &state.device_id, &client_public)?,
-    };
-    let payload = endpoint.exchange(&request).await?;
-    let shared = client_secret.diffie_hellman(&PublicKey::from(endpoint.host_public_key));
-    let key = derive_pairing_key(shared.as_bytes(), &code, &endpoint.session_id)?;
-    let snapshot = decrypt_pairing_snapshot(&payload, &key)?;
-    let replacing_space = load_space(state)?
-        .map(|current| current.id != snapshot.space.id)
-        .unwrap_or(false);
-    if replacing_space {
-        if !replace_existing {
-            return Err("当前设备已加入另一个同步空间；确认替换后才能配对".into());
-        }
-        db::kv_delete(state, PREVIOUS_BACKEND_KEY)?;
-    }
-    db::kv_set(
-        state,
-        SPACE_KEY,
-        &serde_json::to_string(&snapshot.space).map_err(|e| e.to_string())?,
-    )?;
-    save_devices(state, &snapshot.devices)?;
-    apply_pairing_configuration(state, snapshot.configuration)?;
-    runtime.trigger();
-    Ok(runtime.status(state))
 }
 
 fn pairing_proof(
@@ -1566,7 +1385,9 @@ fn pairing_code() -> String {
 }
 
 fn ensure_space(state: &AppState) -> Result<SpaceState, String> {
-    if let Some(space) = load_space(state)? {
+    let mut db = state.db.lock().map_err(|error| error.to_string())?;
+    let tx = db.transaction().map_err(|error| error.to_string())?;
+    if let Some(space) = decode_space(db::kv_get_on(&tx, SPACE_KEY)?)? {
         return Ok(space);
     }
     let mut key = [0_u8; 32];
@@ -1575,18 +1396,25 @@ fn ensure_space(state: &AppState) -> Result<SpaceState, String> {
         id: uuid::Uuid::new_v4().to_string(),
         key: URL_SAFE_NO_PAD.encode(key),
     };
-    db::kv_set(
-        state,
+    db::kv_set_on(
+        &tx,
         SPACE_KEY,
-        &serde_json::to_string(&space).map_err(|e| e.to_string())?,
+        &serde_json::to_string(&space).map_err(|error| error.to_string())?,
     )?;
-    save_devices(state, std::slice::from_ref(&state.device_id))?;
+    let devices = serde_json::to_string(std::slice::from_ref(&state.device_id))
+        .map_err(|error| error.to_string())?;
+    db::kv_set_on(&tx, DEVICES_KEY, &devices)?;
+    tx.commit().map_err(|error| error.to_string())?;
     Ok(space)
 }
 
 fn load_space(state: &AppState) -> Result<Option<SpaceState>, String> {
-    db::kv_get(state, SPACE_KEY)?
-        .map(|value| serde_json::from_str(&value).map_err(|e| e.to_string()))
+    decode_space(db::kv_get(state, SPACE_KEY)?)
+}
+
+fn decode_space(value: Option<String>) -> Result<Option<SpaceState>, String> {
+    value
+        .map(|value| serde_json::from_str(&value).map_err(|error| error.to_string()))
         .transpose()
 }
 
@@ -1605,10 +1433,13 @@ fn save_devices(state: &AppState, devices: &[String]) -> Result<(), String> {
 }
 
 fn settings_object(state: &AppState) -> Result<Map<String, Value>, String> {
-    let value = db::kv_get(state, "settings")?
-        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-        .unwrap_or_else(|| Value::Object(Map::new()));
-    Ok(value.as_object().cloned().unwrap_or_default())
+    Ok(decode_settings(db::kv_get(state, "settings")?))
+}
+
+fn decode_settings(value: Option<String>) -> Map<String, Value> {
+    value
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
 }
 
 fn load_versions(state: &AppState) -> Result<BTreeMap<String, ConfigurationVersion>, String> {
@@ -1646,8 +1477,15 @@ fn now_millis() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Bytes, extract::Path, http::StatusCode, routing::get};
+    use axum::{
+        body::Bytes,
+        extract::{Path, State as AxumState},
+        http::StatusCode,
+        routing::get,
+        Router,
+    };
     use std::collections::HashMap;
+    use std::net::Ipv4Addr;
     use tempfile::tempdir;
 
     fn state(name: &str) -> AppState {

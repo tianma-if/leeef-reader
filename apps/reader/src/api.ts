@@ -1,4 +1,4 @@
-import { convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core'
 
 export type Book = {
   id: string
@@ -122,8 +122,25 @@ export type LibraryHistoryEntry = {
 export type BackupPreview = { books: number; excerpts: number; bookmarks: number; bytes: number; matchingBooks: number }
 
 export type PairingOffer = {
+  sessionId: string
   code: string
   expiresAt: number
+  qr: { width: number; modules: string } | null
+}
+
+export type PairingPeer = {
+  name: string
+  sessionId: string
+  hostPublicKey: string
+  addresses: string[]
+  port: number
+  expiresAt: number
+}
+
+export type PairingHostStatus = {
+  active: boolean
+  completed: boolean
+  pending: { id: string; deviceName: string; verification: string } | null
 }
 
 const asBytes = (raw: ArrayBuffer | Uint8Array | number[]): Uint8Array<ArrayBuffer> =>
@@ -239,6 +256,18 @@ export const api = {
   pairingStart: () => invoke<PairingOffer>('pairing_start'),
   pairingJoin: (code: string, replaceExisting = false) =>
     invoke<SettingsSyncStatus>('pairing_join', { code, replaceExisting }),
+  pairingNearby: () => invoke<PairingPeer[]>('pairing_nearby'),
+  pairingJoinPeer: (peer: PairingPeer, replaceExisting: boolean, onVerification: (code: string) => void) => {
+    const verification = new Channel<string>(onVerification)
+    return invoke<SettingsSyncStatus>('pairing_join_peer', { peer, replaceExisting, verification })
+  },
+  pairingScanQr: (replaceExisting: boolean) =>
+    invoke<SettingsSyncStatus | null>('pairing_scan_qr', { replaceExisting }),
+  pairingStatus: (sessionId: string) => invoke<PairingHostStatus>('pairing_status', { sessionId }),
+  pairingDecide: (sessionId: string, approvalId: string, approve: boolean) =>
+    invoke<void>('pairing_decide', { sessionId, approvalId, approve }),
+  pairingStop: (sessionId: string) => invoke<void>('pairing_stop', { sessionId }),
+  pairingCancelJoin: () => invoke<void>('pairing_cancel_join'),
   libraryHistory: (beforeId: number | null = null, kind: 'excerpts' | 'reading_progresses' | null = null) => invoke<LibraryHistoryEntry[]>('library_history', { beforeId, kind }),
   libraryHistoryRestore: (id: number, expected: LibraryRevision | null) => invoke<void>('library_history_restore', { id, expected }),
   settingsSyncStatus: () => invoke<SettingsSyncStatus>('settings_sync_status'),

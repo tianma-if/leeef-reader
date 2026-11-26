@@ -26,7 +26,7 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
 pub struct NativeBridge<R: Runtime>(PluginHandle<R>);
 
 #[cfg(target_os = "android")]
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairingLink {
     pub handle: u64,
@@ -43,9 +43,32 @@ pub struct PairingNetworks {
 }
 
 impl<R: Runtime> NativeBridge<R> {
+    pub async fn scan_pairing_qr(&self) -> crate::Result<Option<String>> {
+        #[derive(serde::Deserialize)]
+        struct ScannedQr {
+            text: Option<String>,
+        }
+        let result: ScannedQr = self
+            .0
+            .run_mobile_plugin_async("scan_pairing_qr", ())
+            .await?;
+        Ok(result.text)
+    }
+
+    #[cfg(target_os = "ios")]
+    pub async fn browse_pairing_devices<T: DeserializeOwned>(&self) -> crate::Result<T> {
+        Ok(self
+            .0
+            .run_mobile_plugin_async("browse_pairing_devices", ())
+            .await?)
+    }
+
     #[cfg(target_os = "android")]
     pub async fn pairing_networks(&self) -> crate::Result<PairingNetworks> {
-        Ok(self.0.run_mobile_plugin_async("pairing_networks", ()).await?)
+        Ok(self
+            .0
+            .run_mobile_plugin_async("pairing_networks", ())
+            .await?)
     }
 
     pub fn capture_webview_region(

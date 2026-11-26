@@ -1130,6 +1130,10 @@ pub fn list_sessions(state: &AppState) -> Result<Vec<Session>, String> {
 
 pub fn kv_get(state: &AppState, key: &str) -> Result<Option<String>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    kv_get_on(&db, key)
+}
+
+pub(crate) fn kv_get_on(db: &Connection, key: &str) -> Result<Option<String>, String> {
     db.query_row("SELECT value FROM kv WHERE key = ?1", params![key], |row| {
         row.get(0)
     })
@@ -1139,6 +1143,10 @@ pub fn kv_get(state: &AppState, key: &str) -> Result<Option<String>, String> {
 
 pub fn kv_set(state: &AppState, key: &str, value: &str) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    kv_set_on(&db, key, value)
+}
+
+pub(crate) fn kv_set_on(db: &Connection, key: &str, value: &str) -> Result<(), String> {
     db.execute(
         "INSERT INTO kv(key, value) VALUES (?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -1148,8 +1156,7 @@ pub fn kv_set(state: &AppState, key: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn kv_delete(state: &AppState, key: &str) -> Result<(), String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+pub(crate) fn kv_delete_on(db: &Connection, key: &str) -> Result<(), String> {
     db.execute("DELETE FROM kv WHERE key = ?1", params![key])
         .map_err(|e| e.to_string())?;
     Ok(())

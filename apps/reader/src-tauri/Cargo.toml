@@ -44,14 +44,24 @@ time = { version = "0.3", features = ["formatting", "macros"] }
 urlencoding = "2"
 axum = "0.8"
 rmcp = { version = "3.4", features = ["server", "macros", "transport-streamable-http-server", "schemars"] }
-
-[target.'cfg(target_os = "android")'.dependencies]
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
+hostname = "0.4"
+if-addrs = "0.15"
+qrcode = { version = "0.14", default-features = false }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+socket2 = { version = "0.6", features = ["all"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+dns-sd-native = "0.1"
+
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+mdns-sd = "0.21"
 
 [dev-dependencies]
 tempfile = "3"
