@@ -64,6 +64,13 @@ pub struct Excerpt {
     pub color: String,
     pub created_at: String,
     pub book_title: Option<String>,
+    pub chapter: Option<ExcerptChapter>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ExcerptChapter {
+    pub key: String,
+    pub title: String,
 }
 
 #[derive(Clone)]
@@ -243,6 +250,17 @@ pub fn open(root: PathBuf) -> Result<AppState, String> {
           local_content_hash TEXT NOT NULL,
           synced_at TEXT NOT NULL,
           last_error TEXT
+        );
+        CREATE TABLE IF NOT EXISTS excerpt_chapters (
+          book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+          locator TEXT NOT NULL,
+          chapter_key TEXT NOT NULL,
+          title TEXT NOT NULL,
+          PRIMARY KEY(book_id, locator)
+        );
+        CREATE TABLE IF NOT EXISTS edgeever_pending_books (
+          book_id TEXT PRIMARY KEY REFERENCES books(id) ON DELETE CASCADE,
+          generation INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS audit_events (
           id TEXT PRIMARY KEY,
@@ -557,17 +575,22 @@ pub fn save_progress(
 
 pub fn list_excerpts(state: &AppState, book_id: Option<&str>) -> Result<Vec<Excerpt>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    let select = "SELECT e.id, e.book_id, e.locator, e.quote, e.note, e.color, e.created_at, b.title,
+                         c.chapter_key, c.title
+                  FROM excerpts e JOIN books b ON b.id = e.book_id
+                  LEFT JOIN excerpt_chapters c ON c.book_id = e.book_id AND c.locator = e.locator
+                  WHERE e.is_deleted = 0";
     let sql = if book_id.is_some() {
-        "SELECT e.id, e.book_id, e.locator, e.quote, e.note, e.color, e.created_at, b.title
-         FROM excerpts e JOIN books b ON b.id = e.book_id
-         WHERE e.is_deleted = 0 AND e.book_id = ?1 ORDER BY e.updated_at DESC"
+        format!("{select} AND e.book_id = ?1 ORDER BY e.updated_at DESC")
     } else {
-        "SELECT e.id, e.book_id, e.locator, e.quote, e.note, e.color, e.created_at, b.title
-         FROM excerpts e JOIN books b ON b.id = e.book_id
-         WHERE e.is_deleted = 0 ORDER BY e.updated_at DESC"
+        format!("{select} ORDER BY e.updated_at DESC")
     };
-    let mut stmt = db.prepare(sql).map_err(|e| e.to_string())?;
+    let mut stmt = db.prepare(&sql).map_err(|e| e.to_string())?;
     let map_row = |row: &rusqlite::Row| {
+        let chapter = match row.get::<_, Option<String>>(8)? {
+            Some(key) => Some(ExcerptChapter { key, title: row.get(9)? }),
+            None => None,
+        };
         Ok(Excerpt {
             id: row.get(0)?,
             book_id: row.get(1)?,
@@ -577,6 +600,7 @@ pub fn list_excerpts(state: &AppState, book_id: Option<&str>) -> Result<Vec<Exce
             color: row.get(5)?,
             created_at: row.get(6)?,
             book_title: row.get(7)?,
+            chapter,
         })
     };
     let rows = if let Some(id) = book_id {
@@ -587,6 +611,29 @@ pub fn list_excerpts(state: &AppState, book_id: Option<&str>) -> Result<Vec<Exce
     .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
+}
+
+pub fn save_excerpt_chapters(
+    state: &AppState,
+    book_id: &str,
+    chapters: &[(String, ExcerptChapter)],
+) -> Result<(), String> {
+    let mut db = state.db.lock().map_err(|e| e.to_string())?;
+    let tx = db.transaction().map_err(|e| e.to_string())?;
+    {
+        let mut insert = tx.prepare_cached(
+            "INSERT INTO excerpt_chapters(book_id, locator, chapter_key, title)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(book_id, locator) DO UPDATE SET
+               chapter_key = excluded.chapter_key, title = excluded.title
+             WHERE excluded.title <> ''",
+        ).map_err(|e| e.to_string())?;
+        for (locator, chapter) in chapters {
+            insert.execute(params![book_id, locator, chapter.key, chapter.title])
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())
 }
 
 pub fn upsert_excerpt(
@@ -723,6 +770,39 @@ pub fn save_edgeever_sync_error(
         params![book_id, error],
     )
     .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn queue_edgeever_book(state: &AppState, book_id: &str) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.execute(
+        "INSERT INTO edgeever_pending_books VALUES (?1, 1)
+         ON CONFLICT(book_id) DO UPDATE SET generation = generation + 1",
+        [book_id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn pending_edgeever_books(state: &AppState) -> Result<Vec<String>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut statement = db.prepare(
+        "SELECT p.book_id FROM edgeever_pending_books p JOIN books b ON b.id = p.book_id
+         WHERE b.is_deleted = 0 ORDER BY p.book_id",
+    ).map_err(|e| e.to_string())?;
+    let rows = statement.query_map([], |row| row.get(0)).map_err(|e| e.to_string())?;
+    rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+}
+
+pub fn edgeever_pending_generation(state: &AppState, book_id: &str) -> Result<Option<i64>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.query_row("SELECT generation FROM edgeever_pending_books WHERE book_id = ?1", [book_id], |row| row.get(0))
+        .optional().map_err(|e| e.to_string())
+}
+
+pub fn finish_edgeever_book(state: &AppState, book_id: &str, generation: i64) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.execute("DELETE FROM edgeever_pending_books WHERE book_id = ?1 AND generation = ?2", params![book_id, generation])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 

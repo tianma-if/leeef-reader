@@ -119,10 +119,23 @@ fn create_excerpt(
     quote: String,
     note: Option<String>,
     color: String,
+    chapter: Option<db::ExcerptChapter>,
 ) -> Result<String, String> {
+    if let Some(chapter) = chapter {
+        db::save_excerpt_chapters(&state, &book_id, &[(locator.clone(), chapter)])?;
+    }
     let id = db::upsert_excerpt(&state, &book_id, &locator, &quote, note.as_deref(), &color)?;
     edgeever::schedule(state.inner().clone(), book_id);
     Ok(id)
+}
+
+#[tauri::command]
+fn cache_excerpt_chapters(
+    state: State<AppState>,
+    book_id: String,
+    chapters: Vec<(String, db::ExcerptChapter)>,
+) -> Result<(), String> {
+    db::save_excerpt_chapters(&state, &book_id, &chapters)
 }
 
 #[tauri::command]
@@ -156,6 +169,11 @@ async fn edgeever_test(state: State<'_, AppState>) -> Result<serde_json::Value, 
 #[tauri::command]
 async fn edgeever_sync_all(state: State<'_, AppState>) -> Result<edgeever::SyncResult, String> {
     Ok(edgeever::sync_all(&state).await)
+}
+
+#[tauri::command]
+fn edgeever_status(state: State<AppState>) -> Result<edgeever::SyncStatus, String> {
+    edgeever::status(&state)
 }
 
 #[tauri::command]
@@ -423,6 +441,7 @@ pub fn run() {
             let state = db::open(root)?;
             let runtime = trusted_sync::SyncRuntime::default();
             trusted_sync::start_background(app.handle().clone(), state.clone(), runtime.clone());
+            edgeever::start_background(state.clone());
             app.manage(state);
             app.manage(runtime);
             app.manage(mcp::McpHandle::default());
@@ -438,6 +457,7 @@ pub fn run() {
             save_progress,
             list_excerpts,
             create_excerpt,
+            cache_excerpt_chapters,
             update_excerpt,
             delete_excerpt,
             list_bookmarks,
@@ -456,6 +476,7 @@ pub fn run() {
             save_settings,
             edgeever_test,
             edgeever_sync_all,
+            edgeever_status,
             edgeever_notebooks,
             mcp_database_path,
             mcp_start,

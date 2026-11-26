@@ -3,11 +3,12 @@ import { Bookmark, Bot, Copy, Highlighter, MessageSquarePlus, Search, Trash2 } f
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
-import type { Excerpt } from '../api'
+import type { Excerpt, ExcerptChapter } from '../api'
 
 export type SelectionState = {
   text: string
   cfi: string
+  chapter?: ExcerptChapter
   x: number
   y: number
   bottom: number

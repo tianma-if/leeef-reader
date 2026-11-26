@@ -12,6 +12,8 @@ import {
   type Settings,
 } from '../api'
 import { applyReadingFont, applyViewLayout, highlightDraw, labelOf, themeOf, usesCapturedSlide } from './bookStyles'
+import { loadBookSource, loadFoliate } from './bookSource'
+import { cacheExcerptChapters, excerptChapter } from './excerptChapters'
 import { normalizeSelectedText } from './selectionText'
 import { mountReadingFont } from './fontLoader'
 import { CapturedPageTurn } from './capturedTurn'
@@ -36,35 +38,6 @@ type Props = {
   book: Book
   onClose: () => void
   initialLocator?: string
-}
-
-const loadFoliate = () =>
-  new Promise<void>((resolve, reject) => {
-    if (customElements.get('foliate-view')) {
-      resolve()
-      return
-    }
-    const script = document.createElement('script')
-    script.type = 'module'
-    script.src = '/vendor/foliate-js/view.js'
-    script.onload = () => resolve()
-    script.onerror = () => reject(new Error('无法加载阅读引擎'))
-    document.head.append(script)
-  })
-
-const loadBookSource = async (book: Book) => {
-  const type = book.mediaType || 'application/epub+zip'
-  const name = `${book.title}.epub`
-  if (book.filePath) {
-    try {
-      const response = await fetch(api.bookFileUrl(book.filePath))
-      if (response.ok) return new File([await response.blob()], name, { type })
-    } catch {
-      // Fall through to the binary IPC path.
-    }
-  }
-  const bytes = await api.bookBytes(book.id)
-  return new File([bytes], name, { type })
 }
 
 const waitForSize = (element: HTMLElement) =>
@@ -473,7 +446,10 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
           pressedWhileSelected = false
           const range = native.getRangeAt(0)
           const anchor = selectionAtRange(frame, range, currentView.getCFI(index, range), text)
-          if (anchor) updateSelection(anchor)
+          if (anchor) {
+            const { tocItem } = currentView.getProgressOf(index, range)
+            updateSelection({ ...anchor, chapter: excerptChapter(tocItem) })
+          }
         }
         doc.addEventListener('selectionchange', readSelection, { signal })
         if (mobile) doc.addEventListener('contextmenu', (event) => {
@@ -544,7 +520,8 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
               const anchor = selectionAtRange(frame, hit[1], excerpt.locator, excerpt.quote)
               if (anchor) {
                 chromeRef.current.hide()
-                updateSelection(anchor)
+                const { tocItem } = currentView.getProgressOf(index, hit[1])
+                updateSelection({ ...anchor, chapter: excerpt.chapter ?? excerptChapter(tocItem) })
                 event.preventDefault()
                 event.stopImmediatePropagation()
                 return
@@ -557,6 +534,11 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       }) as EventListener)
       await view.open(source)
       if (cancelled) return
+      if (loaded.edgeEverEnabled) {
+        void api.listExcerpts(book.id)
+          .then((items) => { if (!cancelled) return cacheExcerptChapters(reader, book.id, items) })
+          .catch(console.warn)
+      }
       applyViewLayout(view, loaded, mobile)
       void applyReadingFont(view, loaded)
       setToc(view.book?.toc ?? [])
@@ -663,10 +645,13 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       const savedNote = note === undefined ? existing?.note ?? undefined : note || undefined
       let saved: Excerpt
       if (existing) {
+        if (!existing.chapter && selected.chapter) {
+          await api.cacheExcerptChapters(book.id, [[selected.cfi, selected.chapter]])
+        }
         await api.updateExcerpt({ id: existing.id, quote: existing.quote, note: savedNote, color })
-        saved = { ...existing, note: savedNote, color }
+        saved = { ...existing, note: savedNote, color, chapter: existing.chapter ?? selected.chapter }
       } else {
-        const input = { bookId: book.id, locator: selected.cfi, quote: selected.text, note: savedNote, color }
+        const input = { bookId: book.id, locator: selected.cfi, quote: selected.text, note: savedNote, color, chapter: selected.chapter }
         const id = await api.createExcerpt(input)
         saved = { ...input, id, createdAt: new Date().toISOString() }
       }
@@ -868,7 +853,13 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
               toast.error('选中文字过长，请缩小到 16,000 字以内再提问')
               return
             }
-            setAiSource({ bookTitle: title, chapter, quote: selection.text, locator: selection.cfi })
+            setAiSource({
+              bookTitle: title,
+              chapter: selection.chapter?.title || chapter,
+              excerptChapter: selection.chapter,
+              quote: selection.text,
+              locator: selection.cfi,
+            })
             clearSelection()
             chrome.hide()
           }}

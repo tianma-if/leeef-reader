@@ -93,7 +93,10 @@ function SelectionChat({ bookId, source, settings, onGo, onSaved }: Props) {
       <Button variant="outline" disabled={busy || saving || !hasAnswer || savedSignature === signature}
         onClick={() => {
           setSaving(true)
-          void api.createExcerpt({ bookId, locator: source.locator, quote: source.quote, note: signature, color: '#488bc2' })
+          void api.createExcerpt({
+            bookId, locator: source.locator, quote: source.quote, note: signature,
+            color: '#488bc2', chapter: source.excerptChapter,
+          })
             .then(async () => { setSavedSignature(signature); toast.success('对话已保存到书摘笔记'); await onSaved() })
             .catch((cause) => toast.error(String(cause))).finally(() => setSaving(false))
         }}>{saving ? '保存中…' : savedSignature === signature ? '已保存为笔记' : '将对话保存为笔记'}</Button>

@@ -499,12 +499,15 @@ export class View extends HTMLElement {
     async getTOCItemOf(target) {
         try {
             const { index, anchor } = await this.resolveNavigation(target)
-            const doc = await this.book.sections[index].createDocument()
+            const section = this.book.sections[index]
+            if (!section.createDocument || typeof anchor !== 'function')
+                return this.#tocProgress?.getProgress(index)
+            const doc = await section.createDocument()
             const frag = anchor(doc)
             const isRange = frag instanceof Range
             const range = isRange ? frag : doc.createRange()
             if (!isRange) range.selectNodeContents(frag)
-            return this.#tocProgress.getProgress(index, range)
+            return this.#tocProgress?.getProgress(index, range)
         } catch(e) {
             console.error(e)
             console.error(`Could not get ${target}`)

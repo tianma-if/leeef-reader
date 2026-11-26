@@ -1,35 +1,19 @@
-# EdgeEver 书摘同步约定
+# EdgeEver 书摘同步
 
-Leeef Reader 将每本书的全部可见书摘映射为 EdgeEver 中的一篇笔记。同步复用
-`apps/reader/src/notes/exportExcerpts.ts` 的 `BookExcerptDocument` 与
-`bookExcerptMarkdown()`，确保手动 Markdown 导出和 EdgeEver 笔记内容一致。
+启用同步后，Leeef Reader 会在指定的 EdgeEver 笔记本里为每本有书摘的书建立一篇笔记。首次同步使用当前书名和作者，后续沿用同一条笔记。新建时以书籍文件的 SHA-256 作为 EdgeEver 导入标识，同一工作区收到重复请求时会返回已有笔记。
 
-## 身份与幂等性
+## 笔记内容
 
-- 本地映射表 `edgeever_excerpt_notes` 以 Leeef `book_id` 为键，保存 EdgeEver 实例、memo id、revision
-  和最后一次成功同步的内容哈希。
-- 首次同步通过 `POST /api/v1/memos` 创建笔记，后续通过
-  `PATCH /api/v1/memos/{id}` 更新同一篇笔记，不按标题重复创建。
-- 更新携带 EdgeEver 的 `expectedRevision`。遇到 `revision_conflict` 时停止覆盖并保留
-  本地待同步操作，待重新读取远端版本后处理。
-- 删除单条书摘只更新整篇笔记；删除书籍不得自动删除 EdgeEver 笔记。
+书摘区按阅读位置排序，有书籍目录时按章节显示。原文显示为引用，批注跟在对应原文下方。笔记正文由书籍信息、书摘区和用户自行添加的内容构成。章节来自阅读器目录。缺少本地书籍文件或可用目录时，仍可按已保存的书中位置同步。打开书籍或从设置中立即同步时，阅读器会从本地文件补齐历史书摘的章节信息。
 
-## 内容
+书摘区以两条分隔线标识，末尾带有「来自 Leeef Reader」。下次同步时，Leeef Reader 里的记录直接替换区内的书摘和批注。把手写正文放在分隔线以外即可和书摘一起保留。EdgeEver 的标题、标签、置顶状态和笔记本归属由 EdgeEver 管理。删除最后一条书摘时会清空书摘区，移除书籍后仍可在 EdgeEver 查阅原笔记。
 
-- 标题使用书名；作者和书摘数量写入正文头部。
-- 正文使用 Markdown，原文以 blockquote 表示，保留书摘内部换行和空行。
-- 笔记按书摘创建时间正序排列，保证相同输入生成确定内容。
-- 同步内容哈希未变化时不发送更新。
+旧版笔记在下次同步时原地迁移。能识别的旧书摘区会转换为新版，区外内容一并保留。旧正文的边界已被改动且无法识别时，会保留原正文并附加新版书摘区。
 
-## 配置与安全
+## 同步方式
 
-- 用户配置自己的 HTTPS EdgeEver 实例 URL、API Token 和目标笔记本。
-- Token 只允许发送到用户配置并确认的实例 origin，不写入日志或同步操作 payload。
-- 自动同步使用本地 outbox；离线和网络错误可重试，鉴权失败暂停并提示用户。
-- 连接测试读取实例的 memo 与 notebook API。Token 需要 `read:notebooks`、`read:memos`
-  和 `write:memos` scope。
+手机设置页可查看书摘同步开关状态、目标笔记本，以及本机最近一次同步的结果和时间。地址和 API Token 在桌面端配置，通过可信设备同步传到手机。
 
-## 触发点
+新增、编辑和删除书摘会自动调度同步。「立即同步全部书摘」使用同一更新路径，并可用于迁移已有笔记。待同步任务存放在本机，失败后在应用运行时定期重试。写入前会读取最新正文并绑定 EdgeEver 的编辑会话，遇到版本变化时会重新读取后重试。
 
-书摘创建、修改或删除后立即调度同一 `book_id` 的后台同步任务。同一本书的任务串行执行，
-后续任务会根据内容哈希跳过重复推送。手动“立即同步”复用同一同步实现，不另建旁路。
+连接需要 EdgeEver 的 HTTPS 地址、目标笔记本和具备 `read:notebooks`、`read:memos`、`write:memos` 权限的 API Token。本机实例也支持 localhost HTTP。

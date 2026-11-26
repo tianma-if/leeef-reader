@@ -1,16 +1,18 @@
+mod note;
+
 use crate::db::{self, AppState, EdgeEverExcerptNote};
-use reqwest::{Client, Method, Url};
+use note::{ExcerptNote, LegacyBody};
+use reqwest::{Client, Method, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, OnceLock},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use time::{format_description::FormatItem, macros::format_description, OffsetDateTime};
-
-const DATE: &[FormatItem<'static>] = format_description!("[year]-[month]-[day]");
+const IMPORT_ID: &str = "b87b6dfa-1284-4382-9bb5-cea4e59e0ed4";
+const FORMAT_VERSION: &str = "v2:";
 
 static SYNC_LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
 
@@ -36,6 +38,8 @@ struct EdgeEverSettings {
     edge_ever_token: String,
     #[serde(default)]
     edge_ever_notebook_id: String,
+    #[serde(default)]
+    edge_ever_notebook_label: Option<Notebook>,
 }
 
 #[derive(Clone)]
@@ -62,6 +66,24 @@ pub struct Notebook {
     pub name: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncStatus {
+    enabled: bool,
+    configured: bool,
+    notebook_selected: bool,
+    notebook_name: Option<String>,
+    target_key: Option<String>,
+    last_attempt: Option<SyncAttempt>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncAttempt {
+    finished_at: u64,
+    succeeded: bool,
+}
+
 #[derive(Deserialize)]
 struct NotebookEnvelope {
     notebooks: Vec<Notebook>,
@@ -78,6 +100,22 @@ struct Memo {
     id: String,
     revision: i64,
     content_hash: String,
+    content_json: Value,
+    content_markdown: String,
+    #[serde(default)]
+    is_deleted: bool,
+}
+
+#[derive(Deserialize)]
+struct ImportEnvelope {
+    results: Vec<ImportResult>,
+}
+
+#[derive(Deserialize)]
+struct ImportResult {
+    status: String,
+    memo: Option<Memo>,
+    error: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -94,25 +132,20 @@ struct EditSessionEnvelope {
     edit_session: EditSession,
 }
 
-fn config(state: &AppState) -> Result<Option<Config>, String> {
+fn load_settings(state: &AppState) -> Result<EdgeEverSettings, String> {
     let raw = db::kv_get(state, "settings")?.unwrap_or_else(|| "{}".into());
-    let settings: EdgeEverSettings = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    serde_json::from_str(&raw).map_err(|e| e.to_string())
+}
+
+fn config(state: &AppState) -> Result<Option<Config>, String> {
+    let settings = load_settings(state)?;
     if !settings.edge_ever_enabled {
         return Ok(None);
     }
     if settings.edge_ever_endpoint.trim().is_empty() || settings.edge_ever_token.trim().is_empty() {
         return Err("EdgeEver 已启用，但实例地址或 API Token 未填写完整".into());
     }
-    let mut base_url = Url::parse(settings.edge_ever_endpoint.trim())
-        .map_err(|_| "EdgeEver 实例地址无效".to_string())?;
-    let local_http = base_url.scheme() == "http"
-        && matches!(base_url.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
-    if base_url.scheme() != "https" && !local_http {
-        return Err("EdgeEver 实例必须使用 HTTPS（本机 localhost 除外）".into());
-    }
-    base_url.set_path("/");
-    base_url.set_query(None);
-    base_url.set_fragment(None);
+    let base_url = instance_base_url(&settings.edge_ever_endpoint)?;
     let instance_url = base_url.as_str().trim_end_matches('/').to_string();
     Ok(Some(Config {
         base_url,
@@ -122,12 +155,86 @@ fn config(state: &AppState) -> Result<Option<Config>, String> {
     }))
 }
 
+fn instance_base_url(value: &str) -> Result<Url, String> {
+    let mut base_url = Url::parse(value.trim()).map_err(|_| "EdgeEver 实例地址无效".to_string())?;
+    let local_http = base_url.scheme() == "http"
+        && matches!(base_url.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
+    if base_url.scheme() != "https" && !local_http {
+        return Err("EdgeEver 实例必须使用 HTTPS（本机 localhost 除外）".into());
+    }
+    base_url.set_path("/");
+    base_url.set_query(None);
+    base_url.set_fragment(None);
+    Ok(base_url)
+}
+
+fn target_key(base_url: &Url, notebook_id: &str) -> String {
+    digest(&format!("{base_url}\n{notebook_id}"))
+}
+
+pub fn status(state: &AppState) -> Result<SyncStatus, String> {
+    let settings = load_settings(state)?;
+    let notebook_id = settings.edge_ever_notebook_id.trim();
+    let notebook_selected = !notebook_id.is_empty();
+    let target_key = instance_base_url(&settings.edge_ever_endpoint)
+        .ok()
+        .filter(|_| notebook_selected)
+        .map(|base_url| target_key(&base_url, notebook_id));
+    let configured = target_key.is_some() && !settings.edge_ever_token.trim().is_empty();
+    let (cached_name, last_attempt) = if let Some(key) = &target_key {
+        (
+            db::kv_get(state, &format!("edgeever_notebook_name:{key}"))?,
+            db::kv_get(state, &format!("edgeever_last_attempt:{key}"))?
+                .and_then(|value| serde_json::from_str(&value).ok()),
+        )
+    } else {
+        (None, None)
+    };
+    let notebook_name = cached_name.or_else(|| {
+        settings
+            .edge_ever_notebook_label
+            .filter(|notebook| {
+                notebook_selected && notebook.id == notebook_id && !notebook.name.trim().is_empty()
+            })
+            .map(|notebook| notebook.name)
+    });
+    Ok(SyncStatus {
+        enabled: settings.edge_ever_enabled,
+        configured,
+        notebook_selected,
+        notebook_name,
+        target_key: target_key.filter(|_| configured && settings.edge_ever_enabled),
+        last_attempt,
+    })
+}
+
 fn client() -> Result<Client, String> {
     Client::builder()
         .timeout(Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
         .user_agent("Leeef-Reader/2")
         .build()
         .map_err(|e| e.to_string())
+}
+
+struct RequestError {
+    status: Option<StatusCode>,
+    message: String,
+}
+
+impl From<String> for RequestError {
+    fn from(message: String) -> Self {
+        Self {
+            status: None,
+            message,
+        }
+    }
+}
+
+impl From<RequestError> for String {
+    fn from(error: RequestError) -> Self {
+        error.message
+    }
 }
 
 async fn request_json<T: for<'de> Deserialize<'de>>(
@@ -136,7 +243,7 @@ async fn request_json<T: for<'de> Deserialize<'de>>(
     method: Method,
     path: &str,
     body: Option<Value>,
-) -> Result<T, String> {
+) -> Result<T, RequestError> {
     let url = config.base_url.join(path).map_err(|e| e.to_string())?;
     let mut request = client
         .request(method, url)
@@ -162,70 +269,12 @@ async fn request_json<T: for<'de> Deserialize<'de>>(
                     .map(str::to_string)
             })
             .unwrap_or_else(|| status.to_string());
-        return Err(format!(
-            "EdgeEver 请求失败（{}）：{detail}",
-            status.as_u16()
-        ));
+        return Err(RequestError {
+            status: Some(status),
+            message: format!("EdgeEver 请求失败（{}）：{detail}", status.as_u16()),
+        });
     }
-    serde_json::from_slice(&bytes).map_err(|e| format!("EdgeEver 响应无效：{e}"))
-}
-
-fn excerpt_date(value: &str) -> String {
-    value
-        .parse::<i64>()
-        .ok()
-        .and_then(|seconds| OffsetDateTime::from_unix_timestamp(seconds).ok())
-        .and_then(|date| date.format(DATE).ok())
-        .unwrap_or_else(|| value.to_string())
-}
-
-fn markdown(state: &AppState, book_id: &str) -> Result<(String, String), String> {
-    let book = db::list_books(state)?
-        .into_iter()
-        .find(|book| book.id == book_id)
-        .ok_or_else(|| "book does not exist".to_string())?;
-    let mut excerpts = db::list_excerpts(state, Some(book_id))?;
-    excerpts.sort_by(|left, right| left.created_at.cmp(&right.created_at));
-    let mut lines = vec![format!("# {}", book.title)];
-    if let Some(author) = book.author.filter(|value| !value.trim().is_empty()) {
-        lines.extend([String::new(), format!("作者：{author}")]);
-    }
-    lines.extend([String::new(), format!("书摘：{} 条", excerpts.len())]);
-    for (index, excerpt) in excerpts.iter().enumerate() {
-        lines.extend([
-            String::new(),
-            format!("## 书摘 {}", index + 1),
-            String::new(),
-        ]);
-        lines.extend(
-            excerpt
-                .quote
-                .replace("\r\n", "\n")
-                .replace('\r', "\n")
-                .trim_matches('\n')
-                .split('\n')
-                .map(|line| {
-                    if line.is_empty() {
-                        ">".into()
-                    } else {
-                        format!("> {line}")
-                    }
-                }),
-        );
-        if let Some(note) = excerpt.note.as_ref().filter(|value| !value.is_empty()) {
-            lines.extend([
-                String::new(),
-                "**笔记**".into(),
-                String::new(),
-                note.replace("\r\n", "\n").replace('\r', "\n"),
-            ]);
-        }
-        lines.extend([
-            String::new(),
-            format!("— 摘录于 {}", excerpt_date(&excerpt.created_at)),
-        ]);
-    }
-    Ok((book.title, format!("{}\n", lines.join("\n"))))
+    serde_json::from_slice(&bytes).map_err(|e| format!("EdgeEver 响应无效：{e}").into())
 }
 
 fn digest(value: &str) -> String {
@@ -249,113 +298,230 @@ pub async fn notebooks(state: &AppState) -> Result<Vec<Notebook>, String> {
     let config = config(state)?.ok_or_else(|| "EdgeEver 同步尚未启用".to_string())?;
     let response: NotebookEnvelope =
         request_json(&client()?, &config, Method::GET, "api/v1/notebooks", None).await?;
+    if let Some(notebook) = response
+        .notebooks
+        .iter()
+        .find(|notebook| notebook.id == config.notebook_id)
+    {
+        let key = target_key(&config.base_url, &config.notebook_id);
+        let _ = db::kv_set(
+            state,
+            &format!("edgeever_notebook_name:{key}"),
+            &notebook.name,
+        );
+    }
     Ok(response.notebooks)
 }
 
 pub async fn sync_book(state: &AppState, book_id: &str) -> Result<bool, String> {
     let lock = sync_lock(book_id);
     let _guard = lock.lock().await;
-    sync_book_unlocked(state, book_id).await
-}
-
-async fn sync_book_unlocked(state: &AppState, book_id: &str) -> Result<bool, String> {
     let Some(config) = config(state)? else {
         return Ok(false);
     };
     if config.notebook_id.is_empty() {
         return Err("尚未选择 EdgeEver 目标笔记本".into());
     }
-    let (title, content) = markdown(state, book_id)?;
-    let local_hash = digest(&content);
-    let client = client()?;
-    let existing = db::edgeever_excerpt_note(state, book_id, &config.instance_url)?;
-    if existing
-        .as_ref()
-        .is_some_and(|link| link.local_content_hash == local_hash)
-    {
-        return Ok(false);
+    let generation = db::edgeever_pending_generation(state, book_id)?;
+    let result = sync_book_unlocked(state, book_id, &config).await;
+    if !matches!(result, Ok(None)) {
+        let key = target_key(&config.base_url, &config.notebook_id);
+        let attempt = SyncAttempt {
+            finished_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+            succeeded: result.is_ok(),
+        };
+        if let Ok(value) = serde_json::to_string(&attempt) {
+            let _ = db::kv_set(state, &format!("edgeever_last_attempt:{key}"), &value);
+        }
     }
+    let changed = result?.unwrap_or(false);
+    if let Some(generation) = generation {
+        db::finish_edgeever_book(state, book_id, generation)?;
+    }
+    Ok(changed)
+}
 
-    let memo = if let Some(link) = existing {
-        let remote: MemoEnvelope = request_json(
+async fn sync_book_unlocked(
+    state: &AppState,
+    book_id: &str,
+    config: &Config,
+) -> Result<Option<bool>, String> {
+    let existing = db::edgeever_excerpt_note(state, book_id, &config.instance_url)?;
+    let excerpts = db::list_excerpts(state, Some(book_id))?;
+    if excerpts.is_empty() && existing.is_none() {
+        return Ok(None);
+    }
+    let book = db::list_books(state)?
+        .into_iter()
+        .find(|book| book.id == book_id)
+        .ok_or("book does not exist")?;
+    let note = ExcerptNote::new(book.author.as_deref(), &excerpts);
+    let local_hash = format!("{FORMAT_VERSION}{}", digest(&note.markdown));
+    let client = client()?;
+    let (memo, changed) = if let Some(link) = &existing {
+        update_memo(
             &client,
-            &config,
-            Method::GET,
-            &format!("api/v1/memos/{}", urlencoding::encode(&link.memo_id)),
-            None,
+            config,
+            &link.memo_id,
+            &note,
+            &local_hash,
+            Some(link),
         )
-        .await?;
-        if remote.memo.revision != link.revision
-            || remote.memo.content_hash != link.remote_content_hash
-        {
-            return Err("EdgeEver 笔记已在别处修改；为避免覆盖，已暂停该书同步".into());
-        }
-        let session: EditSessionEnvelope = request_json(
-            &client,
-            &config,
-            Method::POST,
-            &format!(
-                "api/v1/memos/{}/edit-sessions",
-                urlencoding::encode(&link.memo_id)
-            ),
-            Some(json!({})),
-        )
-        .await?;
-        if session.edit_session.base_revision != link.revision
-            || session.edit_session.base_content_hash != link.remote_content_hash
-        {
-            return Err("EdgeEver 笔记版本已变化；为避免覆盖，已暂停该书同步".into());
-        }
-        let updated: MemoEnvelope = request_json(
-            &client,
-            &config,
-            Method::PATCH,
-            &format!("api/v1/memos/{}", urlencoding::encode(&link.memo_id)),
-            Some(json!({
-                "expectedRevision": session.edit_session.base_revision,
-                "expectedContentHash": session.edit_session.base_content_hash,
-                "editSessionId": session.edit_session.id,
-                "title": title,
-                "contentMarkdown": content,
-                "tags": ["Leeef Reader", "书摘"]
-            })),
-        )
-        .await?;
-        updated.memo
+        .await?
     } else {
-        let created: MemoEnvelope = request_json(
+        let title: String = book
+            .title
+            .trim()
+            .chars()
+            .scan(0, |length, ch| {
+                *length += ch.len_utf16();
+                (*length <= 160).then_some(ch)
+            })
+            .collect();
+        let response: ImportEnvelope = request_json(
             &client,
-            &config,
+            config,
             Method::POST,
-            "api/v1/memos",
+            "api/v1/imports/memos",
             Some(json!({
+                "importId": IMPORT_ID,
+                "format": "markdown",
                 "notebookId": config.notebook_id,
-                "title": title,
-                "contentMarkdown": content,
-                "tags": ["Leeef Reader", "书摘"]
+                "items": [{
+                    "externalId": book.sha256,
+                    "title": title,
+                    "contentMarkdown": note.markdown,
+                    "tags": ["Leeef Reader", "书摘"]
+                }]
             })),
         )
         .await?;
-        created.memo
+        let result = response
+            .results
+            .into_iter()
+            .next()
+            .ok_or("EdgeEver 未返回导入结果")?;
+        let memo = result.memo.ok_or_else(|| {
+            result
+                .error
+                .unwrap_or_else(|| "EdgeEver 未返回可同步的笔记".into())
+        })?;
+        if memo.is_deleted {
+            return Err("EdgeEver 中的书摘笔记已移到废纸篓".into());
+        }
+        if result.status == "created" {
+            (memo, true)
+        } else {
+            update_memo(&client, config, &memo.id, &note, &local_hash, None).await?
+        }
     };
     db::save_edgeever_excerpt_note(
         state,
         &EdgeEverExcerptNote {
             book_id: book_id.to_string(),
-            instance_url: config.instance_url,
+            instance_url: config.instance_url.clone(),
             memo_id: memo.id,
             revision: memo.revision,
             remote_content_hash: memo.content_hash,
             local_content_hash: local_hash,
         },
     )?;
-    Ok(true)
+    Ok(Some(changed))
+}
+
+async fn update_memo(
+    client: &Client,
+    config: &Config,
+    memo_id: &str,
+    note: &ExcerptNote,
+    local_hash: &str,
+    link: Option<&EdgeEverExcerptNote>,
+) -> Result<(Memo, bool), String> {
+    let path = format!("api/v1/memos/{}", urlencoding::encode(memo_id));
+    let edit_path = format!("{path}/edit-sessions");
+    for _ in 0..4 {
+        let remote: MemoEnvelope = request_json(client, config, Method::GET, &path, None).await?;
+        let remote = remote.memo;
+        let prior_body_matches =
+            link.is_some_and(|link| link.remote_content_hash == remote.content_hash);
+        if prior_body_matches && link.is_some_and(|link| link.local_content_hash == local_hash) {
+            return Ok((remote, false));
+        }
+        let legacy = match link {
+            Some(link) if !link.local_content_hash.starts_with(FORMAT_VERSION) => {
+                if prior_body_matches {
+                    LegacyBody::Unchanged
+                } else {
+                    LegacyBody::Edited
+                }
+            }
+            _ => LegacyBody::Unknown,
+        };
+        let (merged, markdown) =
+            note.merge(&remote.content_json, &remote.content_markdown, legacy)?;
+        if merged == remote.content_json
+            && markdown
+                .as_deref()
+                .is_none_or(|markdown| markdown == remote.content_markdown)
+        {
+            return Ok((remote, false));
+        }
+
+        let session: EditSessionEnvelope =
+            request_json(client, config, Method::POST, &edit_path, Some(json!({}))).await?;
+        let session = session.edit_session;
+        if session.base_revision != remote.revision
+            || session.base_content_hash != remote.content_hash
+        {
+            continue;
+        }
+        let mut body = json!({
+            "expectedRevision": session.base_revision,
+            "expectedContentHash": session.base_content_hash,
+            "editSessionId": session.id,
+            "contentJson": merged
+        });
+        if let Some(markdown) = markdown {
+            body["contentMarkdown"] = json!(markdown);
+        }
+        let updated =
+            request_json::<MemoEnvelope>(client, config, Method::PATCH, &path, Some(body)).await;
+        match updated {
+            Ok(updated) => return Ok((updated.memo, true)),
+            Err(error) if error.status == Some(StatusCode::CONFLICT) => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err("EdgeEver 笔记在同步期间连续变动，请稍后重试".into())
 }
 
 pub fn schedule(state: AppState, book_id: String) {
+    if !matches!(config(&state), Ok(Some(_))) {
+        return;
+    }
+    let _ = db::queue_edgeever_book(&state, &book_id);
     tauri::async_runtime::spawn(async move {
         if let Err(error) = sync_book(&state, &book_id).await {
             let _ = db::save_edgeever_sync_error(&state, &book_id, &error);
+        }
+    });
+}
+
+pub fn start_background(state: AppState) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            if !matches!(config(&state), Ok(Some(config)) if !config.notebook_id.is_empty()) {
+                continue;
+            }
+            for book_id in db::pending_edgeever_books(&state).unwrap_or_default() {
+                if let Err(error) = sync_book(&state, &book_id).await {
+                    let _ = db::save_edgeever_sync_error(&state, &book_id, &error);
+                }
+            }
         }
     });
 }
@@ -408,13 +574,14 @@ mod tests {
     use axum::{
         extract::State as AxumState,
         http::HeaderMap,
+        response::IntoResponse,
         routing::{get, post},
         Json, Router,
     };
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     #[test]
-    fn edgeever_markdown_contains_every_excerpt_date_and_line_break() {
+    fn edgeever_markdown_groups_excerpts_in_order_and_places_annotations_under_quotes() {
         let root = tempfile::tempdir().expect("temporary app data directory");
         let state = db::open(root.path().to_path_buf()).expect("open database");
         let book = db::import_book(
@@ -427,69 +594,171 @@ mod tests {
             None,
         )
         .expect("import book");
-        db::upsert_excerpt(
-            &state,
-            &book.id,
-            "epubcfi(/6/2)",
-            "第一段\n\n第二段",
-            None,
-            "yellow",
+        let locators = [
+            ("epubcfi(/6/10!/4,/1:0,/1:8)", "后面的章节", None, "第三章"),
+            (
+                "epubcfi(/6/2[a^,b]!/4,/1:10,/1:12)",
+                "补划的书摘",
+                None,
+                "第一章",
+            ),
+            (
+                "epubcfi(/6/2[a^,b]!/4,/1:2,/1:10)",
+                "第一段\n\n第二段",
+                Some("我的批注"),
+                "第一章",
+            ),
+        ];
+        for (locator, quote, annotation, chapter) in locators {
+            db::upsert_excerpt(&state, &book.id, locator, quote, annotation, "yellow").unwrap();
+            db::save_excerpt_chapters(
+                &state,
+                &book.id,
+                &[(
+                    locator.into(),
+                    db::ExcerptChapter {
+                        key: chapter.into(),
+                        title: chapter.into(),
+                    },
+                )],
+            )
+            .unwrap();
+        }
+        let output = ExcerptNote::new(
+            book.author.as_deref(),
+            &db::list_excerpts(&state, Some(&book.id)).unwrap(),
         )
-        .expect("create excerpt");
+        .markdown;
+        assert!(output
+            .contains("### 第一章\n\n> 第一段\n>\n> 第二段\n\n**批注** 我的批注\n\n> 补划的书摘"));
+        assert!(output.contains("> 补划的书摘\n\n### 第三章\n\n> 后面的章节"));
+        assert_eq!(output.matches("### 第一章").count(), 1);
+        for omitted in ["页码", "读后感", "摘录于"] {
+            assert!(!output.contains(omitted));
+        }
+    }
 
-        let (_, output) = markdown(&state, &book.id).expect("render markdown");
-        assert!(output.contains("> 第一段\n>\n> 第二段"));
-        assert!(output.contains("— 摘录于 "));
-        assert_eq!(output.matches("— 摘录于 ").count(), 1);
+    #[test]
+    fn edgeever_migrates_an_edited_legacy_note_without_removing_surrounding_blocks() {
+        let before = json!({ "type": "image", "attrs": { "src": "edgeever://resource/test", "width": 240 } });
+        let after =
+            json!({ "type": "paragraph", "content": [{ "type": "text", "text": "手写正文" }] });
+        let legacy = json!({ "type": "doc", "content": [
+            before,
+            { "type": "heading", "attrs": { "level": 1 }, "content": [{ "type": "text", "text": "旧书名" }] },
+            { "type": "paragraph", "content": [{ "type": "text", "text": "书摘：1 条" }] },
+            { "type": "heading", "attrs": { "level": 2 }, "content": [{ "type": "text", "text": "书摘 1" }] },
+            { "type": "blockquote", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "原来的书摘" }] }] },
+            { "type": "paragraph", "content": [{ "type": "text", "text": "— 摘录于 2026-11-26" }] },
+            after
+        ]});
+        let note = ExcerptNote::new(None, &[]);
+        let legacy_markdown = "![封面](edgeever://resource/test)\n\n# 旧书名\n\n书摘：1 条\n\n## 书摘 1\n\n> 原来的书摘\n\n— 摘录于 2026-11-26\n\n<!-- 手写备注 -->\n手写正文";
+        let (merged, markdown) = note
+            .merge(&legacy, legacy_markdown, LegacyBody::Edited)
+            .unwrap();
+        let blocks = merged["content"].as_array().unwrap();
+        assert_eq!(blocks.first(), Some(&before));
+        assert_eq!(blocks.last(), Some(&after));
+        assert_eq!(&blocks[1..blocks.len() - 1], note.nodes.as_slice());
+        let markdown = markdown.unwrap();
+        assert!(markdown.starts_with("![封面](edgeever://resource/test)\n\n"));
+        assert!(markdown.ends_with("\n\n<!-- 手写备注 -->\n手写正文"));
+        assert_eq!(
+            note.merge(&merged, &markdown, LegacyBody::Unknown).unwrap(),
+            (merged, Some(markdown))
+        );
     }
 
     #[derive(Clone, Default)]
     struct MockEdgeEver {
         creates: Arc<AtomicUsize>,
         updates: Arc<AtomicUsize>,
+        memo: Arc<Mutex<Value>>,
+        fail_next_update: Arc<AtomicBool>,
+        fail_next_import: Arc<AtomicBool>,
     }
 
     #[tokio::test]
-    async fn sync_creates_once_then_updates_the_same_memo() {
+    async fn sync_reuses_the_memo_and_overwrites_only_excerpts_after_a_concurrent_edit() {
         let mock = MockEdgeEver::default();
         let app = Router::new()
             .route(
-                "/api/v1/memos",
+                "/api/v1/notebooks",
+                get(|| async {
+                    Json(json!({ "notebooks": [{ "id": "notebook-1", "name": "阅读摘录" }] }))
+                }),
+            )
+            .route(
+                "/api/v1/imports/memos",
                 post(
-                    |AxumState(mock): AxumState<MockEdgeEver>, headers: HeaderMap| async move {
+                    |AxumState(mock): AxumState<MockEdgeEver>, headers: HeaderMap, Json(body): Json<Value>| async move {
                         assert_eq!(headers.get("authorization").unwrap(), "Bearer token");
+                        assert_eq!(body["importId"], IMPORT_ID);
+                        assert_eq!(body["format"], "markdown");
+                        assert_eq!(body["items"][0]["externalId"], digest("book"));
+                        assert_eq!(body["items"][0]["title"], "同步测试");
+                        assert!(body["items"][0]["contentMarkdown"].as_str().unwrap().contains("> 原文"));
+                        if mock.fail_next_import.swap(false, Ordering::SeqCst) {
+                            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+                        }
+                        let mut memo = mock.memo.lock().unwrap();
+                        if !memo.is_null() {
+                            return Json(json!({ "results": [{ "status": "skipped", "memo": *memo }] })).into_response();
+                        }
                         mock.creates.fetch_add(1, Ordering::SeqCst);
-                        Json(json!({ "memo": {
-                            "id": "memo-1", "revision": 1, "contentHash": "remote-hash-1"
-                        }}))
+                        let mut nodes = ExcerptNote::new(None, &[]).nodes;
+                        nodes.insert(2, json!({
+                            "type": "blockquote", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "原文" }] }]
+                        }));
+                        *memo = json!({
+                            "id": "memo-1", "revision": 1, "contentHash": "remote-hash-1",
+                            "contentMarkdown": body["items"][0]["contentMarkdown"],
+                            "title": "同步测试", "tags": ["书摘"], "contentJson": { "type": "doc", "content": nodes }
+                        });
+                        Json(json!({ "results": [{ "status": "created", "memo": *memo }] })).into_response()
                     },
                 ),
             )
             .route(
                 "/api/v1/memos/memo-1",
-                get(|| async {
-                    Json(json!({ "memo": {
-                        "id": "memo-1", "revision": 1, "contentHash": "remote-hash-1"
-                    }}))
+                get(|AxumState(mock): AxumState<MockEdgeEver>| async move {
+                    Json(json!({ "memo": *mock.memo.lock().unwrap() }))
                 })
                 .patch(
                     |AxumState(mock): AxumState<MockEdgeEver>, Json(body): Json<Value>| async move {
-                        assert_eq!(body["expectedRevision"], 1);
-                        assert_eq!(body["expectedContentHash"], "remote-hash-1");
+                        assert!(body.get("title").is_none());
+                        assert!(body.get("tags").is_none());
+                        if mock.fail_next_update.swap(false, Ordering::SeqCst) {
+                            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+                        }
+                        let mut memo = mock.memo.lock().unwrap();
+                        assert_eq!(body["expectedRevision"], memo["revision"]);
+                        assert_eq!(body["expectedContentHash"], memo["contentHash"]);
                         assert_eq!(body["editSessionId"], "session-1");
-                        mock.updates.fetch_add(1, Ordering::SeqCst);
-                        Json(json!({ "memo": {
-                            "id": "memo-1", "revision": 2, "contentHash": "remote-hash-2"
-                        }}))
+                        let revision = memo["revision"].as_i64().unwrap() + 1;
+                        memo["revision"] = json!(revision);
+                        memo["contentHash"] = json!(format!("remote-hash-{revision}"));
+                        if mock.updates.fetch_add(1, Ordering::SeqCst) == 0 {
+                            memo["contentJson"]["content"].as_array_mut().unwrap().push(json!({
+                                "type": "paragraph", "content": [{ "type": "text", "text": "并发写入的正文" }]
+                            }));
+                            memo["contentMarkdown"] = json!(format!("{}\n\n并发写入的正文", memo["contentMarkdown"].as_str().unwrap()));
+                            return (StatusCode::CONFLICT, Json(json!({ "error": { "message": "retry" } }))).into_response();
+                        }
+                        memo["contentJson"] = body["contentJson"].clone();
+                        memo["contentMarkdown"] = body["contentMarkdown"].clone();
+                        Json(json!({ "memo": *memo })).into_response()
                     },
                 ),
             )
             .route(
                 "/api/v1/memos/memo-1/edit-sessions",
-                post(|| async {
+                post(|AxumState(mock): AxumState<MockEdgeEver>| async move {
+                    let memo = mock.memo.lock().unwrap();
                     Json(json!({ "editSession": {
-                        "id": "session-1", "baseRevision": 1,
-                        "baseContentHash": "remote-hash-1"
+                        "id": "session-1", "baseRevision": memo["revision"],
+                        "baseContentHash": memo["contentHash"]
                     }}))
                 }),
             )
@@ -502,18 +771,23 @@ mod tests {
 
         let root = tempfile::tempdir().expect("temporary app data directory");
         let state = db::open(root.path().to_path_buf()).expect("open database");
-        db::kv_set(
-            &state,
-            "settings",
-            &json!({
+        let settings = json!({
                 "edgeEverEnabled": true,
                 "edgeEverEndpoint": format!("http://{address}"),
                 "edgeEverToken": "token",
                 "edgeEverNotebookId": "notebook-1"
-            })
-            .to_string(),
-        )
-        .expect("save settings");
+        })
+        .to_string();
+        db::kv_set(&state, "settings", &settings).unwrap();
+        let initial = status(&state).unwrap();
+        assert!(initial.enabled && initial.configured && initial.notebook_selected);
+        assert!(initial.last_attempt.is_none());
+        assert!(initial.notebook_name.is_none());
+        notebooks(&state).await.unwrap();
+        assert_eq!(
+            status(&state).unwrap().notebook_name.as_deref(),
+            Some("阅读摘录")
+        );
         let book = db::import_book(
             &state,
             "sync.txt",
@@ -528,7 +802,65 @@ mod tests {
             db::upsert_excerpt(&state, &book.id, "epubcfi(/6/2)", "原文", None, "yellow")
                 .expect("create excerpt");
 
+        mock.fail_next_import.store(true, Ordering::SeqCst);
+        assert!(sync_book(&state, &book.id).await.is_err());
+        assert!(!status(&state).unwrap().last_attempt.unwrap().succeeded);
+        assert!(
+            db::edgeever_excerpt_note(&state, &book.id, &format!("http://{address}"))
+                .unwrap()
+                .is_none()
+        );
         assert!(sync_book(&state, &book.id).await.expect("first sync"));
+        assert!(status(&state).unwrap().last_attempt.unwrap().succeeded);
+        {
+            let mut memo = mock.memo.lock().unwrap();
+            memo["title"] = json!("手动改过的标题");
+            memo["tags"] = json!(["手动改过的标签"]);
+            memo["revision"] = json!(2);
+            memo["contentHash"] = json!("remote-hash-2");
+            memo["contentMarkdown"] = json!(format!(
+                "<!-- 用户备注 -->\n![图](edgeever://resource/example)\n\n{}",
+                memo["contentMarkdown"]
+                    .as_str()
+                    .unwrap()
+                    .replace("> 原文", "> EdgeEver 手改的书摘")
+            ));
+            let nodes = memo["contentJson"]["content"].as_array_mut().unwrap();
+            nodes[2]["content"][0]["content"][0]["text"] = json!("EdgeEver 手改的书摘");
+            nodes.insert(
+                0,
+                json!({
+                    "type": "image", "attrs": { "src": "edgeever://resource/example", "width": 240 }
+                }),
+            );
+        }
+        // A manual sync restores the source excerpt even without a local edit.
+        assert!(sync_book(&state, &book.id)
+            .await
+            .expect("refresh the same excerpt"));
+        {
+            let memo = mock.memo.lock().unwrap();
+            assert_eq!(memo["title"], "手动改过的标题");
+            assert_eq!(memo["tags"], json!(["手动改过的标签"]));
+            let blocks = memo["contentJson"]["content"].as_array().unwrap();
+            assert_eq!(blocks.first().unwrap()["attrs"]["width"], 240);
+            assert_eq!(
+                blocks.last().unwrap()["content"][0]["text"],
+                "并发写入的正文"
+            );
+            assert!(memo["contentMarkdown"]
+                .as_str()
+                .unwrap()
+                .starts_with("<!-- 用户备注 -->\n"));
+            assert!(memo["contentMarkdown"]
+                .as_str()
+                .unwrap()
+                .ends_with("\n\n并发写入的正文"));
+            assert!(memo["contentJson"].to_string().contains("原文"));
+            assert!(!memo["contentJson"]
+                .to_string()
+                .contains("EdgeEver 手改的书摘"));
+        }
         db::update_excerpt(
             &state,
             &excerpt_id,
@@ -537,8 +869,75 @@ mod tests {
             "yellow",
         )
         .expect("update excerpt");
-        assert!(sync_book(&state, &book.id).await.expect("second sync"));
+        db::queue_edgeever_book(&state, &book.id).unwrap();
+        mock.fail_next_update.store(true, Ordering::SeqCst);
+        assert!(sync_book(&state, &book.id).await.is_err());
+        assert_eq!(
+            db::pending_edgeever_books(&state).unwrap(),
+            [book.id.clone()]
+        );
+        let state = db::open(root.path().to_path_buf()).unwrap();
+        assert!(!status(&state).unwrap().last_attempt.unwrap().succeeded);
+        assert_eq!(
+            status(&state).unwrap().notebook_name.as_deref(),
+            Some("阅读摘录")
+        );
+        assert_eq!(
+            db::pending_edgeever_books(&state).unwrap(),
+            [book.id.clone()]
+        );
+        assert!(sync_book(&state, &book.id).await.expect("update excerpt"));
+        assert!(status(&state).unwrap().last_attempt.unwrap().succeeded);
+        assert!(db::pending_edgeever_books(&state).unwrap().is_empty());
+        assert!(!sync_book(&state, &book.id).await.expect("unchanged note"));
+        assert!(mock.memo.lock().unwrap()["contentJson"]
+            .to_string()
+            .contains("新增笔记"));
+        db::delete_excerpt(&state, &excerpt_id).unwrap();
+        assert!(sync_book(&state, &book.id)
+            .await
+            .expect("delete final excerpt"));
+        assert!(!mock.memo.lock().unwrap()["contentJson"]
+            .to_string()
+            .contains("新增笔记"));
+
+        let second_root = tempfile::tempdir().unwrap();
+        let second_state = db::open(second_root.path().to_path_buf()).unwrap();
+        db::kv_set(&second_state, "settings", &settings).unwrap();
+        let imported = db::import_book(
+            &second_state,
+            "other-filename.txt",
+            b"book",
+            "同步测试",
+            None,
+            "text/plain",
+            None,
+        )
+        .unwrap();
+        db::upsert_excerpt(
+            &second_state,
+            &imported.id,
+            "epubcfi(/6/2)",
+            "原文",
+            None,
+            "yellow",
+        )
+        .unwrap();
+        assert!(sync_book(&second_state, &imported.id).await.unwrap());
+        let linked =
+            db::edgeever_excerpt_note(&second_state, &imported.id, &format!("http://{address}"))
+                .unwrap()
+                .unwrap();
+        assert_eq!(linked.memo_id, "memo-1");
         assert_eq!(mock.creates.load(Ordering::SeqCst), 1);
-        assert_eq!(mock.updates.load(Ordering::SeqCst), 1);
+        assert_eq!(mock.updates.load(Ordering::SeqCst), 5);
+        let mut changed_target: Value = serde_json::from_str(&settings).unwrap();
+        changed_target["edgeEverNotebookId"] = json!("notebook-2");
+        changed_target["edgeEverNotebookLabel"] = json!({ "id": "notebook-2", "name": "精读" });
+        db::kv_set(&state, "settings", &changed_target.to_string()).unwrap();
+        let changed = status(&state).unwrap();
+        assert_eq!(changed.notebook_name.as_deref(), Some("精读"));
+        assert_ne!(changed.target_key, initial.target_key);
+        assert!(changed.last_attempt.is_none());
     }
 }

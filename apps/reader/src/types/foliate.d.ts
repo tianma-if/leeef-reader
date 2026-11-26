@@ -35,10 +35,13 @@ declare global {
     ) => Promise<unknown>
     deleteAnnotation: (annotation: { value: string }) => Promise<unknown>
     getCFI: (index: number, range?: Range | null) => string
+    getProgressOf: (index: number, range: Range) => { tocItem?: TocItem | null }
+    getTOCItemOf: (locator: string) => Promise<TocItem | null | undefined>
     deselect: () => void
     book?: {
       metadata?: { title?: unknown; author?: unknown }
       toc?: TocItem[]
+      destroy?: () => void | Promise<void>
     }
     lastLocation?: {
       cfi?: string

@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { SettingChoices } from './SettingControls'
 
 export function LibraryBackup() {
   const [password, setPassword] = useState('')
@@ -71,15 +71,17 @@ export function LibraryBackup() {
                 {preview ? `${preview.books} 本书、${preview.excerpts} 条书摘、${preview.bookmarks} 个书签，共 ${(preview.bytes / 1024 / 1024).toFixed(1)} MiB。其中 ${preview.matchingBooks} 本已在本机。` : ''}
               </DialogDescription>
             </DialogHeader>
-            <Label htmlFor="backup-conflicts">已有记录的处理方式</Label>
-            <Select value={preferBackup ? 'backup' : 'local'} disabled={busy}
-              onValueChange={(value) => setPreferBackup(value === 'backup')}>
-              <SelectTrigger id="backup-conflicts"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="local">合并，保留较新的记录</SelectItem>
-                <SelectItem value="backup">匹配记录以备份版本为准</SelectItem>
-              </SelectContent>
-            </Select>
+            <SettingChoices
+              label="已有记录的处理方式"
+              layout="list"
+              disabled={busy}
+              value={preferBackup ? 'backup' : 'local'}
+              onChange={(value) => setPreferBackup(value === 'backup')}
+              options={[
+                { value: 'local', label: '合并，保留较新的记录' },
+                { value: 'backup', label: '匹配记录以备份版本为准' },
+              ]}
+            />
             <p className="text-xs text-muted-foreground">
               {preferBackup ? '备份中的匹配记录会覆盖本机版本，可用于找回误删书摘或旧进度。本机独有书籍保留。' : '合并书库，不覆盖本机较新的修改；同一书籍文件不会重复导入。'}
               开启书库同步后，恢复结果也会同步到其它设备。

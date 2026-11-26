@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { api, type LibraryHistoryEntry, type LibraryHistoryRecord } from '../api'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { SettingChoices } from './SettingControls'
 
 function VersionContent({ record }: { record: LibraryHistoryRecord | null }) {
   if (!record) return <p className="text-muted-foreground">当前记录不存在</p>
@@ -70,12 +71,23 @@ export function LibraryHistory({ onRestored }: { onRestored: () => void }) {
           <p className="text-xs text-muted-foreground">按历史收录顺序排列。更早未保留的版本无法找回。</p>
           <Button variant="outline" size="sm" disabled={loading || restoring} onClick={() => void load()}>刷新历史</Button>
         </div>
-        {!selected ? <label className="flex items-center gap-2 text-sm">历史类型
-          <select className="min-w-0 rounded-md border bg-background p-2" value={kind ?? ''} disabled={loading || restoring}
-            onChange={(event) => { const filter = (event.target.value || null) as typeof kind; setKind(filter); void load(null, filter) }}>
-            <option value="">全部</option><option value="excerpts">书摘与笔记</option><option value="reading_progresses">阅读位置</option>
-          </select>
-        </label> : null}
+        {!selected ? (
+          <SettingChoices
+            label="历史类型"
+            value={kind ?? ''}
+            disabled={loading || restoring}
+            options={[
+              { value: '', label: '全部' },
+              { value: 'excerpts', label: '书摘与笔记' },
+              { value: 'reading_progresses', label: '阅读位置' },
+            ] as const}
+            onChange={(choice) => {
+              const filter = choice || null
+              setKind(filter)
+              void load(null, filter)
+            }}
+          />
+        ) : null}
         {error ? <p role="alert" className="text-sm text-destructive break-words">{error}</p> : null}
         {selected ? <>
           <h3 className="font-semibold break-words">{selected.bookTitle} · {selected.record.table === 'excerpts' ? '书摘' : '阅读位置'}</h3>

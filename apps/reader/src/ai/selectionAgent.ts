@@ -1,10 +1,11 @@
 import { DirectChatTransport, ToolLoopAgent, type InferAgentUIMessage } from 'ai'
-import type { Settings } from '../api'
+import type { ExcerptChapter, Settings } from '../api'
 import { createLeeefModel } from './provider'
 
 export type ReadingSource = {
   bookTitle: string
   chapter: string
+  excerptChapter?: ExcerptChapter
   quote: string
   locator: string
 }

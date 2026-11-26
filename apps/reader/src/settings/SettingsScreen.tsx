@@ -16,7 +16,8 @@ import {
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { toast } from 'sonner'
-import { api, type PairingOffer, type Settings, type SettingsSyncStatus } from '../api'
+import { api, type EdgeEverNotebook, type PairingOffer, type Settings, type SettingsSyncStatus } from '../api'
+import { prepareEdgeEverExcerptChapters } from '../reader/excerptChapters'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -45,8 +46,11 @@ import {
 import { Slider } from '@/components/ui/slider'
 import { Textarea } from '@/components/ui/textarea'
 import { FontPicker } from '../reader/FontPicker'
+import { THEMES } from '../reader/bookStyles'
 import { LibraryBackup } from './LibraryBackup'
 import { SyncCenter } from './SyncCenter'
+import { SettingChoices, SettingSwitch } from './SettingControls'
+import { EdgeEverStatusCard } from './EdgeEverStatusCard'
 
 const desktop = !/Android|iPhone|iPad/i.test(navigator.userAgent)
 
@@ -103,7 +107,7 @@ export function SettingsScreen() {
   const [recoveryBusy, setRecoveryBusy] = useState(false)
   const recoveryFile = useRef<HTMLInputElement>(null)
   const [edgeEverBusy, setEdgeEverBusy] = useState(false)
-  const [edgeEverNotebooks, setEdgeEverNotebooks] = useState<{ id: string; name: string }[]>([])
+  const [edgeEverNotebooks, setEdgeEverNotebooks] = useState<EdgeEverNotebook[]>([])
 
   // Modal dialog states
   const [joinConfirmOpen, setJoinConfirmOpen] = useState(false)
@@ -112,7 +116,7 @@ export function SettingsScreen() {
   useEffect(() => {
     void api.getSettings().then((settings) => {
       setValue(settings)
-      if (settings.edgeEverEnabled) {
+      if (desktop && settings.edgeEverEnabled) {
         void api.edgeEverNotebooks().then(setEdgeEverNotebooks).catch(() => undefined)
       }
     })
@@ -220,37 +224,26 @@ export function SettingsScreen() {
           <CardDescription>配置应用程序界面模式与默认阅读版式</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1.5">
-              <Label>应用外观</Label>
-              <Select value={appTheme ?? 'system'} onValueChange={setAppTheme}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="system">跟随系统</SelectItem>
-                  <SelectItem value="light">浅色模式</SelectItem>
-                  <SelectItem value="dark">深色模式</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-1.5">
-              <Label>阅读底色</Label>
-              <Select
-                value={value.theme ?? 'paper'}
-                onValueChange={(theme) => patch({ theme: theme as Settings['theme'] })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="paper">纸张米黄</SelectItem>
-                  <SelectItem value="sepia">护眼羊皮</SelectItem>
-                  <SelectItem value="night">夜间深沉</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          <SettingChoices
+            label="应用外观"
+            value={appTheme ?? 'system'}
+            onChange={setAppTheme}
+            options={[
+              { value: 'system', label: '跟随系统' },
+              { value: 'light', label: '浅色' },
+              { value: 'dark', label: '深色' },
+            ]}
+          />
+          <SettingChoices
+            label="阅读底色"
+            value={value.theme ?? 'paper'}
+            onChange={(theme) => patch({ theme })}
+            options={[
+              { value: 'paper', label: '纸张', swatch: THEMES.paper },
+              { value: 'sepia', label: '护眼', swatch: THEMES.sepia },
+              { value: 'night', label: '夜间', swatch: THEMES.night },
+            ] as const}
+          />
 
           <div className="grid gap-2">
             <Label>阅读字体</Label>
@@ -267,6 +260,7 @@ export function SettingsScreen() {
                 <span className="font-mono text-muted-foreground">{value.fontSize ?? 18} px</span>
               </div>
               <Slider
+                thumbLabel="字号"
                 min={14}
                 max={28}
                 value={[value.fontSize ?? 18]}
@@ -279,6 +273,7 @@ export function SettingsScreen() {
                 <span className="font-mono text-muted-foreground">{value.lineHeight ?? 1.65}</span>
               </div>
               <Slider
+                thumbLabel="行距"
                 min={1.3}
                 max={2.2}
                 step={0.05}
@@ -288,54 +283,36 @@ export function SettingsScreen() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div className="grid gap-1.5">
-              <Label>排版模式</Label>
-              <Select
-                value={value.flow ?? 'paginated'}
-                onValueChange={(flow) => patch({ flow: flow as Settings['flow'] })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="paginated">左右分页</SelectItem>
-                  <SelectItem value="scrolled">上下滚动</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-1.5">
-              <Label>显示分栏</Label>
-              <Select
-                value={String(value.columns ?? 1)}
-                onValueChange={(columns) => patch({ columns: Number(columns) as 1 | 2 })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">单栏展示</SelectItem>
-                  <SelectItem value="2">双栏并排</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-1.5">
-              <Label>中文转换</Label>
-              <Select
-                value={value.chinese ?? 'original'}
-                onValueChange={(chinese) => patch({ chinese: chinese as Settings['chinese'] })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="original">保持原文</SelectItem>
-                  <SelectItem value="simplified">转为简体</SelectItem>
-                  <SelectItem value="traditional">转为繁体</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <SettingChoices
+              label="排版模式"
+              value={value.flow ?? 'paginated'}
+              onChange={(flow) => patch({ flow })}
+              options={[
+                { value: 'paginated', label: '左右分页' },
+                { value: 'scrolled', label: '上下滚动' },
+              ] as const}
+            />
+            <SettingChoices
+              label="显示分栏"
+              value={value.columns ?? 1}
+              onChange={(columns) => patch({ columns })}
+              options={[
+                { value: 1, label: '单栏' },
+                { value: 2, label: '双栏' },
+              ] as const}
+            />
           </div>
+          <SettingChoices
+            label="中文转换"
+            value={value.chinese ?? 'original'}
+            onChange={(chinese) => patch({ chinese })}
+            options={[
+              { value: 'original', label: '保持原文' },
+              { value: 'simplified', label: '转为简体' },
+              { value: 'traditional', label: '转为繁体' },
+            ] as const}
+          />
         </CardContent>
       </Card>
 
@@ -355,6 +332,7 @@ export function SettingsScreen() {
               <span className="font-mono text-muted-foreground">{value.ttsRate ?? 1}x</span>
             </div>
             <Slider
+              thumbLabel="语速倍率"
               min={0.6}
               max={1.6}
               step={0.1}
@@ -423,38 +401,32 @@ export function SettingsScreen() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="grid gap-1.5">
-              <Label>存储协议</Label>
-              <Select
-                value={value.syncBackend || 'none'}
-                onValueChange={(syncBackend) =>
-                  patch({
-                    syncBackend: (syncBackend === 'none' ? '' : syncBackend) as Settings['syncBackend'],
-                  })
-                }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">未配置云同步</SelectItem>
-                  <SelectItem value="s3">S3 兼容对象存储 (AWS / Cloudflare R2 / MinIO)</SelectItem>
-                  <SelectItem value="webdav">WebDAV (坚果云 / 群晖 / Nextcloud)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-1.5">
-              <Label>服务端地址 (Endpoint)</Label>
-              <Input
-                value={value.syncEndpoint ?? ''}
-                onChange={(event) => patch({ syncEndpoint: event.target.value })}
-                placeholder={
-                  value.syncBackend === 's3'
-                    ? 'https://s3.example.com'
-                    : 'https://dav.example.com/leeef'
-                }
-              />
-            </div>
+            <SettingChoices
+              label="存储协议"
+              value={value.syncBackend ?? ''}
+              onChange={(syncBackend) => patch({ syncBackend })}
+              options={[
+                { value: '', label: '未配置' },
+                { value: 's3', label: 'S3 兼容存储' },
+                { value: 'webdav', label: 'WebDAV' },
+              ] as const}
+            />
+            {value.syncBackend ? (
+              <div className="grid gap-1.5">
+                <Label htmlFor="sync-endpoint">服务端地址 (Endpoint)</Label>
+                <Input
+                  id="sync-endpoint"
+                  type="url"
+                  value={value.syncEndpoint ?? ''}
+                  onChange={(event) => patch({ syncEndpoint: event.target.value })}
+                  placeholder={
+                    value.syncBackend === 's3'
+                      ? 'https://s3.example.com'
+                      : 'https://dav.example.com/leeef'
+                  }
+                />
+              </div>
+            ) : null}
             {value.syncBackend === 'webdav' ? (
               <div className="grid grid-cols-2 gap-3">
                 <div className="grid gap-1.5">
@@ -529,24 +501,20 @@ export function SettingsScreen() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <Label htmlFor="library-sync">同步范围</Label>
-          <Select value={value.syncLibrary ? 'library' : 'settings'}
-            onValueChange={(choice) => patch({ syncLibrary: choice === 'library' })}>
-            <SelectTrigger id="library-sync"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="settings">仅配置</SelectItem>
-              <SelectItem value="library">配置、书籍与阅读数据</SelectItem>
-            </SelectContent>
-          </Select>
-          <Label htmlFor="library-auto-sync">本机自动同步</Label>
-          <Select value={value.autoSync === false ? 'manual' : 'auto'}
-            onValueChange={(choice) => patch({ autoSync: choice === 'auto' })}>
-            <SelectTrigger id="library-auto-sync"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="auto">自动同步</SelectItem>
-              <SelectItem value="manual">仅手动同步</SelectItem>
-            </SelectContent>
-          </Select>
+          <SettingChoices
+            label="同步范围"
+            value={value.syncLibrary ? 'library' : 'settings'}
+            onChange={(choice) => patch({ syncLibrary: choice === 'library' })}
+            options={[
+              { value: 'settings', label: '仅配置' },
+              { value: 'library', label: '配置、书籍与阅读数据' },
+            ]}
+          />
+          <SettingSwitch
+            label="本机自动同步"
+            checked={value.autoSync !== false}
+            onChange={(autoSync) => patch({ autoSync })}
+          />
           <p className="text-xs text-muted-foreground">保存后生效。自动同步在应用运行时每 30 秒检查一次；离线修改保留在本地，联网后重试。</p>
         </CardContent>
       </Card>
@@ -560,60 +528,55 @@ export function SettingsScreen() {
               EdgeEver 笔记同步
             </CardTitle>
             <CardDescription>
-              每本书自动同步为一篇 EdgeEver 笔记，需 read:notebooks 与 write:memos 权限
+              每本书同步到同一篇笔记。同步会覆盖书摘区，保留标题、标签和书摘区外的内容。
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5">
-                <Label>同步状态</Label>
-                <Select
-                  value={value.edgeEverEnabled ? 'enabled' : 'disabled'}
-                  onValueChange={(state) => patch({ edgeEverEnabled: state === 'enabled' })}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="disabled">关闭</SelectItem>
-                    <SelectItem value="enabled">实时同步开启</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-1.5">
-                <Label>目标笔记本</Label>
-                <Select
-                  value={value.edgeEverNotebookId || 'none'}
-                  onValueChange={(id) => patch({ edgeEverNotebookId: id === 'none' ? '' : id })}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">尚未选择</SelectItem>
-                    {edgeEverNotebooks.map((nb) => (
-                      <SelectItem key={nb.id} value={nb.id}>
-                        {nb.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            <SettingSwitch
+              label="自动同步书摘到 EdgeEver"
+              checked={value.edgeEverEnabled === true}
+              onChange={(edgeEverEnabled) => patch({ edgeEverEnabled })}
+            />
             <div className="grid gap-1.5">
-              <Label>实例地址</Label>
+              <Label htmlFor="edgeever-endpoint">实例地址</Label>
               <Input
+                id="edgeever-endpoint"
+                type="url"
                 value={value.edgeEverEndpoint ?? ''}
-                onChange={(event) => patch({ edgeEverEndpoint: event.target.value })}
+                onChange={(event) => patch({ edgeEverEndpoint: event.target.value, edgeEverNotebookLabel: undefined })}
                 placeholder="https://notes.example.com"
               />
             </div>
             <div className="grid gap-1.5">
-              <Label>API Token</Label>
+              <Label htmlFor="edgeever-token">API Token</Label>
               <PasswordInput
+                id="edgeever-token"
                 value={value.edgeEverToken ?? ''}
-                onChange={(event: any) => patch({ edgeEverToken: event.target.value })}
+                onChange={(event) => patch({ edgeEverToken: event.target.value })}
               />
+              <p className="text-xs text-muted-foreground">需要 read:notebooks、read:memos 和 write:memos 权限。</p>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="edgeever-notebook">目标笔记本</Label>
+              <Select
+                value={value.edgeEverNotebookId || 'none'}
+                onValueChange={(id) => patch({
+                  edgeEverNotebookId: id === 'none' ? '' : id,
+                  edgeEverNotebookLabel: edgeEverNotebooks.find((notebook) => notebook.id === id),
+                })}
+              >
+                <SelectTrigger id="edgeever-notebook" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">尚未选择</SelectItem>
+                  {edgeEverNotebooks.map((nb) => (
+                    <SelectItem key={nb.id} value={nb.id}>
+                      {nb.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-wrap gap-2 pt-1">
               <Button
@@ -638,14 +601,15 @@ export function SettingsScreen() {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={edgeEverBusy || !value.edgeEverNotebookId}
+                disabled={edgeEverBusy || !value.edgeEverEnabled || !value.edgeEverNotebookId}
                 onClick={() => {
                   setEdgeEverBusy(true)
                   void api
                     .saveSettings(value)
+                    .then(prepareEdgeEverExcerptChapters)
                     .then(() => api.edgeEverSyncAll())
                     .then((result) => {
-                      if (result.failed) toast.error(result.errors.join('\n'))
+                      if (result.errors.length) toast.error(result.errors.join('\n'))
                       else toast.success(`已同步 ${result.synced} 本，跳过 ${result.skipped} 本`)
                     })
                     .catch((cause) => toast.error(String(cause)))
@@ -657,7 +621,7 @@ export function SettingsScreen() {
             </div>
           </CardContent>
         </Card>
-      ) : null}
+      ) : <EdgeEverStatusCard />}
 
       {/* 6. 设备配对与配置同步 */}
       <Card>

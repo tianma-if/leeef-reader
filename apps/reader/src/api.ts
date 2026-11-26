@@ -29,7 +29,10 @@ export type Excerpt = {
   color: string
   createdAt: string
   bookTitle?: string | null
+  chapter?: ExcerptChapter | null
 }
+
+export type ExcerptChapter = { key: string; title: string }
 
 export type Bookmark = {
   id: string
@@ -79,6 +82,18 @@ export type Settings = {
   edgeEverEndpoint?: string
   edgeEverToken?: string
   edgeEverNotebookId?: string
+  edgeEverNotebookLabel?: EdgeEverNotebook
+}
+
+export type EdgeEverNotebook = { id: string; name: string }
+
+export type EdgeEverStatus = {
+  enabled: boolean
+  configured: boolean
+  notebookSelected: boolean
+  notebookName: string | null
+  targetKey: string | null
+  lastAttempt: { finishedAt: number; succeeded: boolean } | null
 }
 
 export type EdgeEverSyncResult = {
@@ -179,6 +194,7 @@ export const api = {
     quote: string
     note?: string
     color: string
+    chapter?: ExcerptChapter
   }) =>
     invoke<string>('create_excerpt', {
       bookId: input.bookId,
@@ -186,7 +202,10 @@ export const api = {
       quote: input.quote,
       note: input.note ?? null,
       color: input.color,
+      chapter: input.chapter ?? null,
     }),
+  cacheExcerptChapters: (bookId: string, chapters: [string, ExcerptChapter][]) =>
+    invoke<void>('cache_excerpt_chapters', { bookId, chapters }),
   updateExcerpt: (input: {
     id: string
     quote: string
@@ -220,7 +239,8 @@ export const api = {
   getSettings: () => invoke<Settings>('get_settings'),
   saveSettings: (value: Settings) => invoke('save_settings', { value }),
   edgeEverTest: () => invoke<{ ok: boolean; message: string }>('edgeever_test'),
-  edgeEverNotebooks: () => invoke<{ id: string; name: string }[]>('edgeever_notebooks'),
+  edgeEverNotebooks: () => invoke<EdgeEverNotebook[]>('edgeever_notebooks'),
+  edgeEverStatus: () => invoke<EdgeEverStatus>('edgeever_status'),
   edgeEverSyncAll: () => invoke<EdgeEverSyncResult>('edgeever_sync_all'),
   mcpDatabasePath: () => invoke<string>('mcp_database_path'),
   mcpStart: () =>
