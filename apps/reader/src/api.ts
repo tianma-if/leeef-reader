@@ -108,6 +108,7 @@ export type EdgeEverSyncResult = {
 
 export type SettingsSyncStatus = {
   paired: boolean
+  pairedDevices: { id: string; name: string | null }[]
   configured: boolean
   autoSync: boolean
   running: boolean

@@ -1,9 +1,10 @@
 use super::{
-    apply_trusted_snapshot, capture_configuration, configured_backend, decrypt_pairing_snapshot,
-    derive_pairing_key, encrypt_pairing_snapshot, ensure_space, load_devices, load_space,
-    now_millis, pairing_code, pairing_proof, pairing_transport, save_devices, sha256_text,
-    AppState, ConfigurationDocument, DiscoveryRequest, DiscoveryResponse, PairResponse,
-    PairingSnapshot, SyncRuntime, SyncStatus, DISCOVERY_PORT, PAIRING_ALPHABET, PAIRING_TTL,
+    apply_trusted_snapshot, capture_configuration, clean_device_name, configured_backend,
+    decrypt_pairing_snapshot, derive_pairing_key, encrypt_pairing_snapshot, ensure_space,
+    load_space, now_millis, pairing_code, pairing_proof, pairing_transport, sha256_text,
+    update_roster, AppState, ConfigurationDocument, DiscoveryRequest, DiscoveryResponse,
+    PairResponse, PairingSnapshot, SyncRuntime, SyncStatus, DISCOVERY_PORT, PAIRING_ALPHABET,
+    PAIRING_TTL,
 };
 use axum::{
     extract::{DefaultBodyLimit, State},
@@ -118,6 +119,8 @@ struct PairHostState {
 struct PairRequest {
     session_id: String,
     device_id: String,
+    #[serde(default)]
+    device_name: String,
     client_public_key: String,
     proof: String,
 }
@@ -208,19 +211,23 @@ pub async fn start_pairing(state: AppState, runtime: SyncRuntime) -> Result<Pair
     })
 }
 
-fn device_name() -> String {
+pub(super) fn device_name() -> String {
     hostname::get()
         .ok()
         .and_then(|name| name.into_string().ok())
-        .map(|name| {
-            name.trim()
-                .trim_end_matches(".local")
-                .chars()
-                .take(60)
-                .collect()
+        .and_then(|name| clean_device_name(name.trim().trim_end_matches(".local")))
+        .filter(|name| !matches!(name.as_str(), "localhost" | "localhost.localdomain"))
+        .unwrap_or_else(|| {
+            match std::env::consts::OS {
+                "android" => "Android",
+                "ios" => "iPhone / iPad",
+                "macos" => "Mac",
+                "windows" => "Windows",
+                "linux" => "Linux",
+                _ => "Leeef Reader",
+            }
+            .into()
         })
-        .filter(|name: &String| !name.is_empty() && name != "localhost")
-        .unwrap_or_else(|| "Leeef Reader".into())
 }
 
 fn make_qr(peer: &PairingPeer, code: &str) -> Result<PairingQr, String> {
@@ -503,6 +510,9 @@ async fn pair_handler(
     Json(request): Json<PairRequest>,
 ) -> Result<Json<PairResponse>, PairError> {
     check_session(&host.session, &request.session_id)?;
+    if Uuid::parse_str(&request.device_id).is_err() {
+        return Err(bad_request("设备标识无效。".into()));
+    }
     let client_public = request_public_key(&request.client_public_key)?;
     let expected = pairing_proof(
         &host.code,
@@ -516,7 +526,13 @@ async fn pair_handler(
     }
     let shared = shared_secret(&host.secret, client_public).map_err(bad_request)?;
     let key = derive_pairing_key(&shared, &host.code, &request.session_id).map_err(internal)?;
-    complete_pairing(&host, &request.device_id, &key).map(Json)
+    complete_pairing(
+        &host,
+        &request.device_id,
+        clean_device_name(&request.device_name),
+        &key,
+    )
+    .map(Json)
 }
 
 async fn approval_handler(
@@ -533,14 +549,14 @@ async fn approval_handler(
     let (verification, key) =
         approval_keys(&shared, &request.session_id, host_public, client_public)
             .map_err(internal)?;
-    let name = request
-        .device_name
-        .trim()
-        .chars()
-        .take(60)
-        .collect::<String>();
-    wait_for_approval(&host.session, name, verification).await?;
-    complete_pairing(&host, &request.device_id, &key).map(Json)
+    let name = clean_device_name(&request.device_name);
+    wait_for_approval(
+        &host.session,
+        name.clone().unwrap_or_else(|| "未知设备".into()),
+        verification,
+    )
+    .await?;
+    complete_pairing(&host, &request.device_id, name, &key).map(Json)
 }
 
 struct PendingRequest<'a> {
@@ -607,6 +623,7 @@ async fn wait_for_approval(
 fn complete_pairing(
     host: &PairHostState,
     device_id: &str,
+    device_name: Option<String>,
     key: &[u8; 32],
 ) -> Result<PairResponse, PairError> {
     let mut completed = host
@@ -619,23 +636,30 @@ fn complete_pairing(
         return Err((StatusCode::CONFLICT, "这次配对邀请已使用。".into()));
     }
     let space = ensure_space(&host.app_state).map_err(internal)?;
-    let mut devices = load_devices(&host.app_state).map_err(internal)?;
-    devices.extend([host.app_state.device_id.clone(), device_id.into()]);
-    devices.sort();
-    devices.dedup();
-    let configuration = ConfigurationDocument {
-        version: 1,
-        space_id: space.id.clone(),
-        device_id: host.app_state.device_id.clone(),
-        entries: capture_configuration(&host.app_state).map_err(internal)?,
-    };
-    let snapshot = PairingSnapshot {
-        space,
-        devices,
-        configuration,
-    };
-    let response = encrypt_pairing_snapshot(&snapshot, key).map_err(internal)?;
-    save_devices(&host.app_state, &snapshot.devices).map_err(internal)?;
+    let entries = capture_configuration(&host.app_state).map_err(internal)?;
+    let response = update_roster(&host.app_state, &space, |devices, names| {
+        devices.extend([host.app_state.device_id.clone(), device_id.into()]);
+        if let Some(name) = device_name {
+            names.insert(device_id.into(), name);
+        }
+        names.insert(
+            host.app_state.device_id.clone(),
+            host.session.peer.name.clone(),
+        );
+        let snapshot = PairingSnapshot {
+            space: space.clone(),
+            devices: devices.iter().cloned().collect(),
+            configuration: ConfigurationDocument {
+                version: 1,
+                space_id: space.id.clone(),
+                device_id: host.app_state.device_id.clone(),
+                device_names: names.clone(),
+                entries,
+            },
+        };
+        encrypt_pairing_snapshot(&snapshot, key)
+    })
+    .map_err(internal)?;
     *completed = true;
     host.runtime.trigger();
     host.session.cancellation.cancel();
@@ -697,6 +721,7 @@ fn code_request(
     Ok(PairRequest {
         session_id: session_id.into(),
         device_id: state.device_id.clone(),
+        device_name: device_name(),
         client_public_key: URL_SAFE_NO_PAD.encode(public_key),
         proof: pairing_proof(code, session_id, &state.device_id, &public_key)?,
     })
@@ -844,7 +869,7 @@ fn apply_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db;
+    use crate::{db, trusted_sync::load_devices};
     use tokio::net::TcpStream;
 
     #[test]
@@ -878,7 +903,9 @@ mod tests {
         let phone = db::open(home.path().join("phone")).unwrap();
         let space = ensure_space(&desktop).unwrap();
         let runtime = SyncRuntime::default();
-        let offer = start_pairing(desktop, runtime.clone()).await.unwrap();
+        let offer = start_pairing(desktop.clone(), runtime.clone())
+            .await
+            .unwrap();
         let session = current_session(&runtime, &offer.session_id)
             .unwrap()
             .unwrap();
@@ -892,6 +919,16 @@ mod tests {
                 .await
                 .unwrap();
         assert!(result.paired);
+        assert_eq!(result.paired_devices.len(), 1);
+        assert_eq!(result.paired_devices[0].id, desktop.device_id);
+        assert_eq!(
+            result.paired_devices[0].name.as_deref(),
+            Some(session.peer.name.as_str())
+        );
+        let host_status = runtime.status(&desktop);
+        assert_eq!(host_status.paired_devices.len(), 1);
+        assert_eq!(host_status.paired_devices[0].id, phone.device_id);
+        assert!(host_status.paired_devices[0].name.is_some());
         assert_eq!(load_space(&phone).unwrap().unwrap().id, space.id);
         assert!(
             pairing_status(&runtime, &offer.session_id)
@@ -968,6 +1005,11 @@ mod tests {
                     apply_response(&phone, &SyncRuntime::default(), &response, &key, false)
                         .unwrap();
                 assert!(joined.paired);
+                let host_status = runtime.status(&desktop);
+                assert_eq!(
+                    host_status.paired_devices[0].name.as_deref(),
+                    Some("Test phone")
+                );
                 assert_eq!(load_space(&phone).unwrap().unwrap().id, space.id);
                 assert_eq!(
                     super::super::settings_object(&phone).unwrap()["aiKey"],

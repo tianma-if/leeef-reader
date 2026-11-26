@@ -6,6 +6,7 @@ import {
   Database,
   Eye,
   EyeOff,
+  MonitorSmartphone,
   NotebookPen,
   Palette,
   Save,
@@ -129,6 +130,7 @@ export function SettingsScreen() {
   }, [])
 
   const patch = (next: Partial<Settings>) => setValue((current) => ({ ...current, ...next }))
+  const pairedDevices = syncStatus?.pairedDevices ?? []
 
   const handleSave = () => {
     void api.saveSettings(value).then(async () => {
@@ -167,6 +169,26 @@ export function SettingsScreen() {
             onStatus={setSyncStatus}
             onImported={() => void api.getSettings().then(setValue).catch(() => undefined)}
           />
+          <section aria-labelledby="paired-devices-title" className="space-y-2 rounded-lg border p-3">
+            <h3 id="paired-devices-title" className="text-sm font-semibold">已配对设备</h3>
+            {pairedDevices.length > 0 ? (
+              <ul className="divide-y">
+                {pairedDevices.map((device) => (
+                  <li key={device.id} className="flex items-start gap-2 py-2 text-sm first:pt-0 last:pb-0">
+                    <MonitorSmartphone className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <span className="min-w-0 break-words">
+                      {device.name || '未知设备'}
+                      {(!device.name || pairedDevices.some((peer) => peer.id !== device.id && peer.name === device.name)) && (
+                        <span className="ml-1.5 text-xs text-muted-foreground"> {device.id.slice(0, 8)}</span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-muted-foreground">{syncStatus ? '暂无已配对设备。' : '尚未取得设备列表。'}</p>
+            )}
+          </section>
           <SyncCenter status={syncStatus} onStatus={setSyncStatus} />
         </CardContent>
       </Card>

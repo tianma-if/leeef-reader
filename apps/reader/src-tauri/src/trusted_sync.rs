@@ -39,6 +39,7 @@ pub use pairing::{
 
 const SPACE_KEY: &str = "trusted_sync_space";
 const DEVICES_KEY: &str = "trusted_sync_devices";
+const DEVICE_NAMES_KEY: &str = "trusted_sync_device_names";
 const VERSIONS_KEY: &str = "trusted_sync_settings_versions";
 const PREVIOUS_BACKEND_KEY: &str = "trusted_sync_previous_backend";
 const DISCOVERY_PORT: u16 = 43781;
@@ -105,6 +106,8 @@ struct ConfigurationDocument {
     version: u8,
     space_id: String,
     device_id: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    device_names: BTreeMap<String, String>,
     entries: BTreeMap<String, ConfigurationEntry>,
 }
 
@@ -149,6 +152,8 @@ struct RecoveryPayload {
 #[serde(rename_all = "camelCase")]
 pub struct SyncStatus {
     pub paired: bool,
+    #[serde(default)]
+    pub paired_devices: Vec<PairedDevice>,
     pub configured: bool,
     pub auto_sync: bool,
     pub running: bool,
@@ -159,6 +164,13 @@ pub struct SyncStatus {
     pub library_enabled: bool,
     pub pending_records: Option<usize>,
     pub progress: SyncProgress,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairedDevice {
+    id: String,
+    name: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -242,7 +254,7 @@ impl SyncRuntime {
             .and_then(|s| s.get("syncLibrary").and_then(Value::as_bool))
             .unwrap_or(false);
         status.pending_records = library_sync::pending_count(state).ok();
-        status.paired = load_space(state).ok().flatten().is_some();
+        refresh_paired_devices(state, &mut status);
         status.configured = configured_backend(state).is_ok();
         status.auto_sync = auto_sync_enabled(state);
         status
@@ -327,7 +339,7 @@ async fn run_and_publish(app: &AppHandle, state: &AppState, runtime: &SyncRuntim
     let result = configuration.and_then(|count| library.map(|applied| count + applied));
     if let Ok(mut status) = runtime.status.lock() {
         status.running = false;
-        status.paired = load_space(state).ok().flatten().is_some();
+        refresh_paired_devices(state, &mut status);
         status.configured = configured_backend(state).is_ok();
         status.auto_sync = auto_sync_enabled(state);
         match result {
@@ -544,18 +556,35 @@ fn apply_trusted_snapshot(
     snapshot.space.key_bytes()?;
     let mut db = state.db.lock().map_err(|error| error.to_string())?;
     let tx = db.transaction().map_err(|error| error.to_string())?;
-    if decode_space(db::kv_get_on(&tx, SPACE_KEY)?)?
-        .is_some_and(|existing| existing.id != snapshot.space.id)
-    {
+    let existing = decode_space(db::kv_get_on(&tx, SPACE_KEY)?)?;
+    let same_space = existing
+        .as_ref()
+        .is_some_and(|space| space.id == snapshot.space.id);
+    if existing.is_some() && !same_space {
         if !replace_existing {
             return Err("当前设备已加入另一个同步空间，请确认替换后重试。".into());
         }
         db::kv_delete_on(&tx, PREVIOUS_BACKEND_KEY)?;
     }
-    let mut devices = snapshot.devices;
-    devices.push(state.device_id.clone());
-    devices.sort();
-    devices.dedup();
+    let mut devices = if same_space {
+        load_devices_on(&tx)?
+    } else {
+        BTreeSet::new()
+    };
+    devices.extend(snapshot.devices);
+    devices.insert(state.device_id.clone());
+    let mut names = if same_space {
+        load_device_names(&tx)?
+    } else {
+        BTreeMap::new()
+    };
+    for (id, name) in &snapshot.configuration.device_names {
+        if devices.contains(id) {
+            if let Some(name) = clean_device_name(name) {
+                names.insert(id.clone(), name);
+            }
+        }
+    }
     let current = decode_settings(db::kv_get_on(&tx, "settings")?);
     let (settings, versions, changed) = pairing_configuration(current, snapshot.configuration);
     db::kv_set_on(
@@ -563,11 +592,7 @@ fn apply_trusted_snapshot(
         SPACE_KEY,
         &serde_json::to_string(&snapshot.space).map_err(|error| error.to_string())?,
     )?;
-    db::kv_set_on(
-        &tx,
-        DEVICES_KEY,
-        &serde_json::to_string(&devices).map_err(|error| error.to_string())?,
-    )?;
+    write_roster(&tx, &devices, &names)?;
     db::kv_set_on(&tx, "settings", &Value::Object(settings).to_string())?;
     db::kv_set_on(
         &tx,
@@ -583,13 +608,7 @@ async fn synchronize(state: &AppState) -> Result<usize, String> {
         return Ok(0);
     };
     let backend = configured_backend(state)?;
-    let entries = capture_configuration(state)?;
-    let own = ConfigurationDocument {
-        version: 1,
-        space_id: space.id.clone(),
-        device_id: state.device_id.clone(),
-        entries,
-    };
+    let own = configuration_document(state, &space)?;
     let own_path = configuration_path(&space.id, &state.device_id);
     backend
         .put(&own_path, &encrypt_document(&own, &space.key_bytes()?)?)
@@ -611,20 +630,19 @@ async fn synchronize(state: &AppState) -> Result<usize, String> {
         let path = configuration_path(&space.id, &device_id);
         if let Some(bytes) = backend.get(&path).await? {
             let document: ConfigurationDocument = decrypt_document(&bytes, &space.key_bytes()?)?;
-            if document.space_id == space.id && document.device_id == device_id {
+            if document.version == 1
+                && document.space_id == space.id
+                && document.device_id == device_id
+            {
                 documents.push(document);
             }
         }
     }
+    remember_configuration_devices(state, &space, &documents)?;
     let changed = merge_configuration(state, documents)?;
 
     // Publish the merged view so another device can converge in one later pull.
-    let merged = ConfigurationDocument {
-        version: 1,
-        space_id: space.id.clone(),
-        device_id: state.device_id.clone(),
-        entries: capture_configuration(state)?,
-    };
+    let merged = configuration_document(state, &space)?;
     backend
         .put(&own_path, &encrypt_document(&merged, &space.key_bytes()?)?)
         .await?;
@@ -812,7 +830,10 @@ async fn synchronize_library_with_progress(
         progress(report, "downloading", completed + 1, total, None);
     }
     progress(report, "merging", 0, 0, None);
-    save_devices(state, &devices.into_iter().collect::<Vec<_>>())?;
+    update_roster(state, &space, |known, _| {
+        known.extend(devices);
+        Ok(())
+    })?;
     // The next snapshot relays merged versions with their original clocks.
     // Finish network I/O before committing so a failed upload never hides applied changes.
     library_sync::merge(state, &records, &assets.into_values().collect::<Vec<_>>())
@@ -880,12 +901,7 @@ pub fn export_recovery(state: &AppState, password: &str) -> Result<String, Strin
     let payload = RecoveryPayload {
         version: 1,
         created_at: now_millis(),
-        configuration: ConfigurationDocument {
-            version: 1,
-            space_id: space.id.clone(),
-            device_id: state.device_id.clone(),
-            entries: capture_configuration(state)?,
-        },
+        configuration: configuration_document(state, &space)?,
         space,
         devices,
     };
@@ -1404,9 +1420,11 @@ fn ensure_space(state: &AppState) -> Result<SpaceState, String> {
         SPACE_KEY,
         &serde_json::to_string(&space).map_err(|error| error.to_string())?,
     )?;
-    let devices = serde_json::to_string(std::slice::from_ref(&state.device_id))
-        .map_err(|error| error.to_string())?;
-    db::kv_set_on(&tx, DEVICES_KEY, &devices)?;
+    write_roster(
+        &tx,
+        &BTreeSet::from([state.device_id.clone()]),
+        &BTreeMap::new(),
+    )?;
     tx.commit().map_err(|error| error.to_string())?;
     Ok(space)
 }
@@ -1427,12 +1445,144 @@ fn load_devices(state: &AppState) -> Result<Vec<String>, String> {
         .unwrap_or_else(|| vec![state.device_id.clone()]))
 }
 
-fn save_devices(state: &AppState, devices: &[String]) -> Result<(), String> {
-    db::kv_set(
-        state,
+fn load_devices_on(db: &rusqlite::Connection) -> Result<BTreeSet<String>, String> {
+    Ok(db::kv_get_on(db, DEVICES_KEY)?
+        .and_then(|value| serde_json::from_str(&value).ok())
+        .unwrap_or_default())
+}
+
+fn load_device_names(db: &rusqlite::Connection) -> Result<BTreeMap<String, String>, String> {
+    Ok(db::kv_get_on(db, DEVICE_NAMES_KEY)?
+        .and_then(|value| serde_json::from_str(&value).ok())
+        .unwrap_or_default())
+}
+
+fn clean_device_name(name: &str) -> Option<String> {
+    let name: String = name
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(60)
+        .collect();
+    (!name.is_empty()).then_some(name)
+}
+
+fn check_roster_space(db: &rusqlite::Connection, space: &SpaceState) -> Result<(), String> {
+    if decode_space(db::kv_get_on(db, SPACE_KEY)?)?.is_some_and(|current| current.id == space.id) {
+        Ok(())
+    } else {
+        Err("同步空间已更换，请重试。".into())
+    }
+}
+
+fn configuration_document(
+    state: &AppState,
+    space: &SpaceState,
+) -> Result<ConfigurationDocument, String> {
+    let mut device_names = {
+        let db = state.db.lock().map_err(|error| error.to_string())?;
+        check_roster_space(&db, space)?;
+        load_device_names(&db)?
+    };
+    device_names.insert(state.device_id.clone(), pairing::device_name());
+    Ok(ConfigurationDocument {
+        version: 1,
+        space_id: space.id.clone(),
+        device_id: state.device_id.clone(),
+        device_names,
+        entries: capture_configuration(state)?,
+    })
+}
+
+fn refresh_paired_devices(state: &AppState, status: &mut SyncStatus) {
+    status.paired = false;
+    status.paired_devices.clear();
+    let Ok(db) = state.db.lock() else { return };
+    status.paired = decode_space(db::kv_get_on(&db, SPACE_KEY).ok().flatten())
+        .ok()
+        .flatten()
+        .is_some();
+    if !status.paired {
+        return;
+    }
+    let names = load_device_names(&db).unwrap_or_default();
+    status.paired_devices = load_devices_on(&db)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|id| id != &state.device_id)
+        .map(|id| PairedDevice {
+            name: names.get(&id).cloned(),
+            id,
+        })
+        .collect();
+    status.paired_devices.sort_by(|a, b| {
+        a.name
+            .is_none()
+            .cmp(&b.name.is_none())
+            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+}
+
+fn write_roster(
+    db: &rusqlite::Connection,
+    devices: &BTreeSet<String>,
+    names: &BTreeMap<String, String>,
+) -> Result<(), String> {
+    db::kv_set_on(
+        db,
         DEVICES_KEY,
         &serde_json::to_string(devices).map_err(|e| e.to_string())?,
+    )?;
+    db::kv_set_on(
+        db,
+        DEVICE_NAMES_KEY,
+        &serde_json::to_string(names).map_err(|e| e.to_string())?,
     )
+}
+
+fn update_roster<T>(
+    state: &AppState,
+    space: &SpaceState,
+    update: impl FnOnce(&mut BTreeSet<String>, &mut BTreeMap<String, String>) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut db = state.db.lock().map_err(|error| error.to_string())?;
+    let tx = db.transaction().map_err(|error| error.to_string())?;
+    check_roster_space(&tx, space)?;
+    let mut devices = load_devices_on(&tx)?;
+    let mut names = load_device_names(&tx)?;
+    let result = update(&mut devices, &mut names)?;
+    if devices.len() > 256 {
+        return Err("同步设备数量超出支持范围".into());
+    }
+    write_roster(&tx, &devices, &names)?;
+    tx.commit().map_err(|error| error.to_string())?;
+    Ok(result)
+}
+
+fn remember_configuration_devices(
+    state: &AppState,
+    space: &SpaceState,
+    documents: &[ConfigurationDocument],
+) -> Result<(), String> {
+    update_roster(state, space, |devices, names| {
+        for document in documents {
+            for (id, name) in &document.device_names {
+                if id == &state.device_id || uuid::Uuid::parse_str(id).is_err() {
+                    continue;
+                }
+                if let Some(name) = clean_device_name(name) {
+                    devices.insert(id.clone());
+                    if id == &document.device_id {
+                        names.insert(id.clone(), name);
+                    } else {
+                        names.entry(id.clone()).or_insert(name);
+                    }
+                }
+            }
+        }
+        Ok(())
+    })
 }
 
 fn settings_object(state: &AppState) -> Result<Map<String, Value>, String> {
@@ -1560,6 +1710,7 @@ mod tests {
             version: 1,
             space_id: "space".into(),
             device_id: "remote".into(),
+            device_names: BTreeMap::new(),
             entries: BTreeMap::from([
                 (
                     "theme".into(),
@@ -1609,6 +1760,7 @@ mod tests {
             version: 1,
             space_id: "space".into(),
             device_id: "device".into(),
+            device_names: BTreeMap::new(),
             entries: BTreeMap::new(),
         };
         let bytes = encrypt_document(&document, &[7; 32]).unwrap();
@@ -1668,9 +1820,24 @@ mod tests {
         let package = export_recovery(&source, "twelve-character-password").unwrap();
 
         let target = state("recovery-replace-target");
-        ensure_space(&target).unwrap();
+        let old_space = ensure_space(&target).unwrap();
+        let old_peer = uuid::Uuid::new_v4().to_string();
+        update_roster(&target, &old_space, |devices, names| {
+            devices.insert(old_peer.clone());
+            names.insert(old_peer.clone(), "Old peer".into());
+            Ok(())
+        })
+        .unwrap();
         assert!(import_recovery(&target, &package, "twelve-character-password", false,).is_err());
+        assert_eq!(
+            SyncRuntime::default().status(&target).paired_devices[0].id,
+            old_peer
+        );
         assert!(import_recovery(&target, &package, "twelve-character-password", true,).is_ok());
+        let restored = SyncRuntime::default().status(&target);
+        assert_eq!(restored.paired_devices.len(), 1);
+        assert_eq!(restored.paired_devices[0].id, source.device_id);
+        assert!(restored.paired_devices[0].name.is_some());
     }
 
     #[tokio::test]
@@ -1719,21 +1886,33 @@ mod tests {
         )
         .unwrap();
         let space = ensure_space(&desktop).unwrap();
-        let devices = vec![desktop.device_id.clone(), phone.device_id.clone()];
-        save_devices(&desktop, &devices).unwrap();
+        let devices = serde_json::to_string(&[&desktop.device_id, &phone.device_id]).unwrap();
+        db::kv_set(&desktop, DEVICES_KEY, &devices).unwrap();
         db::kv_set(&phone, SPACE_KEY, &serde_json::to_string(&space).unwrap()).unwrap();
-        save_devices(&phone, &devices).unwrap();
+        db::kv_set(&phone, DEVICES_KEY, &devices).unwrap();
+        let legacy = SyncRuntime::default().status(&phone);
+        assert_eq!(legacy.paired_devices.len(), 1);
+        assert_eq!(legacy.paired_devices[0].id, desktop.device_id);
+        assert!(legacy.paired_devices[0].name.is_none());
         apply_pairing_configuration(
             &phone,
             ConfigurationDocument {
                 version: 1,
-                space_id: space.id,
+                space_id: space.id.clone(),
                 device_id: desktop.device_id.clone(),
+                device_names: BTreeMap::new(),
                 entries: capture_configuration(&desktop).unwrap(),
             },
         )
         .unwrap();
 
+        let tablet_id = uuid::Uuid::new_v4().to_string();
+        update_roster(&desktop, &space, |ids, names| {
+            ids.insert(tablet_id.clone());
+            names.insert(tablet_id.clone(), "Test tablet".into());
+            Ok(())
+        })
+        .unwrap();
         synchronize(&desktop).await.unwrap();
         let mut updated = settings_object(&desktop).unwrap();
         updated.insert("theme".into(), Value::String("night".into()));
@@ -1741,6 +1920,16 @@ mod tests {
         synchronize(&desktop).await.unwrap();
         assert_eq!(synchronize(&phone).await.unwrap(), 1);
         assert_eq!(settings_object(&phone).unwrap()["theme"], "night");
+        let synced = SyncRuntime::default().status(&phone);
+        assert_eq!(synced.paired_devices.len(), 2);
+        assert!(synced
+            .paired_devices
+            .iter()
+            .any(|device| device.id == desktop.device_id && device.name.is_some()));
+        assert!(synced
+            .paired_devices
+            .iter()
+            .any(|device| device.id == tablet_id && device.name.as_deref() == Some("Test tablet")));
 
         let mut migrated = settings_object(&desktop).unwrap();
         migrated.insert("theme".into(), Value::String("sepia".into()));
