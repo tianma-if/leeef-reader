@@ -699,16 +699,43 @@ mod tests {
             )
             .unwrap();
         }
-        let output = ExcerptNote::new(
-            book.author.as_deref(),
-            &db::list_excerpts(&state, Some(&book.id)).unwrap(),
-        )
-        .markdown;
-        assert!(output
-            .contains("### 第一章\n\n> 第一段\n>\n> 第二段\n\n**批注** 我的批注\n\n> 补划的书摘"));
-        assert!(output.contains("> 补划的书摘\n\n### 第三章\n\n> 后面的章节"));
+        let mut excerpts = db::list_excerpts(&state, Some(&book.id)).unwrap();
+        for excerpt in &mut excerpts {
+            excerpt.created_at = match excerpt.quote.as_str() {
+                "补划的书摘" => "2026-11-27T01:41:05+08:00",
+                _ => "1795714865",
+            }
+            .into();
+        }
+        let note = ExcerptNote::new(book.author.as_deref(), &excerpts);
+        let instant = time::macros::datetime!(2026-11-26 17:41:05 UTC);
+        let local = instant.to_offset(time::UtcOffset::local_offset_at(instant).unwrap());
+        let timestamp = format!(
+            "摘录于 {:04}-{:02}-{:02}",
+            local.year(),
+            u8::from(local.month()),
+            local.day(),
+        );
+        let output = note.markdown;
+        assert!(output.contains(&format!(
+            "### 第一章\n\n> 第一段\n>\n> 第二段\n>\n> {timestamp}\n\n**批注** 我的批注\n\n> 补划的书摘"
+        )));
+        assert!(output.contains(&format!(
+            "> 补划的书摘\n>\n> {timestamp}\n\n### 第三章\n\n> 后面的章节"
+        )));
+        assert_eq!(output.matches("> 摘录于 ").count(), 3);
+        let timestamps: Vec<_> = note
+            .nodes
+            .iter()
+            .filter(|node| node["type"] == "blockquote")
+            .map(|node| {
+                let footer = node["content"].as_array().unwrap().last().unwrap();
+                footer["content"][0]["text"].as_str().unwrap()
+            })
+            .collect();
+        assert_eq!(timestamps, [timestamp.as_str(); 3]);
         assert_eq!(output.matches("### 第一章").count(), 1);
-        for omitted in ["页码", "读后感", "摘录于"] {
+        for omitted in ["页码", "读后感"] {
             assert!(!output.contains(omitted));
         }
     }
@@ -784,7 +811,11 @@ mod tests {
                         assert_eq!(body["format"], "markdown");
                         assert_eq!(body["items"][0]["externalId"], digest("book"));
                         assert_eq!(body["items"][0]["title"], "同步测试");
-                        assert!(body["items"][0]["contentMarkdown"].as_str().unwrap().contains("> 原文"));
+                        let markdown = body["items"][0]["contentMarkdown"].as_str().unwrap();
+                        let timestamp = markdown.lines()
+                            .find_map(|line| line.strip_prefix("> ").filter(|text| text.starts_with("摘录于 ")))
+                            .expect("timestamp in the first import");
+                        assert!(markdown.contains("> 原文\n>\n"));
                         mock.import_notebooks.lock().unwrap().push(body["notebookId"].as_str().unwrap().to_string());
                         if mock.fail_next_import.swap(false, Ordering::SeqCst) {
                             return StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -796,7 +827,10 @@ mod tests {
                         mock.creates.fetch_add(1, Ordering::SeqCst);
                         let mut nodes = ExcerptNote::new(None, &[]).nodes;
                         nodes.insert(2, json!({
-                            "type": "blockquote", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "原文" }] }]
+                            "type": "blockquote", "content": [
+                                { "type": "paragraph", "content": [{ "type": "text", "text": "原文" }] },
+                                { "type": "paragraph", "content": [{ "type": "text", "text": timestamp }] },
+                            ]
                         }));
                         *memo = json!({
                             "id": "memo-1", "revision": 1, "contentHash": "remote-hash-1",
@@ -877,6 +911,9 @@ mod tests {
         let excerpt_id =
             db::upsert_excerpt(&state, &book.id, "epubcfi(/6/2)", "原文", None, "yellow")
                 .expect("create excerpt");
+        let created_at = db::list_excerpts(&state, Some(&book.id)).unwrap()[0]
+            .created_at
+            .clone();
 
         let draft = serde_json::from_value(settings.clone()).unwrap();
         notebooks(&state, Some(draft)).await.unwrap();
@@ -999,9 +1036,25 @@ mod tests {
         assert!(status(&state).unwrap().last_attempt.unwrap().succeeded);
         assert!(db::pending_edgeever_books(&state).unwrap().is_empty());
         assert!(!sync_book(&state, &book.id).await.expect("unchanged note"));
-        assert!(mock.memo.lock().unwrap()["contentJson"]
-            .to_string()
-            .contains("新增笔记"));
+        assert_eq!(
+            db::list_excerpts(&state, Some(&book.id)).unwrap()[0].created_at,
+            created_at
+        );
+        {
+            let memo = mock.memo.lock().unwrap();
+            let blocks = memo["contentJson"]["content"].as_array().unwrap();
+            let quote = blocks
+                .iter()
+                .find(|block| block["type"] == "blockquote")
+                .unwrap();
+            let footer = quote["content"].as_array().unwrap().last().unwrap();
+            let markdown = memo["contentMarkdown"].as_str().unwrap();
+            let timestamp = footer["content"][0]["text"].as_str().unwrap();
+            assert!(timestamp.starts_with("摘录于 "));
+            assert!(markdown.contains(&format!(
+                "> 修改后的原文\n>\n> {timestamp}\n\n**批注** 新增笔记"
+            )));
+        }
         db::delete_excerpt(&state, &excerpt_id).unwrap();
         assert!(sync_book(&state, &book.id)
             .await

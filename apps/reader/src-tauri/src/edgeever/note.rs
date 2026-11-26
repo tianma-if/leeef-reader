@@ -1,7 +1,8 @@
 use crate::cfi::position;
-use crate::db::Excerpt;
+use crate::db::{parse_stored_time, Excerpt};
 use serde_json::{json, Value};
 use std::{cmp::Ordering, ops::Range};
+use time::{macros::format_description, UtcOffset};
 
 const HEADING: &str = "书摘";
 const SOURCE: &str = "来自 Leeef Reader";
@@ -69,6 +70,16 @@ fn escape_markdown(value: &str) -> String {
     escaped
 }
 
+fn excerpt_timestamp(created_at: &str) -> Option<String> {
+    let date = parse_stored_time(created_at)?;
+    let offset = UtcOffset::local_offset_at(date).ok()?;
+    let date = date
+        .checked_to_offset(offset)?
+        .format(format_description!("[year]-[month]-[day]"))
+        .ok()?;
+    Some(format!("摘录于 {date}"))
+}
+
 impl ExcerptNote {
     pub fn new(author: Option<&str>, excerpts: &[Excerpt]) -> Self {
         let mut ordered: Vec<_> = excerpts
@@ -110,11 +121,10 @@ impl ExcerptNote {
 
             let quote = lines(&excerpt.quote);
             let quote = quote.trim_matches('\n');
-            let paragraphs: Vec<_> = quote
+            let mut paragraphs: Vec<_> = quote
                 .split("\n\n")
                 .map(|section| paragraph(inline_lines(section)))
                 .collect();
-            nodes.push(json!({ "type": "blockquote", "content": paragraphs }));
             let mut quote_lines = quote.split('\n').peekable();
             let mut quoted_markdown = Vec::new();
             while let Some(line) = quote_lines.next() {
@@ -130,6 +140,12 @@ impl ExcerptNote {
                 };
                 quoted_markdown.push(line);
             }
+            if let Some(timestamp) = excerpt_timestamp(&excerpt.created_at) {
+                paragraphs.push(paragraph(vec![text(&timestamp)]));
+                quoted_markdown.push(">".into());
+                quoted_markdown.push(format!("> {timestamp}"));
+            }
+            nodes.push(json!({ "type": "blockquote", "content": paragraphs }));
             markdown.push(quoted_markdown.join("\n"));
 
             if let Some(note) = excerpt

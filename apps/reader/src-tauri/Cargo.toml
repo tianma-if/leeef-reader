@@ -40,7 +40,7 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["rt"] }
-time = { version = "0.3", features = ["formatting", "macros", "parsing"] }
+time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 roxmltree = "0.21"
 urlencoding = "2"
 axum = "0.8"

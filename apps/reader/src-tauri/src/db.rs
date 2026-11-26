@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -108,6 +109,14 @@ pub struct Session {
 pub fn now() -> String {
     // Keep ISO-8601 text like Drift/MCP tests.
     chrono_like()
+}
+
+pub(crate) fn parse_stored_time(value: &str) -> Option<OffsetDateTime> {
+    value
+        .parse::<i64>()
+        .ok()
+        .and_then(|seconds| OffsetDateTime::from_unix_timestamp(seconds).ok())
+        .or_else(|| OffsetDateTime::parse(value, &Rfc3339).ok())
 }
 
 fn chrono_like() -> String {

@@ -172,14 +172,6 @@ fn required_time(value: &str, field: &str) -> Result<OffsetDateTime, String> {
         .map_err(|_| format!("{field} must be an RFC 3339 timestamp with a timezone"))
 }
 
-fn stored_time(value: &str) -> Option<OffsetDateTime> {
-    value
-        .parse::<i64>()
-        .ok()
-        .and_then(|seconds| OffsetDateTime::from_unix_timestamp(seconds).ok())
-        .or_else(|| OffsetDateTime::parse(value, &Rfc3339).ok())
-}
-
 fn has_note(excerpt: &Excerpt) -> bool {
     excerpt
         .note
@@ -270,7 +262,7 @@ pub(super) fn search_excerpts(
                 return None;
             }
             if from.is_some() || to.is_some() {
-                let created = stored_time(&excerpt.created_at)?;
+                let created = db::parse_stored_time(&excerpt.created_at)?;
                 if from.is_some_and(|from| created < from) || to.is_some_and(|to| created >= to) {
                     return None;
                 }
@@ -366,8 +358,8 @@ pub(super) fn activity(
             continue;
         }
         let (Some(start), Some(end)) = (
-            stored_time(&session.started_at),
-            stored_time(&session.ended_at),
+            db::parse_stored_time(&session.started_at),
+            db::parse_stored_time(&session.ended_at),
         ) else {
             continue;
         };
@@ -387,8 +379,8 @@ pub(super) fn activity(
         if !books.contains_key(&excerpt.book_id) {
             continue;
         }
-        let Some(created) =
-            stored_time(&excerpt.created_at).filter(|created| *created >= from && *created < to)
+        let Some(created) = db::parse_stored_time(&excerpt.created_at)
+            .filter(|created| *created >= from && *created < to)
         else {
             continue;
         };
