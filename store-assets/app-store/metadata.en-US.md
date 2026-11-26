@@ -34,4 +34,4 @@ Some online features require a network connection. S3/WebDAV uses storage you pr
 
 ## Review Notes
 
-No account is required. Complete the three-page onboarding, tap Import Books, and select an EPUB, PDF, TXT, MOBI, AZW3, or FB2 file from Files. iOS does not present object-storage, AI, or cloud TTS API-key or provider configuration. Those settings are made on a computer and reach the phone after scanning a pairing QR code or through trusted-device / cloud sync. Reviewers do not need to configure third-party AI or cloud storage. S3/WebDAV and OPDS are optional and are not required for core offline reading.
+No account is required. Complete the three-page onboarding, tap Import Books, and select an EPUB, PDF, TXT, MOBI, AZW3, or FB2 file from Files. iOS does not present object-storage, AI, or cloud TTS API-key or provider configuration. Those settings are made on a computer and reach the phone after scanning a pairing QR code or through trusted-device / cloud sync. Reviewers do not need to configure third-party AI or cloud storage. S3/WebDAV sync is optional.

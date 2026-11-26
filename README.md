@@ -69,7 +69,6 @@ The previous Flutter client does not auto-update to this app, and libraries are 
 - **Reading chrome you can live with**: Font size, line height, one or two columns, paper / sepia / night, and Simplified / Traditional Chinese conversion.
 - **Excerpts, bookmarks, and notes**: Highlights and bookmarks stay attached to the book; the notes tab filters by book, type, and color.
 - **Reading stats**: Time spent, reading days, books finished, and time spent by book.
-- **OPDS catalogs**: Browse and download from OPDS feeds you configure.
 - **Bring-your-own AI**: Desktop settings take an OpenAI-compatible endpoint, API key, and model (OpenAI, DeepSeek, OpenRouter, xAI, and similar). Chat streams in-process. The model can list and search the local library; writes wait for confirmation.
 - **In-process MCP**: Start the library MCP server from Settings. It binds loopback HTTP against the same `leeef.sqlite` the reader uses. Agents can list books, extract text, search excerpts, and apply confirmed writes.
 - **Trusted-device recovery**: Object storage, AI, and similar secrets are filled in on the computer. Any trusted phone or computer can pair a replacement device, while an Argon2id-protected recovery package covers loss of every device.
@@ -171,7 +170,7 @@ The Leeef Reader name, logo, and other brand identifiers distinguish the officia
 
 Leeef Reader is an independent open-source application. It is not affiliated with, authorized, sponsored, or endorsed by Amazon, Apple, Google, or any ebook store.
 
-Leeef does not host your library. Content you import is your responsibility. Optional third-party AI, TTS, OPDS, and object-storage services are operated by those providers under their own terms.
+Leeef does not host your library. Content you import is your responsibility. Optional third-party AI, TTS, and object-storage services are operated by those providers under their own terms.
 
 ## License
 

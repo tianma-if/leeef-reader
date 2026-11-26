@@ -23,6 +23,5 @@ Highlights:
 • System or user-configured cloud text-to-speech
 • User-configured AI for explanations, translation, summaries, and questions
 • User-configured S3 or WebDAV sync for books, progress, highlights, and shelves
-• OPDS catalog browsing and downloads
 
 Configure object storage, AI, and cloud TTS on a computer, then scan a pairing QR code on the phone; the Android app does not collect those credentials. Leeef keeps books and reading data on your device by default. It requires no Leeef account and includes no advertising or cross-app tracking. Online features require a network connection and third-party accounts or API credentials supplied by you.

@@ -3,7 +3,6 @@ import {
   BarChart3,
   BookOpen,
   Bot,
-  Rss,
   Settings,
   StickyNote,
 } from 'lucide-react'
@@ -11,7 +10,6 @@ import { api, type Book } from './api'
 import { Button } from '@/components/ui/button'
 import { LibraryScreen } from './library/LibraryScreen'
 import { NotesScreen } from './notes/NotesScreen'
-import { OpdsScreen } from './opds/OpdsScreen'
 import { ReaderView } from './reader/ReaderView'
 import { SettingsScreen } from './settings/SettingsScreen'
 import { StatsScreen } from './stats/StatsScreen'
@@ -23,13 +21,12 @@ const AiScreen = lazy(() =>
   import('./ai/AiScreen').then((module) => ({ default: module.AiScreen })),
 )
 
-type Tab = 'library' | 'notes' | 'stats' | 'opds' | 'ai' | 'settings'
+type Tab = 'library' | 'notes' | 'stats' | 'ai' | 'settings'
 
 const tabs: { id: Tab; label: string; icon: typeof BookOpen }[] = [
   { id: 'library', label: '书架', icon: BookOpen },
   { id: 'notes', label: '笔记', icon: StickyNote },
   { id: 'stats', label: '统计', icon: BarChart3 },
-  { id: 'opds', label: 'OPDS', icon: Rss },
   { id: 'ai', label: 'AI', icon: Bot },
   { id: 'settings', label: '设置', icon: Settings },
 ]
@@ -125,7 +122,6 @@ function App() {
               />
             ) : null}
             {tab === 'stats' ? <StatsScreen /> : null}
-            {tab === 'opds' ? <OpdsScreen /> : null}
             {tab === 'ai' ? (
               <Suspense fallback={<p className="text-muted-foreground px-4 pt-8">加载 AI…</p>}>
                 <AiScreen onNavigateToSettings={() => setTab('settings')} />

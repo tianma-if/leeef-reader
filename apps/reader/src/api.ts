@@ -63,7 +63,6 @@ export type Settings = {
   aiEndpoint?: string
   aiKey?: string
   aiModel?: string
-  opdsCatalogs?: { name: string; url: string }[]
   syncBackend?: 's3' | 'webdav' | ''
   syncEndpoint?: string
   syncUsername?: string

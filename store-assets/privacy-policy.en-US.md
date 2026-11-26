@@ -18,7 +18,7 @@ Data leaves your device only when you configure or use one of these features, an
 - **S3 or WebDAV sync:** book files, covers, reading progress, shelves, tags, bookmarks, highlights, notes, statistics, sync metadata, and end-to-end encrypted portable settings and service credentials are uploaded to storage you provide.
 - **AI assistant and translation:** submitted text, questions, and selected book or chapter context are sent to the AI provider you configure. Leeef supports user-provided API endpoints and keys.
 - **Cloud text-to-speech:** text selected for narration is sent to the voice provider you configure. System text-to-speech is generally handled within operating-system capabilities.
-- **OPDS and online catalogs:** search terms, catalog requests, and download requests are sent to the OPDS service you access.
+- **OPDS catalogs in older versions:** when you browse or download books from a catalog, requests go to the OPDS service you access.
 - **External search, sharing, and export:** data is handled by the destination app, website, or system sharing service only when you initiate the action.
 
 Those services are independently operated. Their privacy policies and your account settings govern their use, retention, and protection of data. Configure only services you trust.

@@ -382,7 +382,10 @@ pub fn save_settings(state: &AppState, value: Value) -> Result<(), String> {
 }
 
 fn portable_key(key: &str) -> bool {
-    !matches!(key, "autoSync" | "syncLastError" | "syncLastSuccessAt")
+    !matches!(
+        key,
+        "autoSync" | "syncLastError" | "syncLastSuccessAt" | "opdsCatalogs"
+    )
 }
 
 fn auto_sync_enabled(state: &AppState) -> bool {
@@ -1707,10 +1710,13 @@ mod tests {
         let state = state("merge");
         save_settings(
             &state,
-            serde_json::json!({"theme":"paper","fontSize":18,"autoSync":true}),
+            serde_json::json!({
+                "theme": "paper", "fontSize": 18, "autoSync": true, "opdsCatalogs": []
+            }),
         )
         .unwrap();
         let local = capture_configuration(&state).unwrap();
+        assert!(!local.contains_key("opdsCatalogs"));
         let timestamp = local["theme"].modified_at + 10;
         let remote = ConfigurationDocument {
             version: 1,
@@ -1741,6 +1747,14 @@ mod tests {
                         modified_by: "remote".into(),
                     },
                 ),
+                (
+                    "opdsCatalogs".into(),
+                    ConfigurationEntry {
+                        value: serde_json::json!([{"name": "Legacy", "url": "https://example.com"}]),
+                        modified_at: timestamp,
+                        modified_by: "remote".into(),
+                    },
+                ),
             ]),
         };
         assert_eq!(merge_configuration(&state, [remote]).unwrap(), 2);
@@ -1748,6 +1762,7 @@ mod tests {
         assert_eq!(settings["theme"], "night");
         assert_eq!(settings["fontSize"], 22);
         assert_eq!(settings["autoSync"], true);
+        assert_eq!(settings["opdsCatalogs"], serde_json::json!([]));
     }
 
     #[test]
