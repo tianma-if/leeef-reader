@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useEffectEvent, useState } from 'react'
+import { onBackButtonPress } from '@tauri-apps/api/app'
 import { listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import {
@@ -8,7 +9,7 @@ import {
   Settings,
   StickyNote,
 } from 'lucide-react'
-import { api, type Book, type ReadingDestination } from './api'
+import { api, isAndroid, type Book, type ReadingDestination } from './api'
 import { Button } from '@/components/ui/button'
 import { LibraryScreen } from './library/LibraryScreen'
 import { NotesScreen } from './notes/NotesScreen'
@@ -40,6 +41,42 @@ function App() {
   const [preview, setPreview] = useState<ReadingDestination | null>(null)
   const [readerVersion, setReaderVersion] = useState(0)
   const [books, setBooks] = useState<Book[]>([])
+  const readerOpen = open !== null || preview !== null
+
+  const closeReader = () => {
+    if (preview) {
+      if (!open) {
+        setPreview(null)
+        return
+      }
+      void api.listBooks().catch(() => [] as Book[]).then((updated) => {
+        setOpen((current) => current === open
+          ? updated.find((book) => book.id === open.id) ?? null
+          : current)
+        setOpenLocator(undefined)
+        setPreview((current) => current === preview ? null : current)
+      })
+      return
+    }
+    if (!open) return
+    setOpen(null)
+    setOpenLocator(undefined)
+    setTab('library')
+  }
+
+  const handleAndroidBack = useEffectEvent(closeReader)
+  useEffect(() => {
+    if (!readerOpen || !isAndroid()) return
+    let disposed = false
+    const subscription = onBackButtonPress(() => {
+      if (!disposed) handleAndroidBack()
+    })
+    void subscription.catch((error) => console.error('Failed to register Android back handler', error))
+    return () => {
+      disposed = true
+      void subscription.then((listener) => listener.unregister()).catch(() => undefined)
+    }
+  }, [readerOpen])
 
   useLibraryRefresh(() => api.listBooks().then(setBooks))
 
@@ -111,30 +148,14 @@ function App() {
           book={preview.book}
           initialLocator={preview.previewLocator ?? undefined}
           preview
-          onClose={() => {
-            if (!open) {
-              setPreview(null)
-              return
-            }
-            void api.listBooks().catch(() => [] as Book[]).then((updated) => {
-              setOpen((current) => current === open
-                ? updated.find((book) => book.id === open.id) ?? null
-                : current)
-              setOpenLocator(undefined)
-              setPreview((current) => current === preview ? null : current)
-            })
-          }}
+          onClose={closeReader}
         />
       ) : open ? (
         <ReaderView
           key={`reading:${open.id}:${readerVersion}`}
           book={open}
           initialLocator={openLocator}
-          onClose={() => {
-            setOpen(null)
-            setOpenLocator(undefined)
-            void api.listBooks().then(setBooks)
-          }}
+          onClose={closeReader}
         />
       ) : (
         <div className="flex h-full min-h-0 flex-col bg-background md:flex-row">
