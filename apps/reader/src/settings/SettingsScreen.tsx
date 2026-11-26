@@ -516,6 +516,7 @@ export function SettingsScreen() {
               checked={value.edgeEverEnabled === true}
               onChange={(edgeEverEnabled) => patch({ edgeEverEnabled })}
             />
+            <p className="text-xs text-muted-foreground">首次开启并保存配置后，已有书摘会自动同步到目标笔记本。</p>
             <div className="grid gap-1.5">
               <Label htmlFor="edgeever-endpoint">实例地址</Label>
               <Input
@@ -565,10 +566,9 @@ export function SettingsScreen() {
                 onClick={() => {
                   setEdgeEverBusy(true)
                   void api
-                    .saveSettings(value)
-                    .then(() => api.edgeEverNotebooks())
+                    .edgeEverNotebooks(value)
                     .then(setEdgeEverNotebooks)
-                    .then(() => api.edgeEverTest())
+                    .then(() => api.edgeEverTest(value))
                     .then((result) => toast.success(result.message))
                     .catch((cause) => toast.error(String(cause)))
                     .finally(() => setEdgeEverBusy(false))
@@ -582,9 +582,8 @@ export function SettingsScreen() {
                 disabled={edgeEverBusy || !value.edgeEverEnabled || !value.edgeEverEndpoint?.trim() || !value.edgeEverToken?.trim()}
                 onClick={() => {
                   setEdgeEverBusy(true)
-                  void api
-                    .saveSettings(value)
-                    .then(prepareEdgeEverExcerptChapters)
+                  void prepareEdgeEverExcerptChapters()
+                    .then(() => api.saveSettings(value))
                     .then(() => api.edgeEverSyncAll())
                     .then((result) => {
                       if (result.errors.length) toast.error(result.errors.join('\n'))

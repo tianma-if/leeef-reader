@@ -11,6 +11,7 @@ pub struct AppState {
     pub db: Arc<Mutex<Connection>>,
     pub root: PathBuf,
     pub device_id: String,
+    pub edgeever_sync_trigger: Arc<tokio::sync::Notify>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -303,6 +304,7 @@ pub fn open(root: PathBuf) -> Result<AppState, String> {
         db: Arc::new(Mutex::new(db)),
         root,
         device_id,
+        edgeever_sync_trigger: Arc::default(),
     })
 }
 
@@ -793,6 +795,18 @@ pub fn queue_edgeever_book(state: &AppState, book_id: &str) -> Result<(), String
          ON CONFLICT(book_id) DO UPDATE SET generation = generation + 1",
         [book_id],
     ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn queue_existing_edgeever_books(db: &Connection) -> Result<(), String> {
+    db.execute(
+        "INSERT INTO edgeever_pending_books (book_id, generation)
+         SELECT DISTINCT e.book_id, 1 FROM excerpts e JOIN books b ON b.id = e.book_id
+         WHERE e.is_deleted = 0 AND b.is_deleted = 0
+         ON CONFLICT(book_id) DO NOTHING",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 

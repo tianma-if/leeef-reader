@@ -387,7 +387,7 @@ pub fn save_settings(state: &AppState, value: Value) -> Result<(), String> {
             &Value::Object(previous).to_string(),
         )?;
     }
-    db::kv_set(state, "settings", &value.to_string())?;
+    crate::edgeever::persist_settings(state, &value)?;
     let _ = capture_configuration(state)?;
     Ok(())
 }

@@ -163,8 +163,11 @@ fn delete_excerpt(state: State<AppState>, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn edgeever_test(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let message = edgeever::test(&state).await?;
+async fn edgeever_test(
+    state: State<'_, AppState>,
+    draft: Option<edgeever::EdgeEverSettings>,
+) -> Result<serde_json::Value, String> {
+    let message = edgeever::test(&state, draft).await?;
     Ok(serde_json::json!({ "ok": true, "message": message }))
 }
 
@@ -179,8 +182,11 @@ fn edgeever_status(state: State<AppState>) -> Result<edgeever::SyncStatus, Strin
 }
 
 #[tauri::command]
-async fn edgeever_notebooks(state: State<'_, AppState>) -> Result<Vec<edgeever::Notebook>, String> {
-    edgeever::notebooks(&state).await
+async fn edgeever_notebooks(
+    state: State<'_, AppState>,
+    draft: Option<edgeever::EdgeEverSettings>,
+) -> Result<Vec<edgeever::Notebook>, String> {
+    edgeever::notebooks(&state, draft).await
 }
 
 #[tauri::command]

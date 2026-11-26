@@ -13,6 +13,7 @@ use std::{
 };
 const IMPORT_ID: &str = "b87b6dfa-1284-4382-9bb5-cea4e59e0ed4";
 const FORMAT_VERSION: &str = "v2:";
+const INITIAL_SYNC_KEY: &str = "edgeever_initial_sync_scheduled";
 
 static SYNC_LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
 
@@ -29,7 +30,7 @@ fn sync_lock(book_id: &str) -> Arc<tokio::sync::Mutex<()>> {
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct EdgeEverSettings {
+pub(crate) struct EdgeEverSettings {
     #[serde(default)]
     edge_ever_enabled: bool,
     #[serde(default)]
@@ -140,7 +141,10 @@ fn load_settings(state: &AppState) -> Result<EdgeEverSettings, String> {
 }
 
 fn config(state: &AppState) -> Result<Option<Config>, String> {
-    let settings = load_settings(state)?;
+    config_from_settings(&load_settings(state)?)
+}
+
+fn config_from_settings(settings: &EdgeEverSettings) -> Result<Option<Config>, String> {
     if !settings.edge_ever_enabled {
         return Ok(None);
     }
@@ -155,6 +159,37 @@ fn config(state: &AppState) -> Result<Option<Config>, String> {
         token: settings.edge_ever_token.trim().to_string(),
         notebook_id: settings.edge_ever_notebook_id.trim().to_string(),
     }))
+}
+
+pub(crate) fn persist_settings(state: &AppState, value: &Value) -> Result<(), String> {
+    let raw = value.to_string();
+    let is_configured = |raw: &str| {
+        serde_json::from_str::<EdgeEverSettings>(raw)
+            .is_ok_and(|settings| matches!(config_from_settings(&settings), Ok(Some(_))))
+    };
+
+    let mut db = state.db.lock().map_err(|e| e.to_string())?;
+    let tx = db.transaction().map_err(|e| e.to_string())?;
+    let mut queued = false;
+    if db::kv_get_on(&tx, INITIAL_SYNC_KEY)?.is_none() {
+        // Treat an already enabled installation as initialized when upgrading.
+        let was_configured = db::kv_get_on(&tx, "settings")?
+            .as_deref()
+            .is_some_and(is_configured);
+        if was_configured || is_configured(&raw) {
+            if !was_configured {
+                db::queue_existing_edgeever_books(&tx)?;
+                queued = true;
+            }
+            db::kv_set_on(&tx, INITIAL_SYNC_KEY, "1")?;
+        }
+    }
+    db::kv_set_on(&tx, "settings", &raw)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    if queued {
+        state.edgeever_sync_trigger.notify_one();
+    }
+    Ok(())
 }
 
 fn instance_base_url(value: &str) -> Result<Url, String> {
@@ -302,8 +337,16 @@ fn inbox_notebook_id(notebooks: &[Notebook]) -> Result<&str, String> {
         .ok_or_else(|| "无法访问 EdgeEver 的「等待分类」，请检查 Token 的笔记本权限或选择其他笔记本".into())
 }
 
-pub async fn test(state: &AppState) -> Result<String, String> {
-    let config = config(state)?.ok_or_else(|| "EdgeEver 同步尚未启用".to_string())?;
+fn command_config(state: &AppState, draft: Option<EdgeEverSettings>) -> Result<Config, String> {
+    match draft {
+        Some(settings) => config_from_settings(&settings),
+        None => config(state),
+    }?
+    .ok_or_else(|| "EdgeEver 同步尚未启用".to_string())
+}
+
+pub(crate) async fn test(state: &AppState, draft: Option<EdgeEverSettings>) -> Result<String, String> {
+    let config = command_config(state, draft)?;
     let client = client()?;
     let notebooks = list_notebooks(&client, &config).await?;
     let notebook_id = if config.notebook_id.is_empty() {
@@ -319,8 +362,11 @@ pub async fn test(state: &AppState) -> Result<String, String> {
     Ok("连接成功，Token 具备 read:notebooks 与 read:memos 权限".into())
 }
 
-pub async fn notebooks(state: &AppState) -> Result<Vec<Notebook>, String> {
-    let config = config(state)?.ok_or_else(|| "EdgeEver 同步尚未启用".to_string())?;
+pub(crate) async fn notebooks(
+    state: &AppState,
+    draft: Option<EdgeEverSettings>,
+) -> Result<Vec<Notebook>, String> {
+    let config = command_config(state, draft)?;
     let notebooks = list_notebooks(&client()?, &config).await?;
     if let Some(notebook) = notebooks
         .iter()
@@ -539,7 +585,10 @@ pub fn schedule(state: AppState, book_id: String) {
 pub fn start_background(state: AppState) {
     tauri::async_runtime::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_secs(30)).await;
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(30)) => {},
+                _ = state.edgeever_sync_trigger.notified() => {},
+            }
             if !matches!(config(&state), Ok(Some(_))) {
                 continue;
             }
@@ -814,18 +863,7 @@ mod tests {
                 "edgeEverEndpoint": format!("http://{address}"),
                 "edgeEverToken": "token",
                 "edgeEverNotebookId": "notebook-1"
-        })
-        .to_string();
-        db::kv_set(&state, "settings", &settings).unwrap();
-        let initial = status(&state).unwrap();
-        assert!(initial.enabled && initial.configured && initial.notebook_selected);
-        assert!(initial.last_attempt.is_none());
-        assert!(initial.notebook_name.is_none());
-        notebooks(&state).await.unwrap();
-        assert_eq!(
-            status(&state).unwrap().notebook_name.as_deref(),
-            Some("阅读摘录")
-        );
+        });
         let book = db::import_book(
             &state,
             "sync.txt",
@@ -840,9 +878,36 @@ mod tests {
             db::upsert_excerpt(&state, &book.id, "epubcfi(/6/2)", "原文", None, "yellow")
                 .expect("create excerpt");
 
+        let draft = serde_json::from_value(settings.clone()).unwrap();
+        notebooks(&state, Some(draft)).await.unwrap();
+        assert!(!status(&state).unwrap().enabled);
+        assert!(db::pending_edgeever_books(&state).unwrap().is_empty());
+
+        let mut incomplete_settings = settings.clone();
+        incomplete_settings["edgeEverToken"] = json!("");
+        crate::trusted_sync::save_settings(&state, incomplete_settings).unwrap();
+        assert!(db::pending_edgeever_books(&state).unwrap().is_empty());
+
+        crate::trusted_sync::save_settings(&state, settings.clone()).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), state.edgeever_sync_trigger.notified())
+            .await
+            .expect("first valid save wakes the sync worker");
+        assert_eq!(
+            db::pending_edgeever_books(&state).unwrap(),
+            [book.id.clone()]
+        );
+        let initial = status(&state).unwrap();
+        assert!(initial.enabled && initial.configured && initial.notebook_selected);
+        assert!(initial.last_attempt.is_none());
+        assert_eq!(initial.notebook_name.as_deref(), Some("阅读摘录"));
+
         mock.fail_next_import.store(true, Ordering::SeqCst);
         assert!(sync_book(&state, &book.id).await.is_err());
         assert!(!status(&state).unwrap().last_attempt.unwrap().succeeded);
+        assert_eq!(
+            db::pending_edgeever_books(&state).unwrap(),
+            [book.id.clone()]
+        );
         assert!(
             db::edgeever_excerpt_note(&state, &book.id, &format!("http://{address}"))
                 .unwrap()
@@ -850,6 +915,12 @@ mod tests {
         );
         assert!(sync_book(&state, &book.id).await.expect("first sync"));
         assert!(status(&state).unwrap().last_attempt.unwrap().succeeded);
+        crate::trusted_sync::save_settings(&state, settings.clone()).unwrap();
+        let mut disabled_settings = settings.clone();
+        disabled_settings["edgeEverEnabled"] = json!(false);
+        crate::trusted_sync::save_settings(&state, disabled_settings).unwrap();
+        crate::trusted_sync::save_settings(&state, settings.clone()).unwrap();
+        assert!(db::pending_edgeever_books(&state).unwrap().is_empty());
         {
             let mut memo = mock.memo.lock().unwrap();
             memo["title"] = json!("手动改过的标题");
@@ -941,13 +1012,13 @@ mod tests {
 
         let second_root = tempfile::tempdir().unwrap();
         let second_state = db::open(second_root.path().to_path_buf()).unwrap();
-        let mut default_settings: Value = serde_json::from_str(&settings).unwrap();
+        let mut default_settings = settings.clone();
         default_settings["edgeEverNotebookId"] = json!("");
         db::kv_set(&second_state, "settings", &default_settings.to_string()).unwrap();
         let default_status = status(&second_state).unwrap();
         assert!(default_status.configured);
         assert_eq!(default_status.notebook_name.as_deref(), Some("等待分类"));
-        test(&second_state).await.unwrap();
+        test(&second_state, None).await.unwrap();
         let imported = db::import_book(
             &second_state,
             "other-filename.txt",
@@ -980,7 +1051,7 @@ mod tests {
         assert!(status(&second_state).unwrap().last_attempt.unwrap().succeeded);
         assert_eq!(mock.creates.load(Ordering::SeqCst), 1);
         assert_eq!(mock.updates.load(Ordering::SeqCst), 5);
-        let mut changed_target: Value = serde_json::from_str(&settings).unwrap();
+        let mut changed_target = settings;
         changed_target["edgeEverNotebookId"] = json!("notebook-2");
         changed_target["edgeEverNotebookLabel"] = json!({ "id": "notebook-2", "name": "精读" });
         db::kv_set(&state, "settings", &changed_target.to_string()).unwrap();
