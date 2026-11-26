@@ -45,6 +45,11 @@ urlencoding = "2"
 axum = "0.8"
 rmcp = { version = "3.4", features = ["server", "macros", "transport-streamable-http-server", "schemars"] }
 
+[target.'cfg(target_os = "android")'.dependencies]
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"
 

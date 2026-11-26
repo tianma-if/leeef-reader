@@ -296,12 +296,13 @@ async fn pairing_start(
 
 #[tauri::command]
 async fn pairing_join(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     runtime: State<'_, trusted_sync::SyncRuntime>,
     code: String,
     replace_existing: bool,
 ) -> Result<trusted_sync::SyncStatus, String> {
-    trusted_sync::join_pairing(&state, &runtime, &code, replace_existing).await
+    trusted_sync::join_pairing(&app, &state, &runtime, &code, replace_existing).await
 }
 
 #[tauri::command]

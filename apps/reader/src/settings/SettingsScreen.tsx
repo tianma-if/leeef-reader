@@ -96,6 +96,7 @@ export function SettingsScreen() {
   const [pair, setPair] = useState<PairingOffer | null>(null)
   const [pairCode, setPairCode] = useState('')
   const [pairBusy, setPairBusy] = useState(false)
+  const [pairJoinError, setPairJoinError] = useState('')
   const [syncStatus, setSyncStatus] = useState<SettingsSyncStatus | null>(null)
   const [recoveryPassword, setRecoveryPassword] = useState('')
   const [recoveryPackage, setRecoveryPackage] = useState('')
@@ -157,6 +158,7 @@ export function SettingsScreen() {
 
   const handleJoinExecute = () => {
     setJoinConfirmOpen(false)
+    setPairJoinError('')
     setPairBusy(true)
     void api
       .pairingJoin(pairCode, Boolean(syncStatus?.paired))
@@ -165,7 +167,7 @@ export function SettingsScreen() {
         setValue(await api.getSettings())
         toast.success('配对成功，配置会继续自动同步')
       })
-      .catch((cause) => toast.error(String(cause)))
+      .catch((cause) => setPairJoinError(String(cause)))
       .finally(() => setPairBusy(false))
   }
 
@@ -710,11 +712,17 @@ export function SettingsScreen() {
               <div className="flex items-center gap-2">
                 <Input
                   value={pairCode}
-                  aria-describedby="pairing-network-hint"
+                  aria-describedby={
+                    pairJoinError ? 'pairing-network-hint pairing-join-error' : 'pairing-network-hint'
+                  }
+                  disabled={pairBusy}
                   maxLength={12}
                   placeholder="12 位配对码"
                   className="font-mono uppercase tracking-widest text-xs h-8"
-                  onChange={(event) => setPairCode(event.target.value.toUpperCase())}
+                  onChange={(event) => {
+                    setPairCode(event.target.value.toUpperCase())
+                    setPairJoinError('')
+                  }}
                 />
                 <Button
                   size="sm"
@@ -727,6 +735,11 @@ export function SettingsScreen() {
                   加入
                 </Button>
               </div>
+              {pairJoinError && (
+                <p id="pairing-join-error" role="alert" className="text-sm text-destructive">
+                  {pairJoinError}
+                </p>
+              )}
             </div>
           </div>
         </CardContent>

@@ -20,6 +20,8 @@
 
 局域网配对不依赖 Leeef 账号或 Leeef 云服务。iOS 使用 `NSLocalNetworkUsageDescription` 说明局域网用途；当前 Android target SDK 36 继续使用既有 `INTERNET` 权限。升级到 target SDK 37 时需要接入 Android `ACCESS_LOCAL_NETWORK` 运行时授权。
 
+Android 加入已有设备时，配对广播与后续连接使用同一条 Wi-Fi 或以太网链路。应用通过 `ACCESS_NETWORK_STATE` 读取可用链路，且仅为配对连接选择网络。VPN 策略限制局域网访问时，配对失败后会提示用户检查 VPN 的局域网设置。
+
 ## 持续配置同步
 
 配置以每台设备独立拥有的加密文档保存到同步后端。每个配置项记录修改时间和修改设备，冲突时确定性选择最新版本。包括凭据在内的配置离开设备前会加密；当前 Tauri 客户端仍将设置保存在本地应用数据库中，迁移到系统安全存储属于后续安全加固项。

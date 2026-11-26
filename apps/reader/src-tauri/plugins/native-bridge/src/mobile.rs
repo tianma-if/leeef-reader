@@ -25,7 +25,29 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
 
 pub struct NativeBridge<R: Runtime>(PluginHandle<R>);
 
+#[cfg(target_os = "android")]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairingLink {
+    pub handle: u64,
+    pub address: std::net::Ipv4Addr,
+    pub prefix_length: u8,
+}
+
+#[cfg(target_os = "android")]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairingNetworks {
+    pub links: Vec<PairingLink>,
+    pub vpn_active: bool,
+}
+
 impl<R: Runtime> NativeBridge<R> {
+    #[cfg(target_os = "android")]
+    pub async fn pairing_networks(&self) -> crate::Result<PairingNetworks> {
+        Ok(self.0.run_mobile_plugin_async("pairing_networks", ()).await?)
+    }
+
     pub fn capture_webview_region(
         &self,
         _window: &tauri::WebviewWindow<R>,

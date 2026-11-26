@@ -19,6 +19,8 @@ mod mobile;
 use desktop::NativeBridge;
 #[cfg(mobile)]
 use mobile::NativeBridge;
+#[cfg(target_os = "android")]
+pub use mobile::{PairingLink, PairingNetworks};
 
 pub trait NativeBridgeExt<R: Runtime> {
     fn native_bridge(&self) -> &NativeBridge<R>;

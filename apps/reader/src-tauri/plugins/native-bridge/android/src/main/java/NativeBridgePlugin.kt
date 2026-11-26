@@ -8,6 +8,8 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Rect
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -42,6 +44,7 @@ import com.google.android.play.core.install.model.AppUpdateType
 import com.google.android.play.core.install.model.InstallStatus
 import com.google.android.play.core.install.model.UpdateAvailability
 import java.io.ByteArrayOutputStream
+import java.net.Inet4Address
 
 @InvokeArg
 class CaptureWebviewRegionArgs {
@@ -94,6 +97,33 @@ class NativeBridgePlugin(private val activity: Activity) : Plugin(activity) {
         webViewRef = webView
         appUpdateManager.registerListener(updateListener)
         super.load(webView)
+    }
+
+    @Command
+    @Suppress("DEPRECATION")
+    fun pairing_networks(invoke: Invoke) {
+        val connectivity = activity.getSystemService(ConnectivityManager::class.java)
+        val vpnActive = connectivity.getNetworkCapabilities(connectivity.activeNetwork)
+            ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+        val links = JSArray()
+        for (network in connectivity.allNetworks) {
+            val capabilities = connectivity.getNetworkCapabilities(network) ?: continue
+            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
+            if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+            ) continue
+            val properties = connectivity.getLinkProperties(network) ?: continue
+            for (link in properties.linkAddresses) {
+                val address = link.address as? Inet4Address ?: continue
+                links.put(
+                    JSObject()
+                        .put("handle", network.networkHandle)
+                        .put("address", address.hostAddress)
+                        .put("prefixLength", link.prefixLength),
+                )
+            }
+        }
+        invoke.resolve(JSObject().put("links", links).put("vpnActive", vpnActive))
     }
 
     @Command

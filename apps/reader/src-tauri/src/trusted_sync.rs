@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error as _,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::Ipv4Addr,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -29,6 +29,8 @@ use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::db::{self, AppState};
 use crate::library_sync::{self, Snapshot};
+
+mod pairing_transport;
 
 const SPACE_KEY: &str = "trusted_sync_space";
 const DEVICES_KEY: &str = "trusted_sync_devices";
@@ -1450,6 +1452,7 @@ fn internal_pair_error(error: String) -> (StatusCode, String) {
 }
 
 pub async fn join_pairing(
+    app: &AppHandle,
     state: &AppState,
     runtime: &SyncRuntime,
     code: &str,
@@ -1459,37 +1462,18 @@ pub async fn join_pairing(
     if code.len() != 12 || !code.bytes().all(|item| PAIRING_ALPHABET.contains(&item)) {
         return Err("请输入已有设备显示的 12 位配对码".into());
     }
-    let (offer, host_address) = discover_pairing_host(&code).await?;
+    let endpoint = pairing_transport::discover(app, &code).await?;
     let client_secret = StaticSecret::random_from_rng(rand::rngs::OsRng);
     let client_public = PublicKey::from(&client_secret).to_bytes();
     let request = PairRequest {
-        session_id: offer.session_id.clone(),
+        session_id: endpoint.session_id.clone(),
         device_id: state.device_id.clone(),
         client_public_key: URL_SAFE_NO_PAD.encode(client_public),
-        proof: pairing_proof(&code, &offer.session_id, &state.device_id, &client_public)?,
+        proof: pairing_proof(&code, &endpoint.session_id, &state.device_id, &client_public)?,
     };
-    let url = format!("http://{}:{}/pair", host_address.ip(), offer.port);
-    let response = Client::builder()
-        .timeout(Duration::from_secs(12))
-        .build()
-        .map_err(|e| e.to_string())?
-        .post(url)
-        .json(&request)
-        .send()
-        .await
-        .map_err(|e| format!("无法连接桌面端：{e}"))?;
-    if !response.status().is_success() {
-        return Err(response.text().await.unwrap_or_else(|_| "配对失败".into()));
-    }
-    let payload: PairResponse = response.json().await.map_err(|e| e.to_string())?;
-    let host_public_bytes = URL_SAFE_NO_PAD
-        .decode(offer.host_public_key)
-        .map_err(|e| e.to_string())?;
-    let host_public: [u8; 32] = host_public_bytes
-        .try_into()
-        .map_err(|_| "桌面端临时公钥无效".to_string())?;
-    let shared = client_secret.diffie_hellman(&PublicKey::from(host_public));
-    let key = derive_pairing_key(shared.as_bytes(), &code, &offer.session_id)?;
+    let payload = endpoint.exchange(&request).await?;
+    let shared = client_secret.diffie_hellman(&PublicKey::from(endpoint.host_public_key));
+    let key = derive_pairing_key(shared.as_bytes(), &code, &endpoint.session_id)?;
     let snapshot = decrypt_pairing_snapshot(&payload, &key)?;
     let replacing_space = load_space(state)?
         .map(|current| current.id != snapshot.space.id)
@@ -1509,45 +1493,6 @@ pub async fn join_pairing(
     apply_pairing_configuration(state, snapshot.configuration)?;
     runtime.trigger();
     Ok(runtime.status(state))
-}
-
-async fn discover_pairing_host(code: &str) -> Result<(DiscoveryResponse, SocketAddr), String> {
-    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))
-        .await
-        .map_err(|e| e.to_string())?;
-    socket.set_broadcast(true).map_err(|e| e.to_string())?;
-    let request = serde_json::to_vec(&DiscoveryRequest {
-        kind: "leeef-pair-discover".into(),
-        code_hash: sha256_text(code),
-    })
-    .map_err(|e| e.to_string())?;
-    let targets = [
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), DISCOVERY_PORT),
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(239, 255, 73, 73)), DISCOVERY_PORT),
-    ];
-    for target in targets {
-        let _ = socket.send_to(&request, target).await;
-    }
-    let mut buffer = [0_u8; 2048];
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
-            return Err("未在局域网中找到该配对会话，请确认两台设备连接同一网络".into());
-        }
-        match tokio::time::timeout(remaining, socket.recv_from(&mut buffer)).await {
-            Ok(Ok((length, address))) => {
-                let Ok(response) = serde_json::from_slice::<DiscoveryResponse>(&buffer[..length])
-                else {
-                    continue;
-                };
-                if response.kind == "leeef-pair-offer" {
-                    return Ok((response, address));
-                }
-            }
-            _ => return Err("未在局域网中找到该配对会话，请确认两台设备连接同一网络".into()),
-        }
-    }
 }
 
 fn pairing_proof(
