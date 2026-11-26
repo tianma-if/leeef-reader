@@ -20,6 +20,8 @@ export type Book = {
   shelfIds: string[]
 }
 
+export type ReadingDestination = { book: Book; previewLocator: string | null }
+
 export type Excerpt = {
   id: string
   bookId: string
@@ -153,6 +155,7 @@ const toB64 = (bytes: Uint8Array) => {
 }
 
 export const api = {
+  takeReadingLink: () => invoke<ReadingDestination | null>('take_reading_link'),
   listBooks: () => invoke<Book[]>('list_books'),
   importBook: (input: {
     name: string

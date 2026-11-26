@@ -1,4 +1,5 @@
 mod content;
+mod reading;
 mod server;
 
 use serde::Serialize;
@@ -265,6 +266,8 @@ mod tests {
             "add_book_to_bookshelf",
             "remove_book_from_bookshelf",
             "get_reading_progress",
+            "get_reading_recap",
+            "get_reading_activity",
             "update_reading_progress",
             "confirm_write",
             "apply_write",
@@ -287,6 +290,203 @@ mod tests {
         )
         .await;
         assert_eq!(structured(&content)["content"], "Hello from Leeef");
+        cancel.cancel();
+    }
+
+    fn recap_test_epub() -> Vec<u8> {
+        use std::io::{Cursor, Write};
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (path, text) in [
+            ("META-INF/container.xml", r#"<container><rootfiles><rootfile full-path="Book/main.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#),
+            ("Book/main.opf", r#"<package><metadata/><manifest><item id="chapter" href="text/chapter%201.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>"#),
+            ("Book/text/chapter 1.xhtml", "<html><head/><body><p>Earlier paragraph</p><p>Read🙂 Secret after the saved point</p><p>Future paragraph</p></body></html>"),
+        ] {
+            zip.start_file(path, zip::write::SimpleFileOptions::default()).unwrap();
+            zip.write_all(text.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap().into_inner()
+    }
+
+    #[tokio::test]
+    async fn reading_tools_return_citations_bounded_recaps_and_date_scoped_activity() {
+        use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+
+        let (endpoint, cancel, state) = spawn_server().await;
+        let first = db::import_book(
+            &state,
+            "first.epub",
+            &recap_test_epub(),
+            "First",
+            None,
+            "application/epub+zip",
+            None,
+        )
+        .unwrap();
+        let second = db::import_book(
+            &state,
+            "second.txt",
+            b"second",
+            "Second",
+            None,
+            "text/plain",
+            None,
+        )
+        .unwrap();
+        let first_range = "epubcfi(/6/2!/4/2,/1:0,/1:7)";
+        let first_excerpt = db::upsert_excerpt(
+            &state,
+            &first.id,
+            first_range,
+            "Earlier paragraph",
+            Some("注意力的例子"),
+            "yellow",
+        )
+        .unwrap();
+        db::save_excerpt_chapters(
+            &state,
+            &first.id,
+            &[(
+                first_range.into(),
+                db::ExcerptChapter {
+                    key: "chapter".into(),
+                    title: "Opening".into(),
+                },
+            )],
+        )
+        .unwrap();
+        let second_excerpt = db::upsert_excerpt(
+            &state,
+            &second.id,
+            first_range,
+            "Time to focus",
+            Some("另一条笔记"),
+            "yellow",
+        )
+        .unwrap();
+        let overlapping = db::upsert_excerpt(
+            &state,
+            &first.id,
+            "epubcfi(/6/2!/4/4,/1:6,/1:20)",
+            "Hidden selection",
+            None,
+            "red",
+        )
+        .unwrap();
+        let future = db::upsert_excerpt(
+            &state,
+            &first.id,
+            "epubcfi(/6/2!/4/6,/1:0,/1:6)",
+            "Future paragraph",
+            None,
+            "red",
+        )
+        .unwrap();
+        let stop = "epubcfi(/6/2!/4/4,/1:7,/1:20)";
+        db::save_progress(&state, &first.id, stop, 0.4, Some("Opening"), None).unwrap();
+
+        let from = "2026-11-16T00:00:00+08:00";
+        let to = "2026-11-23T00:00:00+08:00";
+        let start = OffsetDateTime::parse(from, &Rfc3339)
+            .unwrap()
+            .unix_timestamp();
+        let end = OffsetDateTime::parse(to, &Rfc3339)
+            .unwrap()
+            .unix_timestamp();
+        {
+            let conn = state.db.lock().unwrap();
+            for (id, created) in [
+                (&first_excerpt, start.to_string()),
+                (&second_excerpt, "2026-11-17T00:00:00+08:00".into()),
+                (&overlapping, end.to_string()),
+                (&future, (end + 1).to_string()),
+            ] {
+                conn.execute(
+                    "UPDATE excerpts SET created_at=?2 WHERE id=?1",
+                    (&id, created),
+                )
+                .unwrap();
+            }
+            for (id, start, end) in [
+                ("left", start - 30, start + 20),
+                ("right", end - 50, end + 30),
+            ] {
+                conn.execute("INSERT INTO reading_sessions(id,book_id,device_id,started_at,ended_at,duration_seconds,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?5)",
+                    (id, &first.id, &state.device_id, start.to_string(), end.to_string(), end - start)).unwrap();
+            }
+        }
+
+        let session = initialize(&endpoint).await;
+        let call = |name: &str, arguments: Value| {
+            post(
+                &endpoint,
+                Some("secret"),
+                &session,
+                json!({
+                    "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": {"name": name, "arguments": arguments}
+                }),
+            )
+        };
+        let mut search = json!({"query":"注意力", "queries":["FOCUS"], "notesOnly":true, "color":"yellow", "from":from, "to":to, "limit":1});
+        let (_, page) = call("search_excerpts", search.clone()).await;
+        assert_eq!(structured(&page)["nextOffset"], 1);
+        search["offset"] = 1.into();
+        let (_, next) = call("search_excerpts", search).await;
+        assert!(structured(&next)["nextOffset"].is_null());
+        let citations = [&page, &next].map(|response| &structured(response)["excerpts"][0]);
+        let citation = citations
+            .iter()
+            .find(|item| item["bookTitle"] == "First")
+            .unwrap();
+        assert_eq!(citation["chapterTitle"], "Opening");
+        assert_eq!(citation["quote"], "Earlier paragraph");
+        assert_eq!(citation["note"], "注意力的例子");
+        assert_eq!(
+            citation["openUrl"],
+            format!("leeef-reader://excerpt/{first_excerpt}")
+        );
+        assert!(citations.iter().any(|item| item["bookTitle"] == "Second"));
+
+        let (_, recap) = call("get_reading_recap", json!({"bookId":first.id})).await;
+        let recap = structured(&recap);
+        assert_eq!(recap["precedingText"], "Earlier paragraph Read🙂");
+        assert_eq!(recap["excerpts"].as_array().unwrap().len(), 1);
+        assert_eq!(recap["excerpts"][0]["id"], first_excerpt);
+        assert_eq!(recap["progress"]["locator"], stop);
+        assert_eq!(
+            recap["progress"]["resumeUrl"],
+            format!("leeef-reader://resume/{}", first.id)
+        );
+        let (_, latest) = call("get_reading_recap", json!({})).await;
+        assert_eq!(structured(&latest)["bookId"], first.id);
+        let (_, unread) = call("get_reading_recap", json!({"bookId":second.id})).await;
+        assert!(structured(&unread)["progress"].is_null());
+        assert!(structured(&unread)["precedingText"].is_null());
+
+        let (_, report) = call(
+            "get_reading_activity",
+            json!({"from":from, "to":to, "limit":1}),
+        )
+        .await;
+        let report = structured(&report);
+        assert_eq!(report["readingSeconds"], 70);
+        assert_eq!(report["sessionCount"], 2);
+        assert_eq!(report["booksRead"], 1);
+        assert_eq!(report["excerptCount"], 2);
+        assert_eq!(report["noteCount"], 2);
+        assert_eq!(report["books"][0]["title"], "First");
+        assert_eq!(report["nextOffset"], 1);
+        let (_, report) = call(
+            "get_reading_activity",
+            json!({"from":from, "to":to, "offset":1}),
+        )
+        .await;
+        assert_eq!(structured(&report)["books"][0]["title"], "Second");
+        assert_eq!(structured(&report)["books"][0]["readingSeconds"], 0);
+        assert_eq!(
+            db::get_reading_progress(&state, &first.id).unwrap().locator,
+            stop
+        );
         cancel.cancel();
     }
 

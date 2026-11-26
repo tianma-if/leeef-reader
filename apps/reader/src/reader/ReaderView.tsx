@@ -38,6 +38,7 @@ type Props = {
   book: Book
   onClose: () => void
   initialLocator?: string
+  preview?: boolean
 }
 
 const waitForSize = (element: HTMLElement) =>
@@ -70,7 +71,7 @@ function selectionAtRange(frame: HTMLElement, range: Range, cfi: string, text: s
   }
 }
 
-export function ReaderView({ book, onClose, initialLocator }: Props) {
+export function ReaderView({ book, onClose, initialLocator, preview = false }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<FoliateViewElement | null>(null)
   const excerptsRef = useRef<Excerpt[]>([])
@@ -250,6 +251,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
   const lastSuggestedLocator = useRef('')
   useLibraryRefresh(async () => {
     await reloadMarks()
+    if (preview) return
     const remote = (await api.listBooks()).find((item) => item.id === book.id)
     if (remote?.locator && remote.locator !== locator && remote.locator !== lastSuggestedLocator.current) {
       lastSuggestedLocator.current = remote.locator
@@ -349,7 +351,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       void readingTimer.flush().catch(() => toast.error('阅读时长保存失败，将在下次记录时重试'))
     }
     const onVisibility = () => {
-      readingTimer.setActive(ready && document.visibilityState === 'visible')
+      readingTimer.setActive(!preview && ready && document.visibilityState === 'visible')
       flushReadingTime()
     }
     const onPageHide = () => {
@@ -403,7 +405,9 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         setCurrentToc(detail.tocItem)
         setChapter(chapterTitle)
         setLocator(detail.cfi ?? '')
-        void api.saveProgress(book.id, detail.cfi ?? '', fraction, chapterTitle || undefined)
+        if (!preview) {
+          void api.saveProgress(book.id, detail.cfi ?? '', fraction, chapterTitle || undefined)
+        }
         getTurner().invalidate()
         window.clearTimeout(prepareTimer.current)
         if (usesCapturedSlide(settingsRef.current, mobile)) {
@@ -552,7 +556,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       if (!cancelled) {
         setStatus('')
         ready = true
-        readingTimer.setActive(document.visibilityState === 'visible')
+        readingTimer.setActive(!preview && document.visibilityState === 'visible')
       }
     }
 
@@ -584,7 +588,7 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
       view?.close()
       view?.remove()
     }
-  }, [book.id, initialLocator, clearSelection, updateSelection])
+  }, [book.id, initialLocator, preview, clearSelection, updateSelection])
 
   useEffect(() => {
     let stop: (() => void) | undefined
@@ -773,7 +777,8 @@ export function ReaderView({ book, onClose, initialLocator }: Props) {
         title={title}
         chapter={chapter}
         progress={progress}
-        visible={chrome.visible}
+        visible={preview || chrome.visible}
+        preview={preview}
         bookmarked={bookmarked}
         bookmarkPull={bookmarkPull}
         canBookmark={canBookmark}

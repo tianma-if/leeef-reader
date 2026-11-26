@@ -29,6 +29,10 @@ use uuid::Uuid;
 use crate::db::{self, AppState};
 
 use super::content::extract_book_text;
+use super::reading::{
+    self, ExcerptSearchInput, ExcerptSearchOutput, ExcerptSummary, ReadingActivityInput,
+    ReadingActivityOutput, ReadingProgressOutput, ReadingRecapOutput,
+};
 
 const PLAN_TTL: Duration = Duration::from_secs(300);
 
@@ -113,18 +117,6 @@ struct BookContentOutput {
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
-struct ExcerptSummary {
-    id: String,
-    book_id: String,
-    locator: String,
-    quote: String,
-    note: Option<String>,
-    color: String,
-    created_at: String,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
 struct ExcerptsOutput {
     excerpts: Vec<ExcerptSummary>,
 }
@@ -160,18 +152,6 @@ struct BookshelvesOutput {
     bookshelves: Vec<BookshelfSummary>,
 }
 
-#[derive(Serialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
-struct ReadingProgressOutput {
-    book_id: String,
-    locator: String,
-    progress: f64,
-    chapter_title: Option<String>,
-    page: Option<i64>,
-    device_id: String,
-    updated_at: String,
-}
-
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct QueryInput {
@@ -183,6 +163,13 @@ struct QueryInput {
 #[serde(rename_all = "camelCase")]
 struct BookIdInput {
     book_id: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ReadingRecapInput {
+    /// Omit to recap the most recently saved reading position in the library.
+    book_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, schemars::JsonSchema)]
@@ -683,21 +670,20 @@ impl LeeefMcp {
         Parameters(input): Parameters<QueryInput>,
     ) -> Result<Json<ExcerptsOutput>, McpError> {
         Ok(Json(ExcerptsOutput {
-            excerpts: self.excerpt_summaries(input.book_id.as_deref(), "")?,
+            excerpts: reading::list_excerpts(&self.state, input.book_id.as_deref()).map_err(err)?,
         }))
     }
 
-    #[tool(description = "Search excerpt quotes and notes.")]
+    #[tool(
+        description = "Find highlights across books by matching original quotes or reader notes. Return book, chapter when known, and a desktop link to preview the original location without moving the reading position. Paginated."
+    )]
     fn search_excerpts(
         &self,
-        Parameters(input): Parameters<QueryInput>,
-    ) -> Result<Json<ExcerptsOutput>, McpError> {
-        Ok(Json(ExcerptsOutput {
-            excerpts: self.excerpt_summaries(
-                input.book_id.as_deref(),
-                input.query.as_deref().unwrap_or(""),
-            )?,
-        }))
+        Parameters(input): Parameters<ExcerptSearchInput>,
+    ) -> Result<Json<ExcerptSearchOutput>, McpError> {
+        reading::search_excerpts(&self.state, input)
+            .map(Json)
+            .map_err(err)
     }
 
     #[tool(description = "List visible bookmarks, optionally for one book.")]
@@ -732,16 +718,34 @@ impl LeeefMcp {
         &self,
         Parameters(input): Parameters<BookIdInput>,
     ) -> Result<Json<ReadingProgressOutput>, McpError> {
-        let item = db::get_reading_progress(&self.state, &input.book_id).map_err(err)?;
-        Ok(Json(ReadingProgressOutput {
-            book_id: item.book_id,
-            locator: item.locator,
-            progress: item.progress,
-            chapter_title: item.chapter_title,
-            page: item.page,
-            device_id: item.device_id,
-            updated_at: item.updated_at,
-        }))
+        let book = self.require_book(&input.book_id)?;
+        let progress = db::get_reading_progress(&self.state, &book.id).map_err(err)?;
+        Ok(Json(ReadingProgressOutput::new(progress, &book)))
+    }
+
+    #[tool(
+        description = "Recap where the reader last stopped. Include nearby saved highlights and, when resolvable, a short EPUB passage bounded by the saved position. Use this for spoiler-aware recaps instead of fetching the whole book. The resume URL opens the latest saved location."
+    )]
+    async fn get_reading_recap(
+        &self,
+        Parameters(input): Parameters<ReadingRecapInput>,
+    ) -> Result<Json<ReadingRecapOutput>, McpError> {
+        let state = self.state.clone();
+        tokio::task::spawn_blocking(move || reading::recap(&state, input.book_id.as_deref()))
+            .await
+            .map_err(|error| err(error.to_string()))?
+            .map(Json)
+            .map_err(err)
+    }
+
+    #[tool(
+        description = "Summarize reading sessions, reading time, highlights and notes by book for an explicit date range. For a weekly recap, use the reader's timezone to set the start and end of the week. Totals cover the full period, including books on later pages."
+    )]
+    fn get_reading_activity(
+        &self,
+        Parameters(input): Parameters<ReadingActivityInput>,
+    ) -> Result<Json<ReadingActivityOutput>, McpError> {
+        reading::activity(&self.state, input).map(Json).map_err(err)
     }
 
     #[tool(
@@ -1112,32 +1116,6 @@ impl LeeefMcp {
 }
 
 impl LeeefMcp {
-    fn excerpt_summaries(
-        &self,
-        book_id: Option<&str>,
-        query: &str,
-    ) -> Result<Vec<ExcerptSummary>, McpError> {
-        Ok(db::list_excerpts(&self.state, book_id)
-            .map_err(err)?
-            .into_iter()
-            .filter(|item| {
-                matches_query(
-                    &format!("{} {}", item.quote, item.note.clone().unwrap_or_default()),
-                    query,
-                )
-            })
-            .map(|item| ExcerptSummary {
-                id: item.id,
-                book_id: item.book_id,
-                locator: item.locator,
-                quote: item.quote,
-                note: item.note,
-                color: item.color,
-                created_at: item.created_at,
-            })
-            .collect())
-    }
-
     fn bookshelf_summaries(&self) -> Result<Vec<BookshelfSummary>, McpError> {
         db::list_shelves(&self.state)
             .map_err(err)?
@@ -1172,7 +1150,7 @@ impl ServerHandler for LeeefMcp {
         .with_server_info(Implementation::new("leeef", env!("CARGO_PKG_VERSION")))
         .with_protocol_version(ProtocolVersion::V_2024_11_05)
         .with_instructions(
-            "Leeef library MCP. Read tools query the same SQLite database as the reader. Write tools return a plan that must be confirmed and applied.",
+            "Leeef library MCP. Read tools query the same SQLite database as the reader. Cite the book, chapter when known, and openUrl when quoting highlights. Use get_reading_recap for the latest saved position and get_reading_activity for weekly reviews. Write tools return a plan that must be confirmed and applied.",
         )
     }
 
@@ -1242,7 +1220,7 @@ impl ServerHandler for LeeefMcp {
             ["books", book_id, "excerpts"] => Self::json_resource(
                 &uri,
                 ExcerptsOutput {
-                    excerpts: self.excerpt_summaries(Some(book_id), "")?,
+                    excerpts: reading::list_excerpts(&self.state, Some(book_id)).map_err(err)?,
                 },
             ),
             ["books", book_id, "bookmarks"] => {

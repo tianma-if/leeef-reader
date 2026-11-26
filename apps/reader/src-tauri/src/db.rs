@@ -581,9 +581,9 @@ pub fn list_excerpts(state: &AppState, book_id: Option<&str>) -> Result<Vec<Exce
                   LEFT JOIN excerpt_chapters c ON c.book_id = e.book_id AND c.locator = e.locator
                   WHERE e.is_deleted = 0";
     let sql = if book_id.is_some() {
-        format!("{select} AND e.book_id = ?1 ORDER BY e.updated_at DESC")
+        format!("{select} AND e.book_id = ?1 ORDER BY e.updated_at DESC, e.id")
     } else {
-        format!("{select} ORDER BY e.updated_at DESC")
+        format!("{select} ORDER BY e.updated_at DESC, e.id")
     };
     let mut stmt = db.prepare(&sql).map_err(|e| e.to_string())?;
     let map_row = |row: &rusqlite::Row| {
@@ -611,6 +611,19 @@ pub fn list_excerpts(state: &AppState, book_id: Option<&str>) -> Result<Vec<Exce
     .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
+}
+
+pub fn excerpt_location(state: &AppState, id: &str) -> Result<(String, String), String> {
+    let db = state.db.lock().map_err(|error| error.to_string())?;
+    db.query_row(
+        "SELECT e.book_id, e.locator FROM excerpts e JOIN books b ON b.id = e.book_id
+         WHERE e.id = ?1 AND e.is_deleted = 0 AND b.is_deleted = 0",
+        [id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+    .map_err(|error| error.to_string())?
+    .ok_or_else(|| "此书摘已删除或不在此书库中".into())
 }
 
 pub fn save_excerpt_chapters(
@@ -1282,6 +1295,13 @@ pub struct ReadingProgress {
 }
 
 pub fn get_reading_progress(state: &AppState, book_id: &str) -> Result<ReadingProgress, String> {
+    find_reading_progress(state, book_id)?.ok_or_else(|| "reading progress does not exist".into())
+}
+
+pub fn find_reading_progress(
+    state: &AppState,
+    book_id: &str,
+) -> Result<Option<ReadingProgress>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.query_row(
         "SELECT book_id, locator, progress, chapter_title, page, device_id, updated_at
@@ -1300,8 +1320,7 @@ pub fn get_reading_progress(state: &AppState, book_id: &str) -> Result<ReadingPr
         },
     )
     .optional()
-    .map_err(|e| e.to_string())?
-    .ok_or_else(|| "reading progress does not exist".into())
+    .map_err(|e| e.to_string())
 }
 
 pub fn shelf_book_ids(state: &AppState, shelf_id: &str) -> Result<Vec<String>, String> {

@@ -7,6 +7,7 @@ type Props = {
   chapter: string
   progress: number
   visible: boolean
+  preview: boolean
   bookmarked: boolean
   bookmarkPull: BookmarkPull | null
   canBookmark: boolean
@@ -23,6 +24,7 @@ export function ReaderChrome({
   chapter,
   progress,
   visible,
+  preview,
   bookmarked,
   bookmarkPull,
   canBookmark,
@@ -61,7 +63,7 @@ export function ReaderChrome({
       >
         <Button type="button" variant="ghost" size="sm" onClick={onBack}>
           <ChevronLeft />
-          书架
+          {preview ? '退出回看' : '书架'}
         </Button>
         <strong>{title}</strong>
         <Button

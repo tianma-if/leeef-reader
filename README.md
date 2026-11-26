@@ -80,8 +80,11 @@ Leeef speaks [Model Context Protocol](https://modelcontextprotocol.io/) from ins
 
 Read tools include `list_books`, `search_books`, `get_book`, `get_book_content`, shelves, excerpts, bookmarks, and reading progress. Writes return a plan that must go through `confirm_write` → `apply_write` so an agent cannot mutate the library in one shot.
 
-> 💡 **With an agent:**
-> Ask what you were reading last week, pull quotes for a topic, or have the agent file a book onto a shelf after you confirm. MCP uses the same `db.rs` path as the reader—not a second SQLite opener.
+- **Find highlights across books.** `search_excerpts` searches quotes and reader notes, with book, color, and creation-time filters. Results include the book title, chapter when known, and a desktop link that previews the passage without moving your saved reading position.
+- **Pick up where you left off.** `get_reading_recap` returns the saved position and nearby highlights for a specific book or the book with the latest saved position. When it can resolve the position in an EPUB, it also returns a short passage from before that point. The resume link opens the saved position at the time you click it.
+- **Review your reading week.** `get_reading_activity` groups time spent reading, highlights, and notes by book. Use RFC 3339 timestamps with offsets for `from` (inclusive) and `to` (exclusive). Pass the returned `nextOffset` to retrieve more books.
+
+The installed desktop app handles `leeef-reader://` links. The AI client must allow app links to open them directly.
 
 ## Data, AI, and sync
 

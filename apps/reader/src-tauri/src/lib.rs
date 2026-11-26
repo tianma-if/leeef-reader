@@ -1,8 +1,10 @@
 mod backup;
+mod cfi;
 mod db;
 mod edgeever;
 mod library_sync;
 mod mcp;
+mod reading_links;
 mod trusted_sync;
 
 use db::AppState;
@@ -428,7 +430,12 @@ async fn library_backup_restore(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(any(windows, target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|_, _, _| {}));
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_deep_link::init());
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_native_bridge::init())
@@ -445,6 +452,9 @@ pub fn run() {
             app.manage(state);
             app.manage(runtime);
             app.manage(mcp::McpHandle::default());
+            app.manage(reading_links::PendingReadingLink::default());
+            #[cfg(desktop)]
+            reading_links::listen(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -482,6 +492,7 @@ pub fn run() {
             mcp_start,
             mcp_stop,
             mcp_status,
+            reading_links::take_reading_link,
             pairing_start,
             pairing_join,
             settings_sync_status,

@@ -1,4 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
+import { listen } from '@tauri-apps/api/event'
+import { toast } from 'sonner'
 import {
   BarChart3,
   BookOpen,
@@ -6,7 +8,7 @@ import {
   Settings,
   StickyNote,
 } from 'lucide-react'
-import { api, type Book } from './api'
+import { api, type Book, type ReadingDestination } from './api'
 import { Button } from '@/components/ui/button'
 import { LibraryScreen } from './library/LibraryScreen'
 import { NotesScreen } from './notes/NotesScreen'
@@ -35,6 +37,8 @@ function App() {
   const [tab, setTab] = useState<Tab>('library')
   const [open, setOpen] = useState<Book | null>(null)
   const [openLocator, setOpenLocator] = useState<string | undefined>()
+  const [preview, setPreview] = useState<ReadingDestination | null>(null)
+  const [readerVersion, setReaderVersion] = useState(0)
   const [books, setBooks] = useState<Book[]>([])
 
   useLibraryRefresh(() => api.listBooks().then(setBooks))
@@ -42,6 +46,35 @@ function App() {
   useEffect(() => {
     void api.listBooks().then(setBooks).catch(() => undefined)
   }, [open, tab])
+
+  useEffect(() => {
+    let disposed = false
+    const openLink = async () => {
+      if (disposed) return
+      try {
+        const destination = await api.takeReadingLink()
+        if (disposed || !destination) return
+        if (destination.previewLocator) {
+          setPreview(destination)
+        } else {
+          setPreview(null)
+          setOpenLocator(undefined)
+          setOpen(destination.book)
+          setReaderVersion((version) => version + 1)
+        }
+      } catch (cause) {
+        if (!disposed) toast.error(String(cause))
+      }
+    }
+    let pending = Promise.resolve()
+    const scheduleOpen = () => { pending = pending.then(openLink) }
+    const subscription = listen('reading-link-opened', scheduleOpen)
+    void subscription.then(scheduleOpen).catch(() => undefined)
+    return () => {
+      disposed = true
+      void subscription.then((unlisten) => unlisten()).catch(() => undefined)
+    }
+  }, [])
 
   useEffect(() => {
     const hrefs = ['/vendor/foliate-js/view.js', '/vendor/foliate-js/paginator.js']
@@ -72,8 +105,29 @@ function App() {
   return (
     <>
       <UpdateCoordinator />
-      {open ? (
+      {preview ? (
         <ReaderView
+          key={`preview:${preview.book.id}:${preview.previewLocator}`}
+          book={preview.book}
+          initialLocator={preview.previewLocator ?? undefined}
+          preview
+          onClose={() => {
+            if (!open) {
+              setPreview(null)
+              return
+            }
+            void api.listBooks().catch(() => [] as Book[]).then((updated) => {
+              setOpen((current) => current === open
+                ? updated.find((book) => book.id === open.id) ?? null
+                : current)
+              setOpenLocator(undefined)
+              setPreview((current) => current === preview ? null : current)
+            })
+          }}
+        />
+      ) : open ? (
+        <ReaderView
+          key={`reading:${open.id}:${readerVersion}`}
           book={open}
           initialLocator={openLocator}
           onClose={() => {

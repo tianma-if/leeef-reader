@@ -49,6 +49,11 @@
     ]
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["leeef-reader"]
+      }
+    },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMxNjI5QjJDQ0U5QzkzNEQKUldSTms1ek9MSnRpTVVHQlQrSk9WV29UN1hRTHBvVmdUdnk1VG16NVFqcUFFMEVwaHY2UmRoaUcK",
       "endpoints": [

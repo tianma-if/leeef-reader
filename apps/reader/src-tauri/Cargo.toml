@@ -40,7 +40,8 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["rt"] }
-time = { version = "0.3", features = ["formatting", "macros"] }
+time = { version = "0.3", features = ["formatting", "macros", "parsing"] }
+roxmltree = "0.21"
 urlencoding = "2"
 axum = "0.8"
 rmcp = { version = "3.4", features = ["server", "macros", "transport-streamable-http-server", "schemars"] }
@@ -52,6 +53,10 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"
+tauri-plugin-deep-link = "2"
+
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [dev-dependencies]
 tempfile = "3"

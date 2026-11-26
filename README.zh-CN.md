@@ -80,8 +80,11 @@ Leeef 在 Tauri 进程内提供 [Model Context Protocol](https://modelcontextpro
 
 读工具包括 `list_books`、`search_books`、`get_book`、`get_book_content`，以及书架、书摘、书签和阅读进度。写操作会返回一份 plan，必须再走 `confirm_write` → `apply_write`，Agent 不能一笔直接改库。
 
-> 💡 **和 Agent 一起用：**
-> 问上周在读什么、按主题抽出书摘，或让 Agent 在你确认后把一本书放进某个书架。MCP 走的就是阅读器同一套 `db.rs`，不是另开一份 SQLite。
+- **跨书找书摘** · 用 `search_excerpts` 搜原文和自己的批注，可按书、颜色和创建时间筛选。结果带书名、已有的章节名和桌面原文链接。打开链接进入临时回看，回看期间保留续读点。
+- **从上次的位置接着读** · 用 `get_reading_recap` 回顾指定书籍或最近在读的一本，包括最新保存的章节和停读点之前的书摘。位置和 EPUB 原文锚点可解析时，也会返回该位置之前的一小段正文。续读链接会打开点击时最新保存的位置。
+- **回顾一周的阅读** · 用 `get_reading_activity` 按书汇总所选日期范围内的阅读时长、书摘和批注。`from` 和 `to` 使用带时区的 RFC 3339 时间，起点包含在内，终点为下一时段的开始。长于一页时可传入返回的 `nextOffset`。
+
+原文和续读链接使用 `leeef-reader://`，由已安装的桌面版处理，点击取决于 AI 客户端是否支持应用链接。
 
 ## 数据、AI 与同步
 
