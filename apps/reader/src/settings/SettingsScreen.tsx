@@ -12,6 +12,7 @@ import {
   Save,
   Share2,
   Volume2,
+  Wifi,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { toast } from 'sonner'
@@ -668,6 +669,11 @@ export function SettingsScreen() {
         <CardContent className="space-y-4">
           <SyncCenter status={syncStatus} onStatus={setSyncStatus} />
 
+          <p id="pairing-network-hint" className="flex items-start gap-2 text-sm text-muted-foreground">
+            <Wifi aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            <span>配对时，两台设备需连接到同一局域网（例如同一 Wi-Fi）。</span>
+          </p>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="grid gap-2 rounded-lg border p-3">
               <Label className="text-xs">让另一台设备加入</Label>
@@ -675,6 +681,7 @@ export function SettingsScreen() {
                 <Button
                   variant="outline"
                   size="sm"
+                  aria-describedby="pairing-network-hint"
                   disabled={pairBusy}
                   onClick={() => {
                     setPairBusy(true)
@@ -703,6 +710,7 @@ export function SettingsScreen() {
               <div className="flex items-center gap-2">
                 <Input
                   value={pairCode}
+                  aria-describedby="pairing-network-hint"
                   maxLength={12}
                   placeholder="12 位配对码"
                   className="font-mono uppercase tracking-widest text-xs h-8"
