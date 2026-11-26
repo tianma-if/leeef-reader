@@ -326,6 +326,81 @@ async fn pairing_join(
 }
 
 #[tauri::command]
+async fn pairing_nearby(
+    app: tauri::AppHandle,
+    runtime: State<'_, trusted_sync::SyncRuntime>,
+) -> Result<Vec<trusted_sync::PairingPeer>, String> {
+    trusted_sync::nearby_pairing_devices(&app, &runtime).await
+}
+
+#[tauri::command]
+async fn pairing_join_peer(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    runtime: State<'_, trusted_sync::SyncRuntime>,
+    peer: trusted_sync::PairingPeer,
+    verification: tauri::ipc::Channel<String>,
+    replace_existing: bool,
+) -> Result<trusted_sync::SyncStatus, String> {
+    trusted_sync::join_pairing_peer(&app, &state, &runtime, peer, verification, replace_existing).await
+}
+
+#[tauri::command]
+async fn pairing_scan_qr(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    runtime: State<'_, trusted_sync::SyncRuntime>,
+    replace_existing: bool,
+) -> Result<Option<trusted_sync::SyncStatus>, String> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        use tauri_plugin_native_bridge::NativeBridgeExt;
+
+        let text = app.native_bridge().scan_pairing_qr().await.map_err(|error| error.to_string())?;
+        match text {
+            Some(text) => trusted_sync::join_pairing_qr(&app, &state, &runtime, &text, replace_existing).await.map(Some),
+            None => Ok(None),
+        }
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let _ = (app, state, runtime, replace_existing);
+        Err("请在手机或平板上扫描配对二维码。".into())
+    }
+}
+
+#[tauri::command]
+fn pairing_status(
+    runtime: State<trusted_sync::SyncRuntime>,
+    session_id: String,
+) -> Result<trusted_sync::PairingHostStatus, String> {
+    trusted_sync::pairing_status(&runtime, &session_id)
+}
+
+#[tauri::command]
+fn pairing_decide(
+    runtime: State<trusted_sync::SyncRuntime>,
+    session_id: String,
+    approval_id: String,
+    approve: bool,
+) -> Result<(), String> {
+    trusted_sync::decide_pairing(&runtime, &session_id, &approval_id, approve)
+}
+
+#[tauri::command]
+fn pairing_stop(
+    runtime: State<trusted_sync::SyncRuntime>,
+    session_id: String,
+) -> Result<(), String> {
+    trusted_sync::stop_pairing(&runtime, &session_id)
+}
+
+#[tauri::command]
+fn pairing_cancel_join(runtime: State<trusted_sync::SyncRuntime>) -> Result<(), String> {
+    trusted_sync::cancel_pairing_join(&runtime)
+}
+
+#[tauri::command]
 fn settings_sync_status(
     state: State<AppState>,
     runtime: State<trusted_sync::SyncRuntime>,
@@ -495,6 +570,13 @@ pub fn run() {
             reading_links::take_reading_link,
             pairing_start,
             pairing_join,
+            pairing_nearby,
+            pairing_join_peer,
+            pairing_scan_qr,
+            pairing_status,
+            pairing_decide,
+            pairing_stop,
+            pairing_cancel_join,
             settings_sync_status,
             library_history,
             library_history_restore,

@@ -28,7 +28,7 @@ export function LibraryBackup() {
         <CardTitle className="text-base">书库备份与恢复</CardTitle>
         <CardDescription>
           将书籍、封面、分类、进度、书摘、书签和阅读时长保存为加密文件，无需云服务或设备配对。
-          服务凭据请另行导出下方的同步配置恢复包。当前支持总计 128 MiB 的书籍与封面。
+          服务凭据可在设备配对页导出为同步配置恢复包。当前支持总计 128 MiB 的书籍与封面。
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">

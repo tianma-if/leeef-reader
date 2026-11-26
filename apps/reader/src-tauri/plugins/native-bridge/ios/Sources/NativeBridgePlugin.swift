@@ -1,3 +1,5 @@
+import AVFoundation
+import Network
 import Tauri
 import UIKit
 import WebKit
@@ -20,6 +22,70 @@ class NativeBridgePlugin: Plugin {
 
   @objc public override func load(webview: WKWebView) {
     self.webView = webview
+  }
+
+  @objc public func browse_pairing_devices(_ invoke: Invoke) {
+    DispatchQueue.main.async {
+      let browser = NWBrowser(for: .bonjourWithTXTRecord(type: "_leeef-pair._tcp", domain: "local."), using: .tcp)
+      var devices: [[String: Any]] = []
+      var denied = false
+      browser.stateUpdateHandler = { state in
+        if case .waiting(.dns(let code)) = state, code == -65570 {
+          denied = true
+        } else if case .ready = state {
+          denied = false
+        }
+      }
+      browser.browseResultsChangedHandler = { results, _ in
+        devices = results.compactMap { result in
+          guard case .bonjour(let txt) = result.metadata,
+            let name = txt["name"], let id = txt["id"], let key = txt["key"],
+            let expiry = txt["expires"].flatMap(UInt64.init),
+            let port = txt["port"].flatMap(UInt16.init),
+            let addresses = txt["addresses"]
+          else { return nil }
+          return [
+            "name": name, "sessionId": id, "hostPublicKey": key,
+            "expiresAt": expiry, "port": port,
+            "addresses": addresses.split(separator: ",").map(String.init),
+          ]
+        }
+      }
+      browser.start(queue: .main)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+        browser.cancel()
+        if denied && devices.isEmpty {
+          invoke.reject("请在 iPhone 设置中允许 Leeef 访问局域网，或导入配置文件。")
+        } else {
+          invoke.resolve(["devices": devices])
+        }
+      }
+    }
+  }
+
+  @objc public func scan_pairing_qr(_ invoke: Invoke) {
+    let openScanner = { [weak self] (allowed: Bool) in
+      DispatchQueue.main.async {
+        guard allowed else {
+          return invoke.reject("请在系统设置中允许 Leeef 使用相机，或选择导入配置文件。")
+        }
+        guard var presenter = self?.webView?.window?.rootViewController else {
+          return invoke.reject("无法打开相机。")
+        }
+        while let presented = presenter.presentedViewController { presenter = presented }
+        let scanner = PairingQrScanner { text, error in
+          if let error { invoke.reject(error) }
+          else { invoke.resolve(["text": text as Any? ?? NSNull()]) }
+        }
+        scanner.modalPresentationStyle = .fullScreen
+        presenter.present(scanner, animated: true)
+      }
+    }
+    switch AVCaptureDevice.authorizationStatus(for: .video) {
+    case .authorized: openScanner(true)
+    case .notDetermined: AVCaptureDevice.requestAccess(for: .video, completionHandler: openScanner)
+    default: openScanner(false)
+    }
   }
 
   @objc public func pick_books(_ invoke: Invoke) {

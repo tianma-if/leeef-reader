@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import {
   Bot,
@@ -6,17 +6,15 @@ import {
   Database,
   Eye,
   EyeOff,
-  KeyRound,
   NotebookPen,
   Palette,
   Save,
   Share2,
   Volume2,
-  Wifi,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { toast } from 'sonner'
-import { api, type EdgeEverNotebook, type PairingOffer, type Settings, type SettingsSyncStatus } from '../api'
+import { api, type EdgeEverNotebook, type Settings, type SettingsSyncStatus } from '../api'
 import { prepareEdgeEverExcerptChapters } from '../reader/excerptChapters'
 import { Button } from '@/components/ui/button'
 import {
@@ -26,14 +24,6 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -44,13 +34,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
-import { Textarea } from '@/components/ui/textarea'
 import { FontPicker } from '../reader/FontPicker'
 import { THEMES } from '../reader/bookStyles'
 import { LibraryBackup } from './LibraryBackup'
 import { SyncCenter } from './SyncCenter'
 import { SettingChoices, SettingSwitch } from './SettingControls'
 import { EdgeEverStatusCard } from './EdgeEverStatusCard'
+import { DevicePairing } from './DevicePairing'
 
 const desktop = !/Android|iPhone|iPad/i.test(navigator.userAgent)
 
@@ -97,21 +87,10 @@ export function SettingsScreen() {
     endpoint?: string
     token?: string
   }>({ running: false })
-  const [pair, setPair] = useState<PairingOffer | null>(null)
-  const [pairCode, setPairCode] = useState('')
-  const [pairBusy, setPairBusy] = useState(false)
-  const [pairJoinError, setPairJoinError] = useState('')
+  const [pairingOpen, setPairingOpen] = useState(false)
   const [syncStatus, setSyncStatus] = useState<SettingsSyncStatus | null>(null)
-  const [recoveryPassword, setRecoveryPassword] = useState('')
-  const [recoveryPackage, setRecoveryPackage] = useState('')
-  const [recoveryBusy, setRecoveryBusy] = useState(false)
-  const recoveryFile = useRef<HTMLInputElement>(null)
   const [edgeEverBusy, setEdgeEverBusy] = useState(false)
   const [edgeEverNotebooks, setEdgeEverNotebooks] = useState<EdgeEverNotebook[]>([])
-
-  // Modal dialog states
-  const [joinConfirmOpen, setJoinConfirmOpen] = useState(false)
-  const [recoveryConfirmOpen, setRecoveryConfirmOpen] = useState(false)
 
   useEffect(() => {
     void api.getSettings().then((settings) => {
@@ -160,45 +139,6 @@ export function SettingsScreen() {
     }).catch((cause) => toast.error(String(cause)))
   }
 
-  const handleJoinExecute = () => {
-    setJoinConfirmOpen(false)
-    setPairJoinError('')
-    setPairBusy(true)
-    void api
-      .pairingJoin(pairCode, Boolean(syncStatus?.paired))
-      .then(async (status) => {
-        setSyncStatus(status)
-        setValue(await api.getSettings())
-        toast.success('配对成功，配置会继续自动同步')
-      })
-      .catch((cause) => setPairJoinError(String(cause)))
-      .finally(() => setPairBusy(false))
-  }
-
-  const handleRecoveryExecute = () => {
-    setRecoveryConfirmOpen(false)
-    setRecoveryBusy(true)
-    void api
-      .settingsRecoveryImport(recoveryPackage, recoveryPassword, Boolean(syncStatus?.paired))
-      .then(async (status) => {
-        let latest = status
-        try {
-          latest = await api.settingsSyncNow()
-        } catch {
-          // Local snapshot imported
-        }
-        setSyncStatus(latest)
-        setValue(await api.getSettings())
-        toast.success(
-          latest.lastSuccessAt
-            ? '恢复完成，已合并云端最新配置'
-            : '恢复包已导入，联网后将继续同步',
-        )
-      })
-      .catch((cause) => toast.error(String(cause)))
-      .finally(() => setRecoveryBusy(false))
-  }
-
   return (
     <main className="mx-auto max-w-2xl px-4 pt-4 pb-16 space-y-6">
       <header className="flex items-center justify-between gap-3 border-b pb-3">
@@ -213,6 +153,27 @@ export function SettingsScreen() {
           保存设置
         </Button>
       </header>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Share2 className="size-4 text-primary" />
+            设备配对与状态
+          </CardTitle>
+          <CardDescription>连接另一台设备，或用加密恢复包导入同步配置。</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Button onClick={() => setPairingOpen(true)}>设备配对</Button>
+          <SyncCenter status={syncStatus} onStatus={setSyncStatus} />
+        </CardContent>
+      </Card>
+      <DevicePairing
+        open={pairingOpen}
+        onOpenChange={setPairingOpen}
+        status={syncStatus}
+        onStatus={setSyncStatus}
+        onImported={() => void api.getSettings().then(setValue).catch(() => undefined)}
+      />
 
       {/* 1. 外观与阅读排版 */}
       <Card>
@@ -623,198 +584,7 @@ export function SettingsScreen() {
         </Card>
       ) : <EdgeEverStatusCard />}
 
-      {/* 6. 设备配对与配置同步 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Share2 className="size-4 text-primary" />
-            设备配对与状态
-          </CardTitle>
-          <CardDescription>生成配对码或加入其它设备，共享配置与已开启同步的书库</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <SyncCenter status={syncStatus} onStatus={setSyncStatus} />
-
-          <p id="pairing-network-hint" className="flex items-start gap-2 text-sm text-muted-foreground">
-            <Wifi aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            <span>配对时，两台设备需连接到同一局域网（例如同一 Wi-Fi）。</span>
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="grid gap-2 rounded-lg border p-3">
-              <Label className="text-xs">让另一台设备加入</Label>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  aria-describedby="pairing-network-hint"
-                  disabled={pairBusy}
-                  onClick={() => {
-                    setPairBusy(true)
-                    void api
-                      .pairingStart()
-                      .then(async (offer) => {
-                      setPair(offer)
-                      setSyncStatus(await api.settingsSyncStatus())
-                    })
-                      .catch((cause) => toast.error(String(cause)))
-                      .finally(() => setPairBusy(false))
-                  }}
-                >
-                  生成配对码
-                </Button>
-                {pair ? (
-                  <strong className="font-mono tracking-widest text-primary text-sm">
-                    {pair.code}
-                  </strong>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="grid gap-2 rounded-lg border p-3">
-              <Label className="text-xs">加入已有设备</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  value={pairCode}
-                  aria-describedby={
-                    pairJoinError ? 'pairing-network-hint pairing-join-error' : 'pairing-network-hint'
-                  }
-                  disabled={pairBusy}
-                  maxLength={12}
-                  placeholder="12 位配对码"
-                  className="font-mono uppercase tracking-widest text-xs h-8"
-                  onChange={(event) => {
-                    setPairCode(event.target.value.toUpperCase())
-                    setPairJoinError('')
-                  }}
-                />
-                <Button
-                  size="sm"
-                  disabled={pairBusy || pairCode.trim().length !== 12}
-                  onClick={() => {
-                    if (syncStatus?.paired) setJoinConfirmOpen(true)
-                    else handleJoinExecute()
-                  }}
-                >
-                  加入
-                </Button>
-              </div>
-              {pairJoinError && (
-                <p id="pairing-join-error" role="alert" className="text-sm text-destructive">
-                  {pairJoinError}
-                </p>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
       <LibraryBackup />
-
-      {/* 7. 灾难恢复 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <KeyRound className="size-4 text-primary" />
-            同步配置恢复包
-          </CardTitle>
-          <CardDescription>
-            恢复包包含同步空间密钥与当前配置，不含书籍、进度或笔记，请另行保留这些数据。恢复包使用独立密码加密保存
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid gap-1.5">
-            <Label>加密密码（至少 12 位）</Label>
-            <PasswordInput
-              value={recoveryPassword}
-              onChange={(e: any) => setRecoveryPassword(e.target.value)}
-              placeholder="请输入高强度密码"
-            />
-          </div>
-
-          <div className="flex flex-wrap gap-2 pt-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={recoveryBusy || !syncStatus?.paired || recoveryPassword.length < 12}
-              onClick={() => {
-                setRecoveryBusy(true)
-                void api
-                  .settingsRecoveryExport(recoveryPassword)
-                  .then(async (content) => {
-                    setRecoveryPackage(content)
-                    const saved = await api.saveTextFile(
-                      `leeef-recovery-${new Date().toISOString().slice(0, 10)}.leeef-recovery`,
-                      content,
-                    )
-                    if (saved.saved) toast.success('恢复包已导出')
-                  })
-                  .catch((cause) => toast.error(String(cause)))
-                  .finally(() => setRecoveryBusy(false))
-              }}
-            >
-              导出加密恢复包
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!recoveryPackage}
-              onClick={() => {
-                void navigator.clipboard
-                  .writeText(recoveryPackage)
-                  .then(() => toast.success('恢复包已复制到剪贴板'))
-                  .catch((cause) => toast.error(String(cause)))
-              }}
-            >
-              复制恢复包
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => recoveryFile.current?.click()}
-            >
-              选择本地文件
-            </Button>
-            <input
-              ref={recoveryFile}
-              type="file"
-              className="hidden"
-              accept=".leeef-recovery,application/json,text/plain"
-              onChange={(event) => {
-                const file = event.target.files?.[0]
-                if (file) {
-                  void file
-                    .text()
-                    .then(setRecoveryPackage)
-                    .catch((cause) => toast.error(String(cause)))
-                }
-                event.target.value = ''
-              }}
-            />
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label className="text-xs">恢复包密文内容</Label>
-            <Textarea
-              value={recoveryPackage}
-              onChange={(event) => setRecoveryPackage(event.target.value)}
-              placeholder="粘贴从密码管理器导出的恢复包内容"
-              className="min-h-20 font-mono text-xs"
-            />
-          </div>
-
-          <Button
-            size="sm"
-            disabled={recoveryBusy || !recoveryPackage.trim() || recoveryPassword.length < 12}
-            onClick={() => {
-              if (syncStatus?.paired) setRecoveryConfirmOpen(true)
-              else handleRecoveryExecute()
-            }}
-          >
-            从恢复包恢复
-          </Button>
-        </CardContent>
-      </Card>
 
       {/* 8. 本机 MCP 服务 */}
       <Card>
@@ -863,42 +633,6 @@ export function SettingsScreen() {
           保存全部设置
         </Button>
       </div>
-
-      {/* Join Confirm Dialog */}
-      <Dialog open={joinConfirmOpen} onOpenChange={setJoinConfirmOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>确认加入新同步空间？</DialogTitle>
-            <DialogDescription>
-              加入新的同步空间将替换当前设备的同步关系，确认继续吗？
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setJoinConfirmOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={handleJoinExecute}>确认替换并加入</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Recovery Confirm Dialog */}
-      <Dialog open={recoveryConfirmOpen} onOpenChange={setRecoveryConfirmOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>确认导入恢复包？</DialogTitle>
-            <DialogDescription>
-              从恢复包导入会替换当前设备的同步空间和配置，确认继续吗？
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRecoveryConfirmOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={handleRecoveryExecute}>确认恢复</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </main>
   )
 }

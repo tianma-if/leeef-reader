@@ -6,6 +6,12 @@
   <false/>
   <key>NSLocalNetworkUsageDescription</key>
   <string>Leeef 使用局域网安全配对你的阅读设备。</string>
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_leeef-pair._tcp</string>
+  </array>
+  <key>NSCameraUsageDescription</key>
+  <string>Leeef 使用相机扫描另一台设备显示的配对二维码。</string>
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsLocalNetworking</key>

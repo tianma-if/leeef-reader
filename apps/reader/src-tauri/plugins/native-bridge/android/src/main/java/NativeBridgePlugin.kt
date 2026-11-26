@@ -43,6 +43,8 @@ import com.google.android.play.core.install.InstallStateUpdatedListener
 import com.google.android.play.core.install.model.AppUpdateType
 import com.google.android.play.core.install.model.InstallStatus
 import com.google.android.play.core.install.model.UpdateAvailability
+import com.google.zxing.client.android.Intents
+import com.journeyapps.barcodescanner.ScanOptions
 import java.io.ByteArrayOutputStream
 import java.net.Inet4Address
 
@@ -124,6 +126,27 @@ class NativeBridgePlugin(private val activity: Activity) : Plugin(activity) {
             }
         }
         invoke.resolve(JSObject().put("links", links).put("vpnActive", vpnActive))
+    }
+
+    @Command
+    fun scan_pairing_qr(invoke: Invoke) {
+        val options = ScanOptions()
+            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            .setPrompt("扫描另一台设备显示的 Leeef 配对二维码")
+            .setBeepEnabled(false)
+            .setOrientationLocked(false)
+        startActivityForResult(invoke, options.createScanIntent(activity), "onPairingQr")
+    }
+
+    @ActivityCallback
+    private fun onPairingQr(invoke: Invoke, result: ActivityResult) {
+        val data = result.data
+        if (data?.getBooleanExtra(Intents.Scan.MISSING_CAMERA_PERMISSION, false) == true) {
+            invoke.reject("请在系统设置中允许 Leeef 使用相机，或选择导入配置文件。")
+            return
+        }
+        val text = if (result.resultCode == Activity.RESULT_OK) data?.getStringExtra(Intents.Scan.RESULT) else null
+        invoke.resolve(JSObject().put("text", text))
     }
 
     @Command
