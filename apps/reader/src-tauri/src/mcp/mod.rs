@@ -1,4 +1,5 @@
 mod content;
+mod import;
 mod reading;
 mod server;
 
@@ -49,6 +50,7 @@ pub fn start(app: &AppHandle, state: &AppState) -> Result<McpStatus, String> {
         bind_state,
         bind_token,
         bind_cancel,
+        Some(app.clone()),
     ))?;
     *handle.endpoint.lock().map_err(|e| e.to_string())? = Some(format!("http://{addr}/mcp"));
     *handle.token.lock().map_err(|e| e.to_string())? = Some(token);
@@ -91,7 +93,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let state = db::open(root).unwrap();
         let cancel = CancellationToken::new();
-        let addr = bind_and_serve(state.clone(), "secret".into(), cancel.clone())
+        let addr = bind_and_serve(state.clone(), "secret".into(), cancel.clone(), None)
             .await
             .unwrap();
         (format!("http://{addr}/mcp"), cancel, state)
@@ -246,6 +248,7 @@ mod tests {
             "search_books",
             "get_book",
             "get_book_content",
+            "import_book",
             "update_book_metadata",
             "move_book",
             "delete_book",
@@ -487,6 +490,118 @@ mod tests {
             db::get_reading_progress(&state, &first.id).unwrap().locator,
             stop
         );
+        cancel.cancel();
+    }
+
+    #[tokio::test]
+    async fn ebook_import_requires_confirmation_and_preserves_the_reviewed_file() {
+        let (endpoint, cancel, state) = spawn_server().await;
+        let session = initialize(&endpoint).await;
+        let source = tempfile::tempdir().unwrap();
+        let path = source.path().join("Review me.TXT");
+        let original = b"Chapter 1\nApproved text";
+        std::fs::write(&path, original).unwrap();
+
+        let call = |name: &str, arguments: Value| {
+            let request = json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments}
+            });
+            async { post(&endpoint, Some("secret"), &session, request).await.1 }
+        };
+        let is_error = |response: &Value| {
+            response["result"]["isError"] == true || response.get("error").is_some()
+        };
+
+        assert!(is_error(
+            &call("import_book", json!({"path": "relative.txt"})).await
+        ));
+        let planned = call("import_book", json!({"path": path, "author": "Leeef"})).await;
+        let plan = structured(&planned);
+        assert!(plan["summary"].as_str().unwrap().contains("Review me.TXT"));
+        let plan_id = plan["planId"].as_str().unwrap();
+        let unconfirmed = json!({"planId": plan_id, "confirmationToken": "wrong"});
+        assert!(is_error(&call("apply_write", unconfirmed).await));
+        assert!(db::list_books(&state).unwrap().is_empty());
+        assert_eq!(
+            std::fs::read_dir(state.root.join("books")).unwrap().count(),
+            0
+        );
+
+        let confirmed = call("confirm_write", json!({"planId": plan_id})).await;
+        let token = &structured(&confirmed)["confirmationToken"];
+        let apply = json!({"planId": plan_id, "confirmationToken": token});
+        assert!(db::list_books(&state).unwrap().is_empty());
+        std::fs::write(&path, b"Chapter 1\nModified text").unwrap();
+        assert!(is_error(&call("apply_write", apply.clone()).await));
+        assert!(db::list_books(&state).unwrap().is_empty());
+
+        std::fs::write(&path, original).unwrap();
+        state
+            .db
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TEMP TRIGGER fail_audit BEFORE INSERT ON audit_events
+             BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END;",
+            )
+            .unwrap();
+        assert!(is_error(&call("apply_write", apply.clone()).await));
+        assert_eq!(db::list_books(&state).unwrap().len(), 1);
+        state
+            .db
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TRIGGER fail_audit")
+            .unwrap();
+
+        let applied = call("apply_write", apply.clone()).await;
+        assert_eq!(structured(&applied)["applied"], true, "{applied}");
+        let book_id = structured(&applied)["entityId"].as_str().unwrap();
+        let retried = call("apply_write", apply).await;
+        assert_eq!(structured(&retried), structured(&applied));
+
+        let books = db::list_books(&state).unwrap();
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].id, book_id);
+        assert_eq!(books[0].title, "Review me");
+        assert_eq!(books[0].author.as_deref(), Some("Leeef"));
+        assert_eq!(books[0].media_type, "text/plain");
+        assert_eq!(db::book_bytes(&state, book_id).unwrap(), original);
+        let content = call("get_book_content", json!({"bookId": book_id})).await;
+        assert_eq!(structured(&content)["content"], "Chapter 1\nApproved text");
+
+        let duplicate = call("import_book", json!({"path": path})).await;
+        let duplicate_id = &structured(&duplicate)["planId"];
+        let confirmed = call("confirm_write", json!({"planId": duplicate_id})).await;
+        let token = &structured(&confirmed)["confirmationToken"];
+        assert!(is_error(
+            &call(
+                "apply_write",
+                json!({"planId": duplicate_id, "confirmationToken": token})
+            )
+            .await
+        ));
+        assert_eq!(db::list_books(&state).unwrap().len(), 1);
+        assert_eq!(
+            db::library_stats(&state).unwrap().pending_sync_operations,
+            1
+        );
+
+        let db = state.db.lock().unwrap();
+        let audit: String = db
+            .query_row(
+                "SELECT parameters_json FROM audit_events WHERE action = 'import_book'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let audit: Value = serde_json::from_str(&audit).unwrap();
+        assert_eq!(audit["entityId"], book_id);
+        assert_eq!(audit["payload"]["sha256"], db::sha256_hex(original));
+        assert!(!audit.to_string().contains("Approved text"));
         cancel.cancel();
     }
 

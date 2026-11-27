@@ -1,4 +1,5 @@
 import { api, type Book } from '../api'
+import { txtToEpub } from '../lib/txtToEpub'
 
 let foliateLoaded: Promise<void> | undefined
 
@@ -21,6 +22,11 @@ export function loadFoliate() {
 
 export async function loadBookSource(book: Book) {
   const type = book.mediaType || 'application/epub+zip'
+  if (type === 'text/plain') {
+    const bytes = await api.bookBytes(book.id)
+    const epub = txtToEpub(bytes, `${book.title}.txt`)
+    return new File([epub], `${book.title}.epub`, { type: 'application/epub+zip' })
+  }
   const name = `${book.title}.epub`
   if (book.filePath) {
     try {

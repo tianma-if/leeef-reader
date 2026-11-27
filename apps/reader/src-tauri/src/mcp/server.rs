@@ -23,12 +23,14 @@ use rmcp::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tauri::{AppHandle, Emitter};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::db::{self, AppState};
 
 use super::content::extract_book_text;
+use super::import::{BookImport, ImportBookInput};
 use super::reading::{
     self, ExcerptSearchInput, ExcerptSearchOutput, ExcerptSummary, ReadingActivityInput,
     ReadingActivityOutput, ReadingProgressOutput, ReadingRecapOutput,
@@ -42,12 +44,15 @@ struct WritePlan {
     payload: serde_json::Value,
     expires_at: Instant,
     confirmation: Option<String>,
-    applied: Option<ApplyWriteOutput>,
+    applying: bool,
+    outcome: Option<ApplyWriteOutput>,
+    audited: bool,
 }
 
 #[derive(Clone)]
 pub struct LeeefMcp {
     state: AppState,
+    app: Option<AppHandle>,
     plans: Arc<Mutex<HashMap<String, WritePlan>>>,
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
@@ -326,9 +331,10 @@ fn matches_query(haystack: &str, query: &str) -> bool {
 }
 
 impl LeeefMcp {
-    pub fn new(state: AppState) -> Self {
+    pub fn new(state: AppState, app: Option<AppHandle>) -> Self {
         Self {
             state,
+            app,
             plans: Arc::new(Mutex::new(HashMap::new())),
             tool_router: Self::tool_router(),
         }
@@ -366,6 +372,7 @@ impl LeeefMcp {
         let plan_id = format!("plan-{}", Uuid::new_v4());
         let expires_at = Instant::now() + PLAN_TTL;
         let mut plans = self.plans.lock().map_err(|e| err(e.to_string()))?;
+        plans.retain(|_, plan| plan.applying || Instant::now() < plan.expires_at);
         plans.insert(
             plan_id.clone(),
             WritePlan {
@@ -373,7 +380,9 @@ impl LeeefMcp {
                 payload,
                 expires_at,
                 confirmation: None,
-                applied: None,
+                applying: false,
+                outcome: None,
+                audited: false,
             },
         );
         Ok(Json(PlanWriteOutput {
@@ -389,6 +398,12 @@ impl LeeefMcp {
         payload: &serde_json::Value,
     ) -> Result<(String, String), McpError> {
         match action {
+            "import_book" => {
+                let import: BookImport =
+                    serde_json::from_value(payload.clone()).map_err(|e| err(e.to_string()))?;
+                let id = import.apply(&self.state).map_err(err)?;
+                Ok((id, Uuid::new_v4().to_string()))
+            }
             "update_book_metadata" => {
                 let input: UpdateBookMetadataInput =
                     serde_json::from_value(payload.clone()).map_err(|e| err(e.to_string()))?;
@@ -749,6 +764,24 @@ impl LeeefMcp {
     }
 
     #[tool(
+        description = "Plan importing a local ebook into Leeef Reader. Review the source and metadata, then call confirm_write and apply_write. On success, apply_write returns the book ID as entityId."
+    )]
+    async fn import_book(
+        &self,
+        Parameters(input): Parameters<ImportBookInput>,
+    ) -> Result<Json<PlanWriteOutput>, McpError> {
+        let (import, summary) = tokio::task::spawn_blocking(move || BookImport::prepare(input))
+            .await
+            .map_err(|e| err(e.to_string()))?
+            .map_err(err)?;
+        self.queue_plan(
+            "import_book",
+            serde_json::to_value(import).map_err(|e| err(e.to_string()))?,
+            summary,
+        )
+    }
+
+    #[tool(
         description = "Plan a title, author, description, or rating update. Returns a plan that requires confirm_write and apply_write."
     )]
     fn update_book_metadata(
@@ -1070,11 +1103,20 @@ impl LeeefMcp {
     #[tool(
         description = "Apply a confirmed one-time write plan, including sync operation and audit event."
     )]
-    fn apply_write(
+    async fn apply_write(
         &self,
         Parameters(input): Parameters<ApplyWriteInput>,
     ) -> Result<Json<ApplyWriteOutput>, McpError> {
-        let (action, payload) = {
+        let server = self.clone();
+        tokio::task::spawn_blocking(move || server.apply_plan(input))
+            .await
+            .map_err(|e| err(e.to_string()))?
+    }
+}
+
+impl LeeefMcp {
+    fn apply_plan(&self, input: ApplyWriteInput) -> Result<Json<ApplyWriteOutput>, McpError> {
+        let (action, payload, previous_outcome) = {
             let mut plans = self.plans.lock().map_err(|e| err(e.to_string()))?;
             let plan = plans
                 .get_mut(&input.plan_id)
@@ -1088,34 +1130,59 @@ impl LeeefMcp {
             {
                 return Err(err("write plan was not confirmed"));
             }
-            if let Some(applied) = plan.applied.clone() {
-                return Ok(Json(applied));
+            if plan.applying {
+                return Err(err(
+                    "write plan is already being applied; retry the same plan",
+                ));
             }
-            (plan.action.clone(), plan.payload.clone())
-        };
-        let (entity_id, operation_id) = self.apply_action(&action, &payload)?;
-        db::audit(
-            &self.state,
-            &action,
-            &json!({"planId": input.plan_id, "entityId": entity_id, "payload": payload}),
-            "applied",
-        )
-        .map_err(err)?;
-        let applied = ApplyWriteOutput {
-            entity_id,
-            operation_id,
-            applied: true,
-        };
-        if let Ok(mut plans) = self.plans.lock() {
-            if let Some(plan) = plans.get_mut(&input.plan_id) {
-                plan.applied = Some(applied.clone());
+            if let Some(outcome) = plan.outcome.as_ref().filter(|_| plan.audited) {
+                return Ok(Json(outcome.clone()));
             }
-        }
-        Ok(Json(applied))
-    }
-}
+            plan.applying = true;
+            (
+                plan.action.clone(),
+                plan.payload.clone(),
+                plan.outcome.clone(),
+            )
+        };
 
-impl LeeefMcp {
+        let outcome = match previous_outcome {
+            Some(outcome) => Ok(outcome),
+            None => self
+                .apply_action(&action, &payload)
+                .map(|(entity_id, operation_id)| {
+                    if action == "import_book" {
+                        if let Some(app) = &self.app {
+                            let _ = app.emit("library-synced", ());
+                        }
+                    }
+                    ApplyWriteOutput {
+                        entity_id,
+                        operation_id,
+                        applied: true,
+                    }
+                }),
+        };
+        let audit = outcome.as_ref().ok().map(|outcome| {
+            db::audit(
+                &self.state,
+                &action,
+                &json!({"planId": input.plan_id, "entityId": outcome.entity_id, "payload": payload}),
+                "applied",
+            )
+            .map_err(err)
+        });
+
+        let mut plans = self.plans.lock().map_err(|e| err(e.to_string()))?;
+        if let Some(plan) = plans.get_mut(&input.plan_id) {
+            plan.applying = false;
+            plan.outcome = outcome.as_ref().ok().cloned();
+            plan.audited = matches!(&audit, Some(Ok(())));
+        }
+        audit.transpose()?;
+        outcome.map(Json)
+    }
+
     fn bookshelf_summaries(&self) -> Result<Vec<BookshelfSummary>, McpError> {
         db::list_shelves(&self.state)
             .map_err(err)?
@@ -1279,12 +1346,13 @@ pub async fn bind_and_serve(
     state: AppState,
     token: String,
     cancel: CancellationToken,
+    app: Option<AppHandle>,
 ) -> Result<SocketAddr, String> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .map_err(|e| e.to_string())?;
     let addr = listener.local_addr().map_err(|e| e.to_string())?;
-    let mcp = LeeefMcp::new(state);
+    let mcp = LeeefMcp::new(state, app);
     let service = StreamableHttpService::new(
         move || Ok(mcp.clone()),
         LocalSessionManager::default().into(),
