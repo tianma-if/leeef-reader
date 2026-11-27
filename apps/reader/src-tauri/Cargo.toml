@@ -1,6 +1,6 @@
 [package]
 name = "leeef_reader"
-version = "2.11.0"
+version = "2.12.0"
 description = "Leeef Reader"
 authors = ["Leeef"]
 edition = "2021"
@@ -51,6 +51,7 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 hostname = "0.4"
 if-addrs = "0.15"
 qrcode = { version = "0.14", default-features = false }
+os_info = { version = "3.15", default-features = false }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 socket2 = { version = "0.6", features = ["all"] }

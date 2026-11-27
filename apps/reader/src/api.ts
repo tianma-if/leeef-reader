@@ -1,5 +1,15 @@
 import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core'
 
+type AppInfo = {
+  version: string
+  platform: string
+  osVersion: string | null
+  arch: string
+  debug: boolean
+  tauriVersion: string
+  webviewVersion: string | null
+}
+
 export type McpStatus = {
   running: boolean
   endpoint: string | null
@@ -265,6 +275,7 @@ export const api = {
   recordSession: (bookId: string, seconds: number) =>
     invoke('record_session', { bookId, seconds }),
   listSessions: () => invoke<Session[]>('list_sessions'),
+  getAppInfo: () => invoke<AppInfo>('get_app_info'),
   getSettings: () => invoke<Settings>('get_settings'),
   saveSettings: (value: Settings) => invoke('save_settings', { value }),
   edgeEverTest: (draft?: Settings) => invoke<{ ok: boolean; message: string }>('edgeever_test', { draft }),

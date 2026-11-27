@@ -9,7 +9,7 @@ mod reading_links;
 mod trusted_sync;
 
 use db::AppState;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::ipc::Response;
 use tauri::{Emitter, Manager, State};
 
@@ -22,6 +22,42 @@ struct ImportPayload {
     author: Option<String>,
     media_type: String,
     cover: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppInfo {
+    version: String,
+    platform: &'static str,
+    os_version: Option<String>,
+    arch: &'static str,
+    debug: bool,
+    tauri_version: &'static str,
+    webview_version: Option<String>,
+}
+
+#[tauri::command]
+async fn get_app_info(app: tauri::AppHandle) -> Result<AppInfo, String> {
+    // On Android, Wry queries the WebView on the activity's main thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        let os = os_info::get();
+        let os_version = match os.version() {
+            os_info::Version::Unknown => None,
+            version => Some(version.to_string()),
+        };
+
+        AppInfo {
+            version: app.package_info().version.to_string(),
+            platform: std::env::consts::OS,
+            os_version,
+            arch: std::env::consts::ARCH,
+            debug: cfg!(debug_assertions),
+            tauri_version: tauri::VERSION,
+            webview_version: tauri::webview_version().ok(),
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -543,6 +579,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_app_info,
             list_books,
             import_book,
             delete_book,

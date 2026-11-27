@@ -42,6 +42,7 @@ import { SyncCenter } from './SyncCenter'
 import { SettingChoices, SettingSwitch } from './SettingControls'
 import { EdgeEverStatusCard } from './EdgeEverStatusCard'
 import { DevicePairing } from './DevicePairing'
+import { AboutCard } from './AboutCard'
 
 const desktop = !/Android|iPhone|iPad/i.test(navigator.userAgent)
 
@@ -146,6 +147,8 @@ export function SettingsScreen() {
           保存设置
         </Button>
       </header>
+
+      <AboutCard />
 
       <Card>
         <CardHeader>
