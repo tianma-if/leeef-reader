@@ -76,7 +76,7 @@ The previous Flutter client does not auto-update to this app, and libraries are 
 
 ## MCP
 
-Leeef speaks [Model Context Protocol](https://modelcontextprotocol.io/) from inside the Tauri process. In Settings, start MCP and point your agent at the printed loopback endpoint with the Bearer token.
+Leeef speaks [Model Context Protocol](https://modelcontextprotocol.io/) from inside the Tauri process. Enable MCP in Settings to see the Streamable HTTP endpoint and copy the JSON connection configuration. Once enabled, the server starts with Leeef Reader and reuses its local address and Bearer token until you disable it.
 
 Read tools include `list_books`, `search_books`, `get_book`, `get_book_content`, shelves, excerpts, bookmarks, and reading progress. Writes return a plan that must go through `confirm_write` → `apply_write` so an agent cannot mutate the library in one shot.
 

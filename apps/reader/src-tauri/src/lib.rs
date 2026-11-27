@@ -293,23 +293,18 @@ fn save_settings(
 }
 
 #[tauri::command]
-fn mcp_database_path(state: State<AppState>) -> String {
-    db::database_path(&state)
+fn mcp_start(mcp: State<mcp::McpHandle>, state: State<AppState>) -> Result<mcp::McpStatus, String> {
+    mcp.start(&state)
 }
 
 #[tauri::command]
-fn mcp_start(app: tauri::AppHandle, state: State<AppState>) -> Result<mcp::McpStatus, String> {
-    mcp::start(&app, &state)
+fn mcp_stop(mcp: State<mcp::McpHandle>, state: State<AppState>) -> Result<mcp::McpStatus, String> {
+    mcp.stop(&state)
 }
 
 #[tauri::command]
-fn mcp_stop(app: tauri::AppHandle, state: State<AppState>) -> Result<mcp::McpStatus, String> {
-    mcp::stop(&app, &state)
-}
-
-#[tauri::command]
-fn mcp_status(app: tauri::AppHandle, state: State<AppState>) -> Result<mcp::McpStatus, String> {
-    mcp::status(&app, &state)
+fn mcp_status(mcp: State<mcp::McpHandle>, state: State<AppState>) -> Result<mcp::McpStatus, String> {
+    mcp.status(&state)
 }
 
 #[tauri::command]
@@ -530,9 +525,9 @@ pub fn run() {
             let runtime = trusted_sync::SyncRuntime::default();
             trusted_sync::start_background(app.handle().clone(), state.clone(), runtime.clone());
             edgeever::start_background(state.clone());
+            app.manage(mcp::McpHandle::restore(&state, Some(app.handle().clone())));
             app.manage(state);
             app.manage(runtime);
-            app.manage(mcp::McpHandle::default());
             app.manage(reading_links::PendingReadingLink::default());
             #[cfg(desktop)]
             reading_links::listen(app.handle())?;
@@ -569,7 +564,6 @@ pub fn run() {
             edgeever_sync_all,
             edgeever_status,
             edgeever_notebooks,
-            mcp_database_path,
             mcp_start,
             mcp_stop,
             mcp_status,

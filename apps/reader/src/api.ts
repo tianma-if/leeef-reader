@@ -1,5 +1,13 @@
 import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core'
 
+export type McpStatus = {
+  running: boolean
+  endpoint: string | null
+  token: string | null
+  databasePath: string
+  error: string | null
+}
+
 export type Book = {
   id: string
   sha256: string
@@ -263,19 +271,9 @@ export const api = {
   edgeEverNotebooks: (draft?: Settings) => invoke<EdgeEverNotebook[]>('edgeever_notebooks', { draft }),
   edgeEverStatus: () => invoke<EdgeEverStatus>('edgeever_status'),
   edgeEverSyncAll: () => invoke<EdgeEverSyncResult>('edgeever_sync_all'),
-  mcpDatabasePath: () => invoke<string>('mcp_database_path'),
-  mcpStart: () =>
-    invoke<{ running: boolean; endpoint?: string; token?: string; databasePath: string }>(
-      'mcp_start',
-    ),
-  mcpStop: () =>
-    invoke<{ running: boolean; endpoint?: string; token?: string; databasePath: string }>(
-      'mcp_stop',
-    ),
-  mcpStatus: () =>
-    invoke<{ running: boolean; endpoint?: string; token?: string; databasePath: string }>(
-      'mcp_status',
-    ),
+  mcpStart: () => invoke<McpStatus>('mcp_start'),
+  mcpStop: () => invoke<McpStatus>('mcp_stop'),
+  mcpStatus: () => invoke<McpStatus>('mcp_status'),
   pairingStart: () => invoke<PairingOffer>('pairing_start'),
   pairingJoin: (code: string, replaceExisting = false) =>
     invoke<SettingsSyncStatus>('pairing_join', { code, replaceExisting }),

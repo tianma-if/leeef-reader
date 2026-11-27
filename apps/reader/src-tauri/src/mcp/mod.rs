@@ -3,87 +3,162 @@ mod import;
 mod reading;
 mod server;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::db::AppState;
+use crate::db::{self, AppState};
 
-pub struct McpHandle {
-    pub cancel: Mutex<Option<CancellationToken>>,
-    pub endpoint: Mutex<Option<String>>,
-    pub token: Mutex<Option<String>>,
+// Keep the opt-in and credentials on this device, outside synced settings.
+const CONNECTION_KEY: &str = "mcp_connection";
+
+#[derive(Deserialize, Serialize)]
+struct Connection {
+    port: u16,
+    token: String,
 }
 
-impl Default for McpHandle {
-    fn default() -> Self {
-        Self {
-            cancel: Mutex::new(None),
-            endpoint: Mutex::new(None),
-            token: Mutex::new(None),
-        }
+pub struct McpHandle {
+    runtime: Mutex<McpRuntime>,
+    app: Option<AppHandle>,
+}
+
+#[derive(Default)]
+struct McpRuntime {
+    server: Option<RunningServer>,
+    error: Option<String>,
+}
+
+struct RunningServer {
+    connection: Connection,
+    cancel: CancellationToken,
+}
+
+impl Drop for RunningServer {
+    fn drop(&mut self) {
+        self.cancel.cancel();
     }
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpStatus {
-    pub running: bool,
-    pub endpoint: Option<String>,
-    pub token: Option<String>,
-    pub database_path: String,
+    running: bool,
+    endpoint: Option<String>,
+    token: Option<String>,
+    database_path: String,
+    error: Option<String>,
 }
 
-pub fn start(app: &AppHandle, state: &AppState) -> Result<McpStatus, String> {
-    let handle = app.state::<McpHandle>();
-    if handle.cancel.lock().map_err(|e| e.to_string())?.is_some() {
-        return status(app, state);
+impl McpHandle {
+    pub fn restore(state: &AppState, app: Option<AppHandle>) -> Self {
+        let mut runtime = McpRuntime::default();
+        match load_connection(state).and_then(|connection| {
+            connection
+                .map(|connection| launch(state, Some(connection), app.clone()))
+                .transpose()
+        }) {
+            Ok(server) => runtime.server = server,
+            Err(error) => runtime.error = Some(error),
+        }
+        Self {
+            runtime: Mutex::new(runtime),
+            app,
+        }
     }
-    let token = format!("leeef-{}", Uuid::new_v4());
-    let cancel = CancellationToken::new();
-    let bind_state = state.clone();
-    let bind_token = token.clone();
-    let bind_cancel = cancel.clone();
-    let addr = tauri::async_runtime::block_on(server::bind_and_serve(
-        bind_state,
-        bind_token,
-        bind_cancel,
-        Some(app.clone()),
-    ))?;
-    *handle.endpoint.lock().map_err(|e| e.to_string())? = Some(format!("http://{addr}/mcp"));
-    *handle.token.lock().map_err(|e| e.to_string())? = Some(token);
-    *handle.cancel.lock().map_err(|e| e.to_string())? = Some(cancel);
-    status(app, state)
-}
 
-pub fn stop(app: &AppHandle, state: &AppState) -> Result<McpStatus, String> {
-    let handle = app.state::<McpHandle>();
-    if let Some(cancel) = handle.cancel.lock().map_err(|e| e.to_string())?.take() {
-        cancel.cancel();
+    pub fn start(&self, state: &AppState) -> Result<McpStatus, String> {
+        let mut runtime = self.runtime.lock().map_err(|e| e.to_string())?;
+        if runtime.running_server().is_none() {
+            let saved = load_connection(state)?;
+            runtime.server = Some(launch(state, saved, self.app.clone())?);
+        }
+        runtime.error = None;
+        Ok(runtime.status(state))
     }
-    *handle.endpoint.lock().map_err(|e| e.to_string())? = None;
-    *handle.token.lock().map_err(|e| e.to_string())? = None;
-    status(app, state)
+
+    pub fn stop(&self, state: &AppState) -> Result<McpStatus, String> {
+        let mut runtime = self.runtime.lock().map_err(|e| e.to_string())?;
+        {
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            db::kv_delete_on(&db, CONNECTION_KEY)?;
+        }
+        runtime.server = None;
+        runtime.error = None;
+        Ok(runtime.status(state))
+    }
+
+    pub fn status(&self, state: &AppState) -> Result<McpStatus, String> {
+        Ok(self
+            .runtime
+            .lock()
+            .map_err(|e| e.to_string())?
+            .status(state))
+    }
 }
 
-pub fn status(app: &AppHandle, state: &AppState) -> Result<McpStatus, String> {
-    let handle = app.state::<McpHandle>();
-    let running = handle.cancel.lock().map_err(|e| e.to_string())?.is_some();
-    let endpoint = handle.endpoint.lock().map_err(|e| e.to_string())?.clone();
-    let token = handle.token.lock().map_err(|e| e.to_string())?.clone();
-    Ok(McpStatus {
-        running,
-        endpoint,
-        token,
-        database_path: crate::db::database_path(state),
+impl McpRuntime {
+    fn running_server(&self) -> Option<&RunningServer> {
+        self.server
+            .as_ref()
+            .filter(|server| !server.cancel.is_cancelled())
+    }
+
+    fn status(&self, state: &AppState) -> McpStatus {
+        let server = self.running_server();
+        McpStatus {
+            running: server.is_some(),
+            endpoint: server
+                .map(|server| format!("http://127.0.0.1:{}/mcp", server.connection.port)),
+            token: server.map(|server| server.connection.token.clone()),
+            database_path: db::database_path(state),
+            error: self.error.clone(),
+        }
+    }
+}
+
+fn load_connection(state: &AppState) -> Result<Option<Connection>, String> {
+    db::kv_get(state, CONNECTION_KEY)?
+        .map(|stored| serde_json::from_str(&stored).map_err(|e| e.to_string()))
+        .transpose()
+}
+
+fn launch(
+    state: &AppState,
+    saved: Option<Connection>,
+    app: Option<AppHandle>,
+) -> Result<RunningServer, String> {
+    tauri::async_runtime::block_on(async {
+        let listener = server::bind(saved.as_ref().map_or(0, |connection| connection.port)).await?;
+        let connection = match saved {
+            Some(connection) => connection,
+            None => {
+                let connection = Connection {
+                    port: listener.local_addr().map_err(|e| e.to_string())?.port(),
+                    token: format!("leeef-{}", Uuid::new_v4()),
+                };
+                let json = serde_json::to_string(&connection).map_err(|e| e.to_string())?;
+                db::kv_set(state, CONNECTION_KEY, &json)?;
+                connection
+            }
+        };
+        let cancel = CancellationToken::new();
+        server::serve(
+            listener,
+            state.clone(),
+            connection.token.clone(),
+            cancel.clone(),
+            app,
+        );
+        Ok(RunningServer { connection, cancel })
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::server::bind_and_serve;
+    use super::{load_connection, server, McpHandle};
     use crate::db;
     use serde_json::{json, Value};
     use tokio_util::sync::CancellationToken;
@@ -93,9 +168,15 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let state = db::open(root).unwrap();
         let cancel = CancellationToken::new();
-        let addr = bind_and_serve(state.clone(), "secret".into(), cancel.clone(), None)
-            .await
-            .unwrap();
+        let listener = server::bind(0).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        server::serve(
+            listener,
+            state.clone(),
+            "secret".into(),
+            cancel.clone(),
+            None,
+        );
         (format!("http://{addr}/mcp"), cancel, state)
     }
 
@@ -176,6 +257,49 @@ mod tests {
 
     fn structured(response: &Value) -> &Value {
         &response["result"]["structuredContent"]
+    }
+
+    #[test]
+    fn connection_is_opt_in_and_survives_restart_until_disabled() {
+        let root = tempfile::tempdir().unwrap();
+        let state = db::open(root.path().to_owned()).unwrap();
+        let first = McpHandle::restore(&state, None);
+        assert!(!first.status(&state).unwrap().running);
+        let original = first.start(&state).unwrap();
+        assert!(original.running);
+        assert_eq!(first.start(&state).unwrap().token, original.token);
+
+        let occupied = McpHandle::restore(&state, None).status(&state).unwrap();
+        assert!(!occupied.running);
+        assert!(occupied.error.is_some());
+
+        let port = load_connection(&state).unwrap().unwrap().port;
+        drop(first);
+        tauri::async_runtime::block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                while server::bind(port).await.is_err() {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("MCP listener should release its port on shutdown");
+        });
+        let restarted = McpHandle::restore(&state, None);
+        let status = restarted.status(&state).unwrap();
+        assert!(status.running);
+        assert_eq!(status.endpoint, original.endpoint);
+        assert_eq!(status.token, original.token);
+
+        assert!(!restarted.stop(&state).unwrap().running);
+        assert!(load_connection(&state).unwrap().is_none());
+        assert!(
+            !McpHandle::restore(&state, None)
+                .status(&state)
+                .unwrap()
+                .running
+        );
+        assert_ne!(restarted.start(&state).unwrap().token, original.token);
+        restarted.stop(&state).unwrap();
     }
 
     #[tokio::test]

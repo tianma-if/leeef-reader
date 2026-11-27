@@ -76,7 +76,7 @@ Leeef Reader 是一款把书库、进度和笔记留在你自己设备上的电�
 
 ## MCP
 
-Leeef 在 Tauri 进程内提供 [Model Context Protocol](https://modelcontextprotocol.io/)。在设置里启动 MCP，把打印出的本机 loopback 地址和 Bearer token 交给 Agent。
+Leeef 在 Tauri 进程内提供 [Model Context Protocol](https://modelcontextprotocol.io/)。在设置里启用 MCP，即可查看 Streamable HTTP 地址并复制 JSON 连接配置。启用后，服务随 Leeef Reader 启动，并沿用本机地址和 Bearer 令牌，直到停用。
 
 读工具包括 `list_books`、`search_books`、`get_book`、`get_book_content`，以及书架、书摘、书签和阅读进度。写操作会返回一份 plan，必须再走 `confirm_write` → `apply_write`，Agent 不能一笔直接改库。
 

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -1319,19 +1318,21 @@ impl ServerHandler for LeeefMcp {
 }
 
 #[derive(Clone)]
-struct AuthToken(String);
+struct Auth {
+    token: String,
+    cancel: CancellationToken,
+}
 
-async fn require_bearer(
-    State(expected): State<AuthToken>,
-    request: Request,
-    next: Next,
-) -> Response {
+async fn require_bearer(State(auth): State<Auth>, request: Request, next: Next) -> Response {
+    if auth.cancel.is_cancelled() {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     let provided = request
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .unwrap_or("");
-    let want = format!("Bearer {}", expected.0);
+    let want = format!("Bearer {}", auth.token);
     if !token_eq(provided, &want) {
         let mut response = (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
         response
@@ -1342,16 +1343,19 @@ async fn require_bearer(
     next.run(request).await
 }
 
-pub async fn bind_and_serve(
+pub async fn bind(port: u16) -> Result<tokio::net::TcpListener, String> {
+    tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
+        .await
+        .map_err(|e| format!("127.0.0.1:{port}: {e}"))
+}
+
+pub fn serve(
+    listener: tokio::net::TcpListener,
     state: AppState,
     token: String,
     cancel: CancellationToken,
     app: Option<AppHandle>,
-) -> Result<SocketAddr, String> {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .map_err(|e| e.to_string())?;
-    let addr = listener.local_addr().map_err(|e| e.to_string())?;
+) {
     let mcp = LeeefMcp::new(state, app);
     let service = StreamableHttpService::new(
         move || Ok(mcp.clone()),
@@ -1364,16 +1368,17 @@ pub async fn bind_and_serve(
     let router = Router::new()
         .nest_service("/mcp", service)
         .layer(middleware::from_fn_with_state(
-            AuthToken(token),
+            Auth {
+                token,
+                cancel: cancel.clone(),
+            },
             require_bearer,
         ));
-    let shutdown = cancel.clone();
     tokio::spawn(async move {
+        let shutdown = cancel.clone();
         let _ = axum::serve(listener, router)
-            .with_graceful_shutdown(async move {
-                shutdown.cancelled_owned().await;
-            })
+            .with_graceful_shutdown(shutdown.cancelled_owned())
             .await;
+        cancel.cancel();
     });
-    Ok(addr)
 }

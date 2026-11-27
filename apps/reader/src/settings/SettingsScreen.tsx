@@ -3,7 +3,6 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import {
   Bot,
   Cloud,
-  Database,
   Eye,
   EyeOff,
   MonitorSmartphone,
@@ -38,6 +37,7 @@ import { Slider } from '@/components/ui/slider'
 import { FontPicker } from '../reader/FontPicker'
 import { THEMES } from '../reader/bookStyles'
 import { LibraryBackup } from './LibraryBackup'
+import { McpSettings } from './McpSettings'
 import { SyncCenter } from './SyncCenter'
 import { SettingChoices, SettingSwitch } from './SettingControls'
 import { EdgeEverStatusCard } from './EdgeEverStatusCard'
@@ -82,12 +82,6 @@ function PasswordInput({
 export function SettingsScreen() {
   const { theme: appTheme, setTheme: setAppTheme } = useTheme()
   const [value, setValue] = useState<Settings>({})
-  const [dbPath, setDbPath] = useState('')
-  const [mcp, setMcp] = useState<{
-    running: boolean
-    endpoint?: string
-    token?: string
-  }>({ running: false })
   const [syncStatus, setSyncStatus] = useState<SettingsSyncStatus | null>(null)
   const [edgeEverBusy, setEdgeEverBusy] = useState(false)
   const [edgeEverNotebooks, setEdgeEverNotebooks] = useState<EdgeEverNotebook[]>([])
@@ -99,8 +93,6 @@ export function SettingsScreen() {
         void api.edgeEverNotebooks().then(setEdgeEverNotebooks).catch(() => undefined)
       }
     })
-    void api.mcpDatabasePath().then(setDbPath)
-    void api.mcpStatus().then(setMcp).catch(() => undefined)
     let disposed = false
     let statusEvents = 0
     let unlistenStatus: UnlistenFn | undefined
@@ -602,45 +594,7 @@ export function SettingsScreen() {
 
       <LibraryBackup />
 
-      {/* 8. 本机 MCP 服务 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Database className="size-4 text-primary" />
-            本机 MCP 服务 (Model Context Protocol)
-          </CardTitle>
-          <CardDescription>
-            提供官方 rmcp Streamable HTTP 端点，供外部 AI 工具或脚本调用本地数据库
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="text-xs text-muted-foreground space-y-1 bg-muted/40 p-3 rounded-lg">
-            <p>本地数据库：{dbPath || '…'}</p>
-            <p className="font-semibold text-foreground">
-              状态：{mcp.running ? `已在运行 (${mcp.endpoint})` : '未启动'}
-            </p>
-            {mcp.running && mcp.token ? (
-              <p className="break-all font-mono text-[11px] select-all">
-                Token: Bearer {mcp.token}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              onClick={() =>
-                void api.mcpStart().then(setMcp).catch((cause) => toast.error(String(cause)))
-              }
-            >
-              启动服务
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => void api.mcpStop().then(setMcp)}>
-              停止服务
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      <McpSettings />
 
       {/* Bottom Save Bar */}
       <div className="flex justify-end pt-2">

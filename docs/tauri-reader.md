@@ -1,6 +1,6 @@
 # Tauri 阅读壳（`tauri` 分支）
 
-数据层是 SQLite `leeef.sqlite`。MCP 在 Tauri 进程内用官方 `rmcp` SDK 提供本机 Streamable HTTP，读写走同一套 `db.rs`。设置里启动后会给出 loopback endpoint 和 Bearer token。
+数据层是 SQLite `leeef.sqlite`。MCP 在 Tauri 进程内用官方 `rmcp` SDK 提供本机 Streamable HTTP，读写走同一套 `db.rs`。MCP 默认关闭。启用后随阅读器启动，并在同一台设备上复用连接地址和 Bearer 令牌。设置页提供 Streamable HTTP 地址和可复制的 JSON 连接配置。停用后，旧配置失效。
 
 本仓库主线是 Tauri 壳，不 fork Readest，也不另开 GitHub 仓库。
 
