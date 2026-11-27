@@ -6,6 +6,7 @@ use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 
 use crate::db::{self, AppState};
+use crate::epub;
 
 const MAX_BOOK_BYTES: u64 = 128 * 1024 * 1024;
 
@@ -14,8 +15,9 @@ const MAX_BOOK_BYTES: u64 = 128 * 1024 * 1024;
 pub(super) struct ImportBookInput {
     /// Absolute path to a local EPUB, TXT, PDF, FB2, MOBI, or AZW3 file (up to 128 MiB).
     path: PathBuf,
-    /// Defaults to the filename without its extension.
+    /// Overrides the EPUB title. Falls back to the filename without its extension.
     title: Option<String>,
+    /// Overrides the EPUB author.
     author: Option<String>,
 }
 
@@ -47,7 +49,7 @@ impl BookImport {
             .map(str::to_ascii_lowercase)
             .as_deref()
         {
-            Some("epub") => "application/epub+zip",
+            Some("epub") => epub::MEDIA_TYPE,
             Some("txt") => "text/plain",
             Some("pdf") => "application/pdf",
             Some("fb2") => "application/x-fictionbook+xml",
@@ -64,20 +66,9 @@ impl BookImport {
             return Err("resolved path must be valid Unicode".into());
         }
         let bytes = read_book(&path)?;
-        let title = input
-            .title
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| {
-                input
-                    .path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .unwrap_or(&name)
-            })
-            .to_owned();
-        let author = input.author.filter(|author| !author.trim().is_empty());
+        let package = epub::Package::open(&bytes, media_type);
+        let (title, author) =
+            epub::import_metadata(package.as_ref(), &name, input.title, input.author);
         let sha256 = db::sha256_hex(&bytes);
         let summary = format!(
             "Import {title:?}{} from {:?} ({} bytes)",
@@ -106,6 +97,8 @@ impl BookImport {
         if db::sha256_hex(&bytes) != self.sha256 {
             return Err("ebook file changed after planning; create a new import plan".into());
         }
+        let cover =
+            epub::Package::open(&bytes, &self.media_type).and_then(|mut package| package.cover());
         db::import_book(
             state,
             &self.name,
@@ -113,7 +106,7 @@ impl BookImport {
             &self.title,
             self.author.as_deref(),
             &self.media_type,
-            None,
+            cover.as_deref(),
         )
         .map(|book| book.id)
     }

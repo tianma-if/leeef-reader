@@ -730,6 +730,114 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn epub_import_saves_embedded_metadata_and_cover() {
+        use std::io::{Cursor, Write};
+
+        let (endpoint, cancel, state) = spawn_server().await;
+        let session = initialize(&endpoint).await;
+        let source = tempfile::tempdir().unwrap();
+        let call = |name: &str, arguments: Value| {
+            let request = json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments}
+            });
+            async { post(&endpoint, Some("secret"), &session, request).await.1 }
+        };
+
+        let cover = br#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>"#;
+        let cases = [
+            (
+                "Modern.epub",
+                r#"properties="cover-image""#,
+                "cover%20art.svg",
+                None,
+                None,
+            ),
+            (
+                "Legacy.epub",
+                "",
+                "cover%20art.svg",
+                Some("Custom title"),
+                Some("Custom author"),
+            ),
+            (
+                "Missing cover.epub",
+                r#"properties="cover-image""#,
+                "missing.svg",
+                None,
+                None,
+            ),
+        ];
+
+        for (filename, properties, href, title, author) in cases {
+            let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+            let legacy_cover = if properties.is_empty() {
+                r#"<meta name="cover" content="art"/>"#
+            } else {
+                ""
+            };
+            let opf = format!(
+                r#"<package xmlns="http://www.idpf.org/2007/opf">
+                  <metadata xmlns:d="http://purl.org/dc/elements/1.1/">
+                    <d:title>Tea &amp; Books</d:title><d:creator>Book Author</d:creator>
+                    {legacy_cover}
+                  </metadata>
+                  <manifest><item href="../Images/{href}" {properties} id="art" media-type="image/svg+xml"/></manifest>
+                </package>"#,
+            );
+            for (name, bytes) in [
+                (
+                    "META-INF/container.xml",
+                    br#"<container><rootfiles><rootfile full-path="Book/main.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#.as_slice(),
+                ),
+                ("Book/main.opf", opf.as_bytes()),
+                ("Images/cover art.svg", cover.as_slice()),
+            ] {
+                zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+                zip.write_all(bytes).unwrap();
+            }
+            let original = zip.finish().unwrap().into_inner();
+            let path = source.path().join(filename);
+            std::fs::write(&path, &original).unwrap();
+            let planned = call(
+                "import_book",
+                json!({"path": path, "title": title, "author": author}),
+            )
+            .await;
+            let plan = structured(&planned);
+            let expected_title = title.unwrap_or("Tea & Books");
+            let expected_author = author.unwrap_or("Book Author");
+            let summary = plan["summary"].as_str().unwrap();
+            assert!(summary.contains(expected_title) && summary.contains(expected_author));
+            let plan_id = &plan["planId"];
+            let confirmed = call("confirm_write", json!({"planId": plan_id})).await;
+            let token = &structured(&confirmed)["confirmationToken"];
+            let applied = call(
+                "apply_write",
+                json!({"planId": plan_id, "confirmationToken": token}),
+            )
+            .await;
+            let book_id = structured(&applied)["entityId"].as_str().unwrap();
+            let book = db::list_books(&state)
+                .unwrap()
+                .into_iter()
+                .find(|book| book.id == book_id)
+                .unwrap();
+            assert_eq!(book.title, expected_title);
+            assert_eq!(book.author.as_deref(), Some(expected_author));
+            assert_eq!(db::book_bytes(&state, book_id).unwrap(), original);
+            if href == "missing.svg" {
+                assert!(book.cover_path.is_none());
+            } else {
+                assert_eq!(db::book_cover(&state, book_id).unwrap(), cover);
+            }
+        }
+        cancel.cancel();
+    }
+
+    #[tokio::test]
     async fn confirmed_excerpt_write_is_audited_and_idempotent() {
         let (endpoint, cancel, state) = spawn_server().await;
         let book = db::import_book(

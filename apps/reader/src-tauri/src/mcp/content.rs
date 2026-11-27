@@ -6,12 +6,12 @@ use roxmltree::{Document, Node};
 use std::sync::OnceLock;
 
 use crate::cfi::Position;
+use crate::epub::{read_xml, resolve_href};
 
 static SCRIPT_STYLE: OnceLock<Regex> = OnceLock::new();
 static MARKUP: OnceLock<Regex> = OnceLock::new();
 static WHITESPACE: OnceLock<Regex> = OnceLock::new();
 
-const MAX_EPUB_XML_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_RECAP_CHARS: usize = 1200;
 
 pub fn extract_book_text(path: &str, media_type: &str) -> Result<String, String> {
@@ -67,28 +67,10 @@ pub(super) fn text_before_locator(path: &str, position: &Position) -> Option<Str
                     .is_some_and(|node| node.has_tag_name("manifest"))
         })?
         .attribute("href")?;
-    let mut base = tauri::Url::parse("https://book.invalid/").ok()?;
-    base.set_path(&format!("/{opf_path}"));
-    let chapter_url = base.join(href).ok()?;
-    if chapter_url.origin() != base.origin() {
-        return None;
-    }
-    let chapter_path = urlencoding::decode(chapter_url.path().strip_prefix('/')?).ok()?;
+    let chapter_path = resolve_href(opf_path, href)?;
     let chapter = read_xml(&mut archive, &chapter_path)?;
     let chapter = Document::parse(&chapter).ok()?;
     preceding_text(&chapter, text_steps)
-}
-
-fn read_xml(archive: &mut zip::ZipArchive<std::fs::File>, path: &str) -> Option<String> {
-    let file = archive.by_name(path).ok()?;
-    let mut bytes = Vec::new();
-    file.take(MAX_EPUB_XML_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .ok()?;
-    if bytes.len() as u64 > MAX_EPUB_XML_BYTES {
-        return None;
-    }
-    String::from_utf8(bytes).ok()
 }
 
 fn element_at<'a, 'input>(

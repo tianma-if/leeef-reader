@@ -124,9 +124,7 @@ export function LibraryScreen({ onOpen }: Props) {
           name: prepared.name,
           data: prepared.bytes,
           title: prepared.title,
-          author: prepared.author,
           mediaType: prepared.mediaType,
-          cover: prepared.cover,
         })
       }, (completed) => setImportProgress({ completed, total: files.length }))
       setImportFailures(result.failures)

@@ -2,6 +2,7 @@ mod backup;
 mod cfi;
 mod db;
 mod edgeever;
+mod epub;
 mod library_sync;
 mod mcp;
 mod reading_links;
@@ -17,7 +18,7 @@ use tauri::{Emitter, Manager, State};
 struct ImportPayload {
     name: String,
     data: String,
-    title: String,
+    title: Option<String>,
     author: Option<String>,
     media_type: String,
     cover: Option<String>,
@@ -43,12 +44,20 @@ fn import_book(state: State<AppState>, payload: ImportPayload) -> Result<db::Boo
                 .map_err(|e| e.to_string())
         })
         .transpose()?;
+    let mut package = epub::Package::open(&bytes, &payload.media_type);
+    let (title, author) = epub::import_metadata(
+        package.as_ref(),
+        &payload.name,
+        payload.title,
+        payload.author,
+    );
+    let cover = cover.or_else(|| package.as_mut()?.cover());
     db::import_book(
         &state,
         &payload.name,
         &bytes,
-        &payload.title,
-        payload.author.as_deref(),
+        &title,
+        author.as_deref(),
         &payload.media_type,
         cover.as_deref(),
     )

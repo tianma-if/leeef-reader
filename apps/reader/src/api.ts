@@ -186,7 +186,7 @@ export const api = {
   importBook: (input: {
     name: string
     data: Uint8Array
-    title: string
+    title?: string
     author?: string
     mediaType: string
     cover?: Uint8Array
@@ -195,7 +195,7 @@ export const api = {
       payload: {
         name: input.name,
         data: toB64(input.data),
-        title: input.title,
+        title: input.title ?? null,
         author: input.author ?? null,
         mediaType: input.mediaType,
         cover: input.cover ? toB64(input.cover) : null,

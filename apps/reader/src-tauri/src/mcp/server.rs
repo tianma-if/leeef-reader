@@ -763,7 +763,7 @@ impl LeeefMcp {
     }
 
     #[tool(
-        description = "Plan importing a local ebook into Leeef Reader. Review the source and metadata, then call confirm_write and apply_write. On success, apply_write returns the book ID as entityId."
+        description = "Plan importing a local ebook into Leeef Reader. EPUB imports read the embedded title, author, and cover when available. Review the source and metadata, then call confirm_write and apply_write. On success, apply_write returns the book ID as entityId."
     )]
     async fn import_book(
         &self,
