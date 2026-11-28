@@ -332,9 +332,15 @@ fn inbox_notebook_id(notebooks: &[Notebook]) -> Result<&str, String> {
             notebook.id == "nb_inbox"
                 || (notebook.id.starts_with("ws_") && notebook.id.ends_with("_inbox"))
         })
-        .or_else(|| notebooks.iter().find(|notebook| notebook.slug.as_deref() == Some("inbox")))
+        .or_else(|| {
+            notebooks
+                .iter()
+                .find(|notebook| notebook.slug.as_deref() == Some("inbox"))
+        })
         .map(|notebook| notebook.id.as_str())
-        .ok_or_else(|| "无法访问 EdgeEver 的「等待分类」，请检查 Token 的笔记本权限或选择其他笔记本".into())
+        .ok_or_else(|| {
+            "无法访问 EdgeEver 的「等待分类」，请检查 Token 的笔记本权限或选择其他笔记本".into()
+        })
 }
 
 fn command_config(state: &AppState, draft: Option<EdgeEverSettings>) -> Result<Config, String> {
@@ -345,7 +351,10 @@ fn command_config(state: &AppState, draft: Option<EdgeEverSettings>) -> Result<C
     .ok_or_else(|| "EdgeEver 同步尚未启用".to_string())
 }
 
-pub(crate) async fn test(state: &AppState, draft: Option<EdgeEverSettings>) -> Result<String, String> {
+pub(crate) async fn test(
+    state: &AppState,
+    draft: Option<EdgeEverSettings>,
+) -> Result<String, String> {
     let config = command_config(state, draft)?;
     let client = client()?;
     let notebooks = list_notebooks(&client, &config).await?;
@@ -945,9 +954,12 @@ mod tests {
         assert!(db::pending_edgeever_books(&state).unwrap().is_empty());
 
         crate::trusted_sync::save_settings(&state, settings.clone()).unwrap();
-        tokio::time::timeout(Duration::from_secs(1), state.edgeever_sync_trigger.notified())
-            .await
-            .expect("first valid save wakes the sync worker");
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            state.edgeever_sync_trigger.notified(),
+        )
+        .await
+        .expect("first valid save wakes the sync worker");
         assert_eq!(
             db::pending_edgeever_books(&state).unwrap(),
             [book.id.clone()]
@@ -1121,7 +1133,13 @@ mod tests {
             *mock.import_notebooks.lock().unwrap(),
             ["notebook-1", "notebook-1", "ws_default_inbox"]
         );
-        assert!(status(&second_state).unwrap().last_attempt.unwrap().succeeded);
+        assert!(
+            status(&second_state)
+                .unwrap()
+                .last_attempt
+                .unwrap()
+                .succeeded
+        );
         assert_eq!(mock.creates.load(Ordering::SeqCst), 1);
         assert_eq!(mock.updates.load(Ordering::SeqCst), 5);
         let mut changed_target = settings;

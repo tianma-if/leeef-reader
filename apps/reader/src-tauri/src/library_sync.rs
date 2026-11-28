@@ -139,6 +139,15 @@ pub struct Record {
 pub struct Asset {
     pub book_hash: String,
     pub cover_hash: Option<String>,
+    /// Plaintext size. Zero means a snapshot written before sizes were recorded.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub book_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cover_bytes: Option<u64>,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -330,22 +339,31 @@ pub fn local_assets(state: &AppState) -> Result<Vec<(Asset, Vec<(String, PathBuf
             continue;
         };
         if !std::path::Path::new(&file).is_file() {
-            return Err("书籍文件已丢失，请重新导入后再同步".into());
+            // One missing file must not hide every other book from this round.
+            continue;
         }
-        let mut objects = vec![(hash.clone(), PathBuf::from(file))];
-        let cover_hash =
+        let book_bytes = fs::metadata(&file).map(|info| info.len()).unwrap_or(0);
+        let mut objects = vec![(hash.clone(), PathBuf::from(&file))];
+        let (cover_hash, cover_bytes) =
             if let Some(path) = cover.filter(|path| std::path::Path::new(path).is_file()) {
-                let bytes = fs::read(&path).map_err(|e| e.to_string())?;
-                let hash = db::sha256_hex(&bytes);
-                objects.push((hash.clone(), PathBuf::from(path)));
-                Some(hash)
+                match fs::read(&path) {
+                    Ok(bytes) => {
+                        let cover_hash = db::sha256_hex(&bytes);
+                        let cover_bytes = bytes.len() as u64;
+                        objects.push((cover_hash.clone(), PathBuf::from(path)));
+                        (Some(cover_hash), Some(cover_bytes))
+                    }
+                    Err(_) => (None, None),
+                }
             } else {
-                None
+                (None, None)
             };
         result.push((
             Asset {
                 book_hash: hash,
                 cover_hash,
+                book_bytes,
+                cover_bytes,
             },
             objects,
         ));

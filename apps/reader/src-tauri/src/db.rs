@@ -586,7 +586,8 @@ pub fn save_progress(
 
 pub fn list_excerpts(state: &AppState, book_id: Option<&str>) -> Result<Vec<Excerpt>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let select = "SELECT e.id, e.book_id, e.locator, e.quote, e.note, e.color, e.created_at, b.title,
+    let select =
+        "SELECT e.id, e.book_id, e.locator, e.quote, e.note, e.color, e.created_at, b.title,
                          c.chapter_key, c.title
                   FROM excerpts e JOIN books b ON b.id = e.book_id
                   LEFT JOIN excerpt_chapters c ON c.book_id = e.book_id AND c.locator = e.locator
@@ -599,7 +600,10 @@ pub fn list_excerpts(state: &AppState, book_id: Option<&str>) -> Result<Vec<Exce
     let mut stmt = db.prepare(&sql).map_err(|e| e.to_string())?;
     let map_row = |row: &rusqlite::Row| {
         let chapter = match row.get::<_, Option<String>>(8)? {
-            Some(key) => Some(ExcerptChapter { key, title: row.get(9)? }),
+            Some(key) => Some(ExcerptChapter {
+                key,
+                title: row.get(9)?,
+            }),
             None => None,
         };
         Ok(Excerpt {
@@ -645,15 +649,18 @@ pub fn save_excerpt_chapters(
     let mut db = state.db.lock().map_err(|e| e.to_string())?;
     let tx = db.transaction().map_err(|e| e.to_string())?;
     {
-        let mut insert = tx.prepare_cached(
-            "INSERT INTO excerpt_chapters(book_id, locator, chapter_key, title)
+        let mut insert = tx
+            .prepare_cached(
+                "INSERT INTO excerpt_chapters(book_id, locator, chapter_key, title)
              VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(book_id, locator) DO UPDATE SET
                chapter_key = excluded.chapter_key, title = excluded.title
              WHERE excluded.title <> ''",
-        ).map_err(|e| e.to_string())?;
+            )
+            .map_err(|e| e.to_string())?;
         for (locator, chapter) in chapters {
-            insert.execute(params![book_id, locator, chapter.key, chapter.title])
+            insert
+                .execute(params![book_id, locator, chapter.key, chapter.title])
                 .map_err(|e| e.to_string())?;
         }
     }
@@ -803,7 +810,8 @@ pub fn queue_edgeever_book(state: &AppState, book_id: &str) -> Result<(), String
         "INSERT INTO edgeever_pending_books VALUES (?1, 1)
          ON CONFLICT(book_id) DO UPDATE SET generation = generation + 1",
         [book_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -821,24 +829,40 @@ pub(crate) fn queue_existing_edgeever_books(db: &Connection) -> Result<(), Strin
 
 pub fn pending_edgeever_books(state: &AppState) -> Result<Vec<String>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let mut statement = db.prepare(
-        "SELECT p.book_id FROM edgeever_pending_books p JOIN books b ON b.id = p.book_id
+    let mut statement = db
+        .prepare(
+            "SELECT p.book_id FROM edgeever_pending_books p JOIN books b ON b.id = p.book_id
          WHERE b.is_deleted = 0 ORDER BY p.book_id",
-    ).map_err(|e| e.to_string())?;
-    let rows = statement.query_map([], |row| row.get(0)).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map([], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
     rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
 }
 
 pub fn edgeever_pending_generation(state: &AppState, book_id: &str) -> Result<Option<i64>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.query_row("SELECT generation FROM edgeever_pending_books WHERE book_id = ?1", [book_id], |row| row.get(0))
-        .optional().map_err(|e| e.to_string())
+    db.query_row(
+        "SELECT generation FROM edgeever_pending_books WHERE book_id = ?1",
+        [book_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
 }
 
-pub fn finish_edgeever_book(state: &AppState, book_id: &str, generation: i64) -> Result<(), String> {
+pub fn finish_edgeever_book(
+    state: &AppState,
+    book_id: &str,
+    generation: i64,
+) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.execute("DELETE FROM edgeever_pending_books WHERE book_id = ?1 AND generation = ?2", params![book_id, generation])
-        .map_err(|e| e.to_string())?;
+    db.execute(
+        "DELETE FROM edgeever_pending_books WHERE book_id = ?1 AND generation = ?2",
+        params![book_id, generation],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 

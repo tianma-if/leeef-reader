@@ -348,7 +348,10 @@ fn mcp_stop(mcp: State<mcp::McpHandle>, state: State<AppState>) -> Result<mcp::M
 }
 
 #[tauri::command]
-fn mcp_status(mcp: State<mcp::McpHandle>, state: State<AppState>) -> Result<mcp::McpStatus, String> {
+fn mcp_status(
+    mcp: State<mcp::McpHandle>,
+    state: State<AppState>,
+) -> Result<mcp::McpStatus, String> {
     mcp.status(&state)
 }
 
@@ -388,7 +391,8 @@ async fn pairing_join_peer(
     verification: tauri::ipc::Channel<String>,
     replace_existing: bool,
 ) -> Result<trusted_sync::SyncStatus, String> {
-    trusted_sync::join_pairing_peer(&app, &state, &runtime, peer, verification, replace_existing).await
+    trusted_sync::join_pairing_peer(&app, &state, &runtime, peer, verification, replace_existing)
+        .await
 }
 
 #[tauri::command]
@@ -402,9 +406,17 @@ async fn pairing_scan_qr(
     {
         use tauri_plugin_native_bridge::NativeBridgeExt;
 
-        let text = app.native_bridge().scan_pairing_qr().await.map_err(|error| error.to_string())?;
+        let text = app
+            .native_bridge()
+            .scan_pairing_qr()
+            .await
+            .map_err(|error| error.to_string())?;
         match text {
-            Some(text) => trusted_sync::join_pairing_qr(&app, &state, &runtime, &text, replace_existing).await.map(Some),
+            Some(text) => {
+                trusted_sync::join_pairing_qr(&app, &state, &runtime, &text, replace_existing)
+                    .await
+                    .map(Some)
+            }
             None => Ok(None),
         }
     }

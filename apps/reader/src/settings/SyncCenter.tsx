@@ -56,7 +56,7 @@ export function SyncCenter({ status, onStatus }: {
             </> : null}
             {status.lastError ? <div className="rounded-md bg-destructive/10 p-2 text-destructive break-words">
               <p>{phases[progress?.phase ?? ''] ?? '同步'}失败：{status.lastError}</p>
-              <p className="mt-1">请检查网络和同步服务配置后重试，已成功传输的文件会复用。</p>
+              <p className="mt-1">已传完的文件会复用，已完成的书籍会先进入书架。失败的文件在下一轮重试。</p>
             </div> : null}
             {status.lastAttemptAt ? <p className="text-muted-foreground">最近尝试：{new Date(status.lastAttemptAt).toLocaleString()}</p> : null}
             {status.lastSuccessAt ? <p className="text-muted-foreground">最近成功：{new Date(status.lastSuccessAt).toLocaleString()}</p> : null}
