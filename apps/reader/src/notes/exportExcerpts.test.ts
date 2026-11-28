@@ -50,7 +50,7 @@ describe('excerpt export', () => {
       'markdown',
     )
 
-    expect(output).toContain('> 甲一\n> 甲二\n\n— 摘录于 2026-09-21\n\n---\n\n# 乙')
+    expect(output).toContain('> 甲一\n> 甲二\n\n— 2026-09-21\n\n---\n\n# 乙')
     expect(output).toContain('> 乙一\n> 乙二')
   })
 
@@ -65,6 +65,6 @@ describe('excerpt export', () => {
       excerpts: [{ ...excerpt('正文'), createdAt: '1789948800' }],
     })
 
-    expect(output).toContain('— 摘录于 2026-09-21')
+    expect(output).toContain('— 2026-09-21')
   })
 })

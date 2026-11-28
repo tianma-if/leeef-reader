@@ -655,6 +655,23 @@ mod tests {
     };
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+    fn excerpt_date(text: &str) -> bool {
+        let mut parts = text.split('-');
+        let year = parts.next();
+        let month = parts.next();
+        let day = parts.next();
+        matches!(
+            (year, month, day, parts.next()),
+            (Some(year), Some(month), Some(day), None)
+                if year.len() == 4
+                    && month.len() == 2
+                    && day.len() == 2
+                    && [year, month, day]
+                        .into_iter()
+                        .all(|part| part.bytes().all(|byte| byte.is_ascii_digit()))
+        )
+    }
+
     #[test]
     fn edgeever_markdown_groups_excerpts_in_order_and_places_annotations_under_quotes() {
         let root = tempfile::tempdir().expect("temporary app data directory");
@@ -711,7 +728,7 @@ mod tests {
         let instant = time::macros::datetime!(2026-11-26 17:41:05 UTC);
         let local = instant.to_offset(time::UtcOffset::local_offset_at(instant).unwrap());
         let timestamp = format!(
-            "摘录于 {:04}-{:02}-{:02}",
+            "{:04}-{:02}-{:02}",
             local.year(),
             u8::from(local.month()),
             local.day(),
@@ -723,7 +740,8 @@ mod tests {
         assert!(output.contains(&format!(
             "> 补划的书摘\n>\n> {timestamp}\n\n### 第三章\n\n> 后面的章节"
         )));
-        assert_eq!(output.matches("> 摘录于 ").count(), 3);
+        assert_eq!(output.matches(&format!("> {timestamp}")).count(), 3);
+        assert!(!output.contains("摘录于"));
         let timestamps: Vec<_> = note
             .nodes
             .iter()
@@ -812,8 +830,9 @@ mod tests {
                         assert_eq!(body["items"][0]["externalId"], digest("book"));
                         assert_eq!(body["items"][0]["title"], "同步测试");
                         let markdown = body["items"][0]["contentMarkdown"].as_str().unwrap();
-                        let timestamp = markdown.lines()
-                            .find_map(|line| line.strip_prefix("> ").filter(|text| text.starts_with("摘录于 ")))
+                        let timestamp = markdown
+                            .lines()
+                            .find_map(|line| line.strip_prefix("> ").filter(|text| excerpt_date(text)))
                             .expect("timestamp in the first import");
                         assert!(markdown.contains("> 原文\n>\n"));
                         mock.import_notebooks.lock().unwrap().push(body["notebookId"].as_str().unwrap().to_string());
@@ -1050,7 +1069,8 @@ mod tests {
             let footer = quote["content"].as_array().unwrap().last().unwrap();
             let markdown = memo["contentMarkdown"].as_str().unwrap();
             let timestamp = footer["content"][0]["text"].as_str().unwrap();
-            assert!(timestamp.starts_with("摘录于 "));
+            assert!(excerpt_date(timestamp));
+            assert!(!timestamp.contains("摘录于"));
             assert!(markdown.contains(&format!(
                 "> 修改后的原文\n>\n> {timestamp}\n\n**批注** 新增笔记"
             )));

@@ -77,7 +77,7 @@ fn excerpt_timestamp(created_at: &str) -> Option<String> {
         .checked_to_offset(offset)?
         .format(format_description!("[year]-[month]-[day]"))
         .ok()?;
-    Some(format!("摘录于 {date}"))
+    Some(date)
 }
 
 impl ExcerptNote {

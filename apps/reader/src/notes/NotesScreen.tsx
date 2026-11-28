@@ -258,7 +258,7 @@ export function NotesScreen({ onOpenBook }: Props) {
 
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-border/40 text-xs">
                       <span className="text-muted-foreground text-[11px]">
-                        摘录于 {excerptDate(item.createdAt)}
+                        {excerptDate(item.createdAt)}
                       </span>
                       <div className="flex items-center gap-1.5">
                         {editing?.id === item.id ? (

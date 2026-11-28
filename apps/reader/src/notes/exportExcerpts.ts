@@ -60,7 +60,7 @@ export function bookExcerptMarkdown(document: BookExcerptDocument): string {
     if (excerpt.note) {
       lines.push('', '**笔记**', '', trimOuterBlankLines(excerpt.note))
     }
-    lines.push('', `— 摘录于 ${excerptDate(excerpt.createdAt)}`)
+    lines.push('', `— ${excerptDate(excerpt.createdAt)}`)
   }
 
   return `${lines.join('\n')}\n`
@@ -74,7 +74,7 @@ export function bookExcerptText(document: BookExcerptDocument): string {
   for (const [index, excerpt] of ordered(document.excerpts).entries()) {
     lines.push('', `【书摘 ${index + 1}】`, trimOuterBlankLines(excerpt.quote))
     if (excerpt.note) lines.push('', '笔记：', trimOuterBlankLines(excerpt.note))
-    lines.push('', `— 摘录于 ${excerptDate(excerpt.createdAt)}`)
+    lines.push('', `— ${excerptDate(excerpt.createdAt)}`)
   }
 
   return `${lines.join('\n')}\n`
