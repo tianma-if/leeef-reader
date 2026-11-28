@@ -12,6 +12,12 @@
 #   public *;
 #}
 
+# Document-start script reads inset lengths from this bridge. R8 would drop
+# the methods because nothing in Java calls them.
+-keepclassmembers class dev.leeef.leeef_reader.SafeAreaBridge {
+    @android.webkit.JavascriptInterface <methods>;
+}
+
 # Uncomment this to preserve the line number information for
 # debugging stack traces.
 #-keepattributes SourceFile,LineNumberTable
